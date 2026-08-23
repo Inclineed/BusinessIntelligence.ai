@@ -1,0 +1,13 @@
+Release v4.2 — 2024-01-14 22:00 UTC
+Component: checkout-service
+Type: Routine maintenance
+
+Changes:
+- Updated checkout UI to improve mobile responsiveness
+- Minor styling fixes to the payment confirmation screen
+- Backend dependency upgrades (no functional changes to payment processing)
+- Improved logging in the order confirmation flow
+
+Testing: Full regression suite passed. No changes to payment gateway integration.
+Risk level: Low
+Rollback plan: Revert to v4.1 tag

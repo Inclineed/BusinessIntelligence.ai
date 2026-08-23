@@ -1,0 +1,82 @@
+# entitlements.yaml — Persona authorization scopes for BusinessIntelligence.ai
+#
+# Each persona maps to:
+#   authorized_sources  — list of source ids the persona may access
+#   authorized_fields   — per-source allowlist of field names
+#   authorized_regions  — "all" or "own_only" (region resolved at request time)
+#
+# Any persona NOT listed under a KPI's access block is denied by default
+# (Requirements 5.1, 5.3, 2.2).  The Security_Engine enforces this
+# server-side before evidence is assembled (Requirement 5.6).
+
+personas:
+
+  cfo:
+    description: "CFO sees aggregate revenue and inventory only"
+    authorized_sources:
+      - orders
+      - inventory
+    authorized_fields:
+      orders:
+        - revenue
+        - conversion
+      inventory:
+        - fill_rate
+    authorized_regions: all
+
+  analyst:
+    description: "Analyst has full access to all sources"
+    authorized_sources:
+      - orders
+      - payment_gateway
+      - inventory
+      - marketing
+      - deployment_log
+      - support_tickets
+      - release_notes
+    authorized_fields:
+      orders:
+        - revenue
+        - conversion
+        - aov
+        - device
+        - channel
+      payment_gateway:
+        - success
+        - latency_ms
+        - error_code
+      inventory:
+        - fill_rate
+        - in_stock
+        - sku_id
+      marketing:
+        - spend
+        - impressions
+        - channel
+      deployment_log:
+        - version
+        - component
+        - notes
+      support_tickets:
+        - message
+        - category
+        - device
+      release_notes:
+        - content
+    authorized_regions: all
+
+  manager:
+    description: "Manager sees their own region only"
+    authorized_sources:
+      - orders
+      - inventory
+    authorized_fields:
+      orders:
+        - revenue
+        - conversion
+        - aov
+      inventory:
+        - fill_rate
+        - in_stock
+    authorized_regions: own_only
+    # region is resolved from the request context at runtime

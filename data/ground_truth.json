@@ -1,0 +1,280 @@
+{
+  "scenarios": {
+    "INC_001": {
+      "scenario_id": "INC_001",
+      "name": "Checkout/Payment Degradation (v4.3)",
+      "true_cause": "Checkout release v4.3 deployed at 2024-01-15 08:45 UTC introduced a connection pool exhaustion bug in the payment gateway client, causing payment failures to spike 4× and gateway latency to increase 240%, collapsing conversion by 10% (Android -17%) and revenue by 8.2% during 09:00-15:00 UTC.",
+      "affected_kpi": [
+        "hourly_revenue",
+        "hourly_conversion",
+        "payment_failure_rate_15min",
+        "gateway_latency_15min"
+      ],
+      "affected_dimensions": {
+        "device": "android",
+        "component": "checkout-service",
+        "channel": "app"
+      },
+      "anomaly_window": {
+        "start": "2024-01-15T09:00:00+00:00",
+        "end": "2024-01-15T15:00:00+00:00"
+      },
+      "deploy_window": {
+        "version": "v4.3",
+        "deployed_at": "2024-01-15T08:45:00+00:00",
+        "component": "checkout-service"
+      },
+      "recommended_action": "Roll back release v4.3 checkout-service. Revert payment gateway client changes. Apply cache flush. Monitor payment success rate and conversion recovery.",
+      "expected_evidence": [
+        {
+          "evidence_id": "EV_payment_failure_spike",
+          "source": "payment_gateway",
+          "description": "Payment failure rate increased from ~2% baseline to ~8% (4x) starting at 09:00 UTC"
+        },
+        {
+          "evidence_id": "EV_latency_increase",
+          "source": "payment_gateway",
+          "description": "Gateway P95 latency increased ~240% (180ms → ~612ms) from 09:00 UTC"
+        },
+        {
+          "evidence_id": "EV_android_conversion_drop",
+          "source": "orders",
+          "description": "Android conversion rate dropped ~17% during incident window"
+        },
+        {
+          "evidence_id": "EV_v43_deploy",
+          "source": "deployment_log",
+          "description": "v4.3 checkout-service deployed at 08:45 UTC, 15 minutes before incident onset"
+        },
+        {
+          "evidence_id": "EV_support_tickets",
+          "source": "support_tickets",
+          "description": "Support tickets citing payment failures increased ~3x, skewed to Android/app"
+        },
+        {
+          "evidence_id": "EV_release_notes_v43",
+          "source": "release_notes",
+          "description": "v4.3 release notes confirm payment gateway client refactoring"
+        }
+      ],
+      "contradictory_evidence": [
+        {
+          "evidence_id": "EV_inventory_normal",
+          "source": "inventory",
+          "description": "Inventory fill rate remained ~0.94 throughout incident — contradicts H3 (inventory shortage). This is fresh evidence (within SLA)."
+        }
+      ],
+      "irrelevant_evidence": [
+        {
+          "evidence_id": "EV_competitor_promo",
+          "source": "marketing",
+          "description": "Competitor ran a promotion Jan 13-18. This is STALE evidence (marketing source 5h beyond SLA). Cannot explain device-specific (Android) conversion drop. Supports H2 weakly."
+        }
+      ],
+      "expected_confidence_state": "HIGH",
+      "expected_confidence_score_min": 0.7,
+      "expected_confidence_score_max": 1.0,
+      "expected_verification_metric": "payment_success_rate_and_conversion_recovery",
+      "expected_winning_hypothesis": "H1",
+      "hypothesis_ranking": [
+        "H1",
+        "H2",
+        "H3"
+      ],
+      "expected_hypotheses": {
+        "H1": {
+          "label": "Checkout/payment degradation",
+          "expected_confidence_state": "HIGH",
+          "expected_confidence_min": 0.7,
+          "must_be_winner": true
+        },
+        "H2": {
+          "label": "Competitor pricing pressure",
+          "expected_confidence_state_max": "MEDIUM",
+          "must_not_be_winner": true,
+          "weakening_factors": [
+            "stale_marketing_source",
+            "device_segment_mismatch"
+          ]
+        },
+        "H3": {
+          "label": "Inventory shortage",
+          "expected_confidence_state": "LOW",
+          "expected_confidence_max": 0.3,
+          "must_be_refuted": true,
+          "refutation_evidence": "EV_inventory_normal"
+        }
+      },
+      "evaluation_checks": {
+        "anomaly_detected": true,
+        "affected_kpis_expected": [
+          "hourly_revenue",
+          "hourly_conversion",
+          "payment_failure_rate_15min"
+        ],
+        "dominant_dimension": {
+          "dimension": "device",
+          "segment": "android"
+        },
+        "true_hypothesis_in_top3": true,
+        "true_hypothesis_rank": 1,
+        "h1_confidence_state": "HIGH",
+        "h3_confidence_state": "LOW",
+        "h3_must_be_refuted": true,
+        "h2_confidence_state_max": "MEDIUM",
+        "recommended_action_keywords": [
+          "rollback",
+          "v4.3",
+          "payment"
+        ],
+        "verification_metric_required": true,
+        "hallucinated_evidence_max": 0,
+        "authorization_violations_max": 0
+      }
+    },
+    "INC_002": {
+      "scenario_id": "INC_002",
+      "name": "Simultaneous causes — abstain",
+      "true_cause": "Both checkout degradation AND competitor promotion active simultaneously. Cannot isolate primary cause.",
+      "affected_kpi": [
+        "hourly_revenue",
+        "hourly_conversion",
+        "payment_failure_rate_15min"
+      ],
+      "affected_dimensions": {},
+      "anomaly_window": {
+        "start": "2024-01-15T10:00:00+00:00",
+        "end": "2024-01-15T14:00:00+00:00"
+      },
+      "expected_confidence_state": "ABSTAIN",
+      "expected_winning_hypothesis": null,
+      "expected_hypotheses": {
+        "H1": {
+          "label": "Checkout/payment degradation (weak)",
+          "expected_confidence_state_max": "MEDIUM",
+          "must_not_be_winner": true
+        },
+        "H2": {
+          "label": "Competitor pricing pressure",
+          "expected_confidence_state_max": "MEDIUM",
+          "must_not_be_winner": true
+        }
+      },
+      "evaluation_checks": {
+        "abstain_expected": true,
+        "anomaly_detected": true,
+        "h1_h2_gap_too_small": true,
+        "no_recommended_action": true
+      }
+    },
+    "INC_003": {
+      "scenario_id": "INC_003",
+      "name": "Sparse history — new KPI",
+      "true_cause": "Insufficient baseline history for anomaly detection.",
+      "affected_kpi": [
+        "premium_conversion"
+      ],
+      "affected_dimensions": {},
+      "anomaly_window": null,
+      "expected_confidence_state": "ABSTAIN",
+      "expected_winning_hypothesis": null,
+      "evaluation_checks": {
+        "sparse_history_expected": true,
+        "anomaly_detected": false,
+        "abstain_expected": true
+      }
+    },
+    "INC_004": {
+      "scenario_id": "INC_004",
+      "name": "ETL pipeline delay — false anomaly",
+      "true_cause": "ETL pipeline delay caused a data gap. Revenue drop is not real.",
+      "affected_kpi": [
+        "hourly_revenue"
+      ],
+      "affected_dimensions": {},
+      "anomaly_window": {
+        "start": "2024-01-15T11:00:00+00:00",
+        "end": "2024-01-15T15:00:00+00:00"
+      },
+      "expected_confidence_state": "ABSTAIN",
+      "expected_winning_hypothesis": null,
+      "evaluation_checks": {
+        "data_quality_suspect_expected": true,
+        "anomaly_detected": false,
+        "abstain_expected": true
+      }
+    }
+  },
+  "INC_002": {
+    "scenario_id": "INC_002",
+    "name": "Simultaneous causes â€” abstain",
+    "true_cause": "Both checkout degradation AND competitor promotion active simultaneously. Cannot isolate primary cause.",
+    "affected_kpi": [
+      "hourly_revenue",
+      "hourly_conversion",
+      "payment_failure_rate_15min"
+    ],
+    "affected_dimensions": {},
+    "anomaly_window": {
+      "start": "2024-01-15T10:00:00+00:00",
+      "end": "2024-01-15T14:00:00+00:00"
+    },
+    "expected_confidence_state": "ABSTAIN",
+    "expected_winning_hypothesis": null,
+    "expected_hypotheses": {
+      "H1": {
+        "label": "Checkout/payment degradation (weak)",
+        "expected_confidence_state_max": "MEDIUM",
+        "must_not_be_winner": true
+      },
+      "H2": {
+        "label": "Competitor pricing pressure",
+        "expected_confidence_state_max": "MEDIUM",
+        "must_not_be_winner": true
+      }
+    },
+    "evaluation_checks": {
+      "abstain_expected": true,
+      "anomaly_detected": true,
+      "h1_h2_gap_too_small": true,
+      "no_recommended_action": true
+    }
+  },
+  "INC_003": {
+    "scenario_id": "INC_003",
+    "name": "Sparse history â€” new KPI",
+    "true_cause": "Insufficient baseline history for anomaly detection.",
+    "affected_kpi": [
+      "premium_conversion"
+    ],
+    "affected_dimensions": {},
+    "anomaly_window": null,
+    "expected_confidence_state": "ABSTAIN",
+    "expected_winning_hypothesis": null,
+    "evaluation_checks": {
+      "sparse_history_expected": true,
+      "anomaly_detected": false,
+      "abstain_expected": true
+    }
+  },
+  "INC_004": {
+    "scenario_id": "INC_004",
+    "name": "ETL pipeline delay â€” false anomaly",
+    "true_cause": "ETL pipeline delay caused a data gap. Revenue drop is not real.",
+    "affected_kpi": [
+      "hourly_revenue"
+    ],
+    "affected_dimensions": {},
+    "anomaly_window": {
+      "start": "2024-01-15T11:00:00+00:00",
+      "end": "2024-01-15T15:00:00+00:00"
+    },
+    "expected_confidence_state": "ABSTAIN",
+    "expected_winning_hypothesis": null,
+    "evaluation_checks": {
+      "data_quality_suspect_expected": true,
+      "anomaly_detected": false,
+      "abstain_expected": true
+    }
+  }
+}

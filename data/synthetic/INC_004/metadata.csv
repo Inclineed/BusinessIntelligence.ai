@@ -1,0 +1,2 @@
+scenario_id,gap_start,gap_end,gap_duration_hours,data_quality_score_in_gap,dq_threshold,data_quality_suspect,evaluation_note
+INC_004,2024-01-15T11:00:00+00:00,2024-01-15T15:00:00+00:00,4,0.0,0.8,True,Signal Engine must set data_quality_suspect=True for the gap window and suppress anomaly. No hypotheses should be generated.

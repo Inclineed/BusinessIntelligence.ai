@@ -1,0 +1,4 @@
+deploy_id,scenario_id,ts,version,component,notes
+DEPLOY_001,INC_001,2024-01-14T22:00:00+00:00,v4.2,checkout-service,Routine maintenance: checkout UI improvements and dependency updates
+DEPLOY_002,INC_001,2024-01-15T08:45:00+00:00,v4.3,checkout-service,Checkout performance optimisation and payment gateway refactor
+DEPLOY_003,INC_001,2024-01-16T10:00:00+00:00,v4.3-hotfix,checkout-service,Emergency rollback of payment gateway changes introduced in v4.3

@@ -1,0 +1,129 @@
+# kpi_contracts.yaml — KPI Semantic Contract for the retail domain (INC_001 scenario)
+# This file is the sole source of domain definition. Swapping it (along with
+# entitlements.yaml and sources.yaml) re-targets the pipeline to any industry
+# with zero code changes (Requirements 2.7, 19.1).
+
+domain: "Retail / Consumer Goods"
+version: "1.0"
+owner: "Analytics COE"
+
+kpis:
+
+  - id: hourly_revenue
+    label: "Hourly Sales Revenue"
+    source: orders
+    grain: hourly
+    formula: "SUM(revenue) WHERE conversion=true GROUP BY hour"
+    definition: >
+      The total revenue generated from successfully converted (paid) orders
+      within a given hour, aggregated across all channels and regions.
+    calculation: "SUM(order_total) WHERE conversion_flag = true GROUP BY hour_bucket"
+    drivers:
+      - footfall
+      - average_basket_size
+      - conversion_rate
+      - inventory_availability
+      - payment_success_rate
+    thresholds:
+      anomaly_threshold_zscore: 3.0
+      anomaly_threshold_delta_pct: 10.0
+    lineage:
+      - "pos_system → orders → kpi:hourly_revenue"
+      - "payment_provider_api → payment_events → driver:payment_success_rate"
+    access:
+      cfo: aggregate_only
+      analyst: full
+      manager: own_region_only
+
+  - id: hourly_conversion
+    label: "Hourly Conversion Rate"
+    source: orders
+    grain: hourly
+    formula: "COUNT(conversion=true)/COUNT(*) GROUP BY hour, device"
+    definition: >
+      The proportion of sessions that result in a completed purchase,
+      broken down by hour and device type.
+    calculation: "COUNT(CASE WHEN conversion_flag = true THEN 1 END)::float / COUNT(*) GROUP BY hour_bucket, device_type"
+    drivers:
+      - payment_success_rate
+      - checkout_ux
+      - competitor_pricing
+      - inventory_availability
+    thresholds:
+      anomaly_threshold_zscore: 3.0
+      anomaly_threshold_delta_pct: 10.0
+    lineage:
+      - "pos_system → orders → kpi:hourly_conversion"
+    access:
+      cfo: aggregate_only
+      analyst: full
+      manager: own_region_only
+
+  - id: payment_failure_rate_15min
+    label: "Payment Failure Rate (15-min)"
+    source: payment_gateway
+    grain: 15-min
+    formula: "COUNT(success=false)/COUNT(*) GROUP BY 15min window"
+    definition: >
+      The fraction of payment attempts that fail within each 15-minute window,
+      across all active payment methods.
+    calculation: "COUNT(CASE WHEN success_flag = false THEN 1 END)::float / NULLIF(COUNT(*), 0) GROUP BY window_15min"
+    drivers:
+      - gateway_reliability
+      - checkout_code_quality
+      - payment_provider_health
+    thresholds:
+      anomaly_threshold_zscore: 3.0
+      anomaly_threshold_delta_pct: 10.0
+    lineage:
+      - "payment_provider_api → payment_events → kpi:payment_failure_rate_15min"
+    access:
+      analyst: full
+      manager: own_region_only
+      # cfo: not listed → denied by default (Requirement 2.2)
+
+  - id: gateway_latency_15min
+    label: "Gateway Latency P95 (15-min)"
+    source: payment_gateway
+    grain: 15-min
+    formula: "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms)"
+    definition: >
+      The 95th-percentile end-to-end latency (ms) for payment gateway round-trips,
+      measured in 15-minute windows.
+    calculation: "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) GROUP BY window_15min"
+    drivers:
+      - gateway_reliability
+      - checkout_code_quality
+      - network_conditions
+    thresholds:
+      anomaly_threshold_zscore: 3.0
+      anomaly_threshold_delta_pct: 10.0
+    lineage:
+      - "payment_provider_api → payment_events → kpi:gateway_latency_15min"
+    access:
+      analyst: full
+      manager: own_region_only
+      # cfo: not listed → denied by default (Requirement 2.2)
+
+  - id: inventory_fill_rate_daily
+    label: "Inventory Fill Rate (Daily)"
+    source: inventory
+    grain: daily
+    formula: "COUNT(in_stock=true)/COUNT(*) per store per day"
+    definition: >
+      The fraction of SKUs that are in-stock at each store location,
+      aggregated to a daily snapshot.
+    calculation: "COUNT(CASE WHEN in_stock_flag = true THEN 1 END)::float / NULLIF(COUNT(*), 0) GROUP BY store_id, day_bucket"
+    drivers:
+      - supplier_delivery_performance
+      - demand_forecast_accuracy
+      - reorder_triggers
+    thresholds:
+      anomaly_threshold_zscore: 2.0
+      absolute_drop_pct: 15.0
+    lineage:
+      - "warehouse_system → inventory_events → kpi:inventory_fill_rate_daily"
+    access:
+      cfo: aggregate_only
+      analyst: full
+      manager: own_store_only

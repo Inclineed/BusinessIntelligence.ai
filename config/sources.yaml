@@ -1,0 +1,92 @@
+# sources.yaml — Source Registry configuration for BusinessIntelligence.ai
+#
+# Tracks grain, cadence, SLA, data quality, lineage, and owner for every
+# data source the pipeline can touch (Requirements 1.3, 1.5, 1.6).
+#
+# SLA thresholds (minutes):
+#   orders           → 120  (2 hours)
+#   payment_gateway  → 30   (30 minutes)
+#   inventory        → 2880 (48 hours)
+#   marketing        → 2880 (48 hours)
+#
+# NOTE: last_refresh is intentionally omitted here; it is set at runtime by
+# the data loader (etl/load_synthetic.py).  The SourceRegistry defaults
+# last_refresh to utcnow() at construction time and exposes
+# update_last_refresh() so the ETL layer can install the scenario clock.
+# For INC_001 the marketing source will be made intentionally stale (~5 h)
+# by calling update_last_refresh() with an offset timestamp.
+
+sources:
+
+  - id: orders
+    name: "Orders (Transactional)"
+    grain: hourly
+    cadence_minutes: 60
+    sla_minutes: 120
+    data_quality: 0.98
+    lineage:
+      - "pos_system → orders"
+    owner: "Retail Operations"
+
+  - id: payment_gateway
+    name: "Payment Gateway Events"
+    grain: 15-min
+    cadence_minutes: 15
+    sla_minutes: 30
+    data_quality: 0.99
+    lineage:
+      - "payment_provider_api → payment_events"
+    owner: "Platform Engineering"
+
+  - id: inventory
+    name: "Inventory Snapshots"
+    grain: daily
+    cadence_minutes: 1440
+    sla_minutes: 2880
+    data_quality: 0.95
+    lineage:
+      - "warehouse_system → inventory_events"
+    owner: "Supply Chain"
+
+  - id: marketing
+    name: "Marketing Campaigns"
+    grain: daily
+    cadence_minutes: 1440
+    sla_minutes: 2880
+    data_quality: 0.90
+    lineage:
+      - "campaign_platform_api → marketing_events"
+    owner: "Marketing"
+    # last_refresh will be set to utcnow() - 5h by the ETL loader to produce
+    # an intentionally stale source for the INC_001 scenario (stale marketing
+    # weakens the competitor-pricing hypothesis H2 in the challenge engine).
+
+  - id: deployment_log
+    name: "Deployment Log"
+    grain: event
+    cadence_minutes: 0
+    sla_minutes: 10080
+    data_quality: 1.00
+    lineage:
+      - "ci_cd_system → deployment_log"
+    owner: "Platform Engineering"
+
+  - id: support_tickets
+    name: "Customer Support Tickets"
+    grain: event
+    cadence_minutes: 60
+    sla_minutes: 240
+    data_quality: 0.92
+    lineage:
+      - "support_system → support_tickets"
+    owner: "Customer Operations"
+
+  - id: release_notes
+    name: "Release Notes"
+    grain: event
+    cadence_minutes: 0
+    sla_minutes: 10080
+    data_quality: 1.00
+    lineage:
+      - "engineering_wiki → release_notes"
+    owner: "Platform Engineering"

@@ -1,0 +1,7 @@
+file,rows
+orders.csv,43359
+payment_events.csv,345286
+inventory_events.csv,2250
+marketing_events.csv,27
+support_tickets.csv,1238
+deployment_log.csv,3

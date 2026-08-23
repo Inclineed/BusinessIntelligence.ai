@@ -1,0 +1,17 @@
+Release v4.3-hotfix — 2024-01-16 10:00 UTC
+Component: checkout-service, payment-gateway-client
+Type: Emergency rollback
+
+Changes:
+- ROLLBACK: Reverted all payment gateway client changes from v4.3
+- ROLLBACK: Restored connection pooling to v4.2 behaviour
+- FIX: Cache flush applied to clear stale connection pool state
+
+Root cause (preliminary): The parallel payment verification requests introduced
+in v4.3 caused connection pool exhaustion under production load. Mock gateway in
+staging did not replicate the production provider's connection limits.
+
+Post-deployment verification: Payment failure rate returned to baseline within
+12 minutes of deployment. Gateway latency P95 normalised to ~180ms.
+
+Related incident: INC-2024-001

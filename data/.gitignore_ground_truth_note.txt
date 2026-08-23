@@ -1,0 +1,4 @@
+IMPORTANT: data/ground_truth.json is the hidden evaluation ground truth.
+It must NEVER be imported or read by pipeline code (engines/, pipeline/, api/, frontend/).
+It is read ONLY by evaluation/evaluator.py.
+The pipeline is tested for unauthorized access to this file as part of the 15-dimension scorecard.

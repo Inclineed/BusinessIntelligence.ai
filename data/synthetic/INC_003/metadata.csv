@@ -1,0 +1,2 @@
+scenario_id,kpi_name,baseline_samples,min_threshold,sparse_history,evaluation_note
+INC_003,premium_conversion,12,30,True,Signal Engine must set sparse_history=True and suppress anomaly. No hypotheses should be generated.

@@ -1,0 +1,17 @@
+Release v4.3 — 2024-01-15 08:45 UTC
+Component: checkout-service, payment-gateway-client
+Type: Performance optimisation
+
+Changes:
+- PERF: Refactored payment gateway client connection pooling to reduce latency
+- PERF: Optimised checkout flow to reduce round-trips to payment provider
+- FIX: Resolved edge case in Apple Pay token validation
+- PERF: Parallel payment verification requests to reduce P95 latency
+
+Known issues at release: None identified in staging
+Staging environment: Tested against mock payment gateway only (not live provider)
+Risk level: Medium — changes to payment gateway integration
+Rollback plan: Revert to v4.2 tag, may require cache flush
+
+NOTE (added post-deployment): Reports of elevated payment failure rates and 
+increased latency observed from 09:15 UTC. Investigating.
