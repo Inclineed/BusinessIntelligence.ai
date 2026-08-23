@@ -119,7 +119,7 @@ These numbers are from automated test runs against the live pipeline (PostgreSQL
 - Cross-domain generalization works for at least one non-trivial domain shift.
 
 **Architecture claims** (not yet statistically validated):
-- Confidence calibration reporting exists (`evaluation/calibration.py`) but the current dataset (N=8) is too small for meaningful calibration metrics. The target for statistical significance is N ≥ 30.
+- Confidence calibration reporting exists (`evaluation/evaluator.py`, `CalibrationReporter`) but the current dataset (N=8) is too small for meaningful calibration metrics. The target for statistical significance is N ≥ 30.
 - Memory decay and human-validation boost are implemented and unit-tested but have not been evaluated at scale.
 
 ---
@@ -187,8 +187,8 @@ pytest
 ├── security/
 │   └── entitlements.py   # Authorization boundary (fail-closed)
 ├── evaluation/
-│   ├── evaluator.py      # Dynamic ground-truth evaluation
-│   └── calibration.py    # Confidence calibration reporting
+│   ├── evaluator.py      # Dynamic ground-truth evaluation & calibration reporting
+│   └── benchmark_results.md # Evaluation benchmarks
 ├── config/               # YAML configuration files
 ├── data/                 # Ground truth and seed data
 ├── etl/                  # Data generation and ingestion
@@ -202,6 +202,25 @@ pytest
 
 ---
 
+## Documentation
+
+For in-depth technical documentation, refer to the following deep-dive guides:
+
+- [Technical Overview](docs/OVERVIEW.md) — Master system overview and core engineering philosophy.
+- [System Architecture](docs/ARCHITECTURE.md) — End-to-end data flow, orchestrator design, and failure modes.
+- [Engines E1–E9 Reference](docs/ENGINES.md) — Comprehensive technical reference for each of the nine engines.
+- [Security & Entitlements](docs/SECURITY.md) — Pre-retrieval authorization boundary and fail-closed isolation.
+- [Precedent Memory](docs/MEMORY.md) — E9 memory lifecycle, retrieval weighting, human validation, and retention.
+- [Evaluation Framework](docs/EVALUATION.md) — 16 scorecard dimensions, held-out validation, and calibration.
+- [Data & Provenance Model](docs/DATA_AND_PROVENANCE.md) — Relational and vector stores, MethodTags, and citation fidelity.
+- [Deterministic vs. LLM Boundaries](docs/LLM_BOUNDARIES.md) — Permitted vs forbidden LLM operations and prompts.
+- [Configuration Reference](docs/CONFIGURATION.md) — Schemas, loader validations, and operational impact.
+- [Testing Architecture](docs/TESTING.md) — Test suite layout, adversarial test suites, and reproduction commands.
+- [Operations & Deployment](docs/OPERATIONS.md) — Setup, data ingestion, CLI/API/UI execution, and troubleshooting.
+
+---
+
 ## License
 
 See repository for license details.
+
