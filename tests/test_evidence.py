@@ -331,7 +331,7 @@ class TestAssembleEvidenceNoConnections:
         scope = _make_scope(["orders"])
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=None,
@@ -350,7 +350,7 @@ class TestAssembleEvidenceNoConnections:
         scope = _make_scope(["payment_gateway"])
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=None,
@@ -400,7 +400,7 @@ class TestAssembleEvidenceStructured:
         db_conn = self._make_mock_db([(1000, 40, 250.0)])
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -428,7 +428,7 @@ class TestAssembleEvidenceStructured:
         db_conn = self._make_mock_db([(500, 25, 180.0)])
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -458,7 +458,7 @@ class TestAssembleEvidenceStructured:
         db_conn = self._make_mock_db([(200, 10, 300.0)])
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -484,7 +484,7 @@ class TestAssembleEvidenceStructured:
         db_conn = self._make_mock_db([(100, 5, 200.0)])
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -519,7 +519,7 @@ class TestAssembleEvidenceStructured:
         db_conn = self._make_mock_db([(500.0,)])  # fill_rate row
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -553,7 +553,7 @@ class TestAssembleEvidenceStructured:
         ]
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -612,7 +612,7 @@ class TestUnresolvedSourceDrop:
         # Here we test that even if ghost_source is authorized, no evidence is
         # produced because the registry doesn't know it.
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -638,7 +638,7 @@ class TestUnresolvedSourceDrop:
         db_conn.cursor.return_value.fetchall.return_value = [(1000, 40, 250.0)]
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -672,7 +672,7 @@ class TestUnresolvedSourceDrop:
         db_conn.cursor.return_value.fetchall.return_value = []
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -725,7 +725,7 @@ class TestAssembleEvidenceUnstructured:
         chroma = self._make_chroma_mock("support_tickets", n=2)
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=None,
@@ -753,7 +753,7 @@ class TestAssembleEvidenceUnstructured:
         chroma = self._make_chroma_mock("support_tickets", n=3)
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=None,
@@ -788,7 +788,7 @@ class TestAssembleEvidenceUnstructured:
         }
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=None,
@@ -841,7 +841,7 @@ class TestAssembleEvidenceSortOrder:
         }
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -879,7 +879,7 @@ class TestEdgeCases:
         db_conn.cursor.return_value.fetchall.return_value = [(100, 5, 200.0)]
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -899,7 +899,7 @@ class TestEdgeCases:
         db_conn.cursor.return_value.fetchall.return_value = []
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=db_conn,
@@ -919,7 +919,7 @@ class TestEdgeCases:
         chroma.get_collection.side_effect = Exception("collection not found")
 
         result = assemble_evidence(
-            scope=scope,
+            authorized_sources=scope.authorized_sources,
             signals=[],
             registry=registry,
             db_conn=None,

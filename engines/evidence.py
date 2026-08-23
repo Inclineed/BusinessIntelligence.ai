@@ -183,7 +183,7 @@ def _maybe_summarize(
 # ---------------------------------------------------------------------------
 
 def _assemble_structured(
-    scope: AuthorizationScope,
+    authorized_sources: frozenset[str],
     scenario_id: str,
     anomaly_window_start: datetime,
     anomaly_window_end: datetime,
@@ -195,11 +195,14 @@ def _assemble_structured(
     """
     Query structured SQL sources and build Evidence items tagged [SQL].
 
-    Returns (items, dropped_count).
-    Only queries sources present in scope.authorized_sources.
+    Evidence retrieval is constrained by the authorized source set before evidence assembly.
+    Unauthorized sources are excluded at the retrieval layer.
     """
     items: list[Evidence] = []
     dropped = 0
+
+    if not authorized_sources:
+        return items, dropped
 
     # -----------------------------------------------------------------------
     # Helper: resolve registry entry and compute reliability weight
@@ -234,7 +237,7 @@ def _assemble_structured(
 
     # --- Payment events summary (source: payment_gateway) ---
     SOURCE_PAYMENT = "payment_gateway"
-    if SOURCE_PAYMENT in scope.authorized_sources:
+    if SOURCE_PAYMENT in authorized_sources:
         weight = _get_weight(SOURCE_PAYMENT)
         if weight is not None:
             rows = _query(
@@ -285,7 +288,7 @@ def _assemble_structured(
 
     # --- Inventory fill rate (source: inventory) ---
     SOURCE_INVENTORY = "inventory"
-    if SOURCE_INVENTORY in scope.authorized_sources:
+    if SOURCE_INVENTORY in authorized_sources:
         weight = _get_weight(SOURCE_INVENTORY)
         if weight is not None:
             rows = _query(
@@ -324,7 +327,7 @@ def _assemble_structured(
 
     # --- Deployment log (source: deployment_log) ---
     SOURCE_DEPLOY = "deployment_log"
-    if SOURCE_DEPLOY in scope.authorized_sources:
+    if SOURCE_DEPLOY in authorized_sources:
         weight = _get_weight(SOURCE_DEPLOY)
         if weight is not None:
             # Look for deployments in the 48h before anomaly_window_start
@@ -364,7 +367,7 @@ def _assemble_structured(
 
     # --- Support tickets (source: support_tickets) ---
     SOURCE_SUPPORT = "support_tickets"
-    if SOURCE_SUPPORT in scope.authorized_sources:
+    if SOURCE_SUPPORT in authorized_sources:
         weight = _get_weight(SOURCE_SUPPORT)
         if weight is not None:
             rows = _query(
@@ -414,7 +417,7 @@ def _assemble_structured(
 # ---------------------------------------------------------------------------
 
 def _assemble_unstructured(
-    scope: AuthorizationScope,
+    authorized_sources: frozenset[str],
     signals: list[AnomalySignal],
     scenario_id: str,
     registry: SourceRegistry,
@@ -425,13 +428,13 @@ def _assemble_unstructured(
     """
     Query ChromaDB for unstructured evidence tagged [RETRIEVAL].
 
-    Returns (items, dropped_count).
-    Only includes results from sources in scope.authorized_sources.
+    Evidence retrieval is constrained by the authorized source set before evidence assembly.
+    Unauthorized sources are excluded at the retrieval layer.
     """
     items: list[Evidence] = []
     dropped = 0
 
-    if chroma_client is None:
+    if not authorized_sources or chroma_client is None:
         return items, dropped
 
     # Build retrieval query from signals
@@ -451,6 +454,13 @@ def _assemble_unstructured(
         )
         return items, dropped
 
+    # Build ChromaDB metadata where filter for query-level authorization
+    auth_list = sorted(list(authorized_sources))
+    if len(auth_list) == 1:
+        where_filter = {"source": auth_list[0]}
+    else:
+        where_filter = {"source": {"$in": auth_list}}
+
     # Embed the query with Ollama bge-m3 so the vector dimension (1024) matches
     # the collection. Passing query_texts would make ChromaDB embed with its
     # default 384-dim model, causing a dimension mismatch.
@@ -467,6 +477,7 @@ def _assemble_unstructured(
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=5,
+            where=where_filter,
             include=["documents", "metadatas", "distances"],
         )
     except Exception as exc:  # noqa: BLE001
@@ -485,10 +496,10 @@ def _assemble_unstructured(
     ):
         source_id = (meta or {}).get("source", "")
 
-        # Only include authorized sources
-        if source_id not in scope.authorized_sources:
+        # Only include authorized sources (secondary defense-in-depth check)
+        if source_id not in authorized_sources:
             logger.debug(
-                "_assemble_unstructured: skipping doc '%s' from unauthorized source '%s'.",
+                "_assemble_unstructured: secondary check skipped doc '%s' from unauthorized source '%s'.",
                 doc_id,
                 source_id,
             )
@@ -538,7 +549,7 @@ def _assemble_unstructured(
 # ---------------------------------------------------------------------------
 
 def assemble_evidence(
-    scope: AuthorizationScope,
+    authorized_sources: frozenset[str],
     signals: list[AnomalySignal],
     registry: SourceRegistry,
     db_conn,
@@ -547,21 +558,29 @@ def assemble_evidence(
     anomaly_window_start: datetime,
     anomaly_window_end: datetime,
     provider=None,
+    scope: Optional[AuthorizationScope] = None,
 ) -> EvidenceAssemblyResult:
     """
     Assemble authorized, freshness-weighted evidence (Engine E4).
 
-    Must be called AFTER the Security_Engine entitlement boundary (Req 5.2).
-    The scope parameter reflects what the boundary already approved.
+    Evidence retrieval is constrained by the authorized source set before evidence assembly.
+    Unauthorized sources are excluded at the retrieval layer.
 
-    Steps
-    -----
-    A  Structured evidence (SQL): payment_events, inventory_events,
-       deployment_log, support_tickets — only for authorized sources.
-    B  Unstructured evidence (ChromaDB RETRIEVAL): top-5 cosine-similar docs
-       from the scenario's collection — only for authorized sources.
-    C  Drop any item whose source_id cannot be resolved in the registry.
-    D  Optional LLM summarization for items whose summary exceeds 200 words.
+    Parameters
+    ----------
+    authorized_sources : frozenset[str]
+        Set of source_id strings authorized for the current persona.
+        Must be provided explicitly. An empty frozenset means no sources are
+        authorized (fail-closed, returns zero evidence).
+    signals       : AnomalySignal list from Engine E2.
+    registry      : SourceRegistry instance.
+    db_conn       : Database connection.
+    chroma_client : ChromaDB client.
+    scenario_id   : Current scenario ID.
+    anomaly_window_start : Window start datetime.
+    anomaly_window_end   : Window end datetime.
+    provider      : Optional LLMProvider.
+    scope         : Optional AuthorizationScope (extracted for backward compatibility).
 
     Returns
     -------
@@ -570,12 +589,32 @@ def assemble_evidence(
 
     Requirements: 6.1–6.7, 7.3–7.5
     """
+    if isinstance(authorized_sources, AuthorizationScope):
+        scope = authorized_sources
+        authorized_sources = scope.authorized_sources
+    elif scope is not None and (authorized_sources is None or not isinstance(authorized_sources, (set, frozenset))):
+        authorized_sources = scope.authorized_sources
+
+    if not isinstance(authorized_sources, (set, frozenset)):
+        raise TypeError(
+            f"assemble_evidence requires authorized_sources as a frozenset[str]; "
+            f"got {type(authorized_sources).__name__!r}. "
+            f"Authorization must be explicitly passed at evidence assembly layer."
+        )
+
+    auth_sources = frozenset(authorized_sources)
+
+    # Fail-closed: empty frozenset means no sources authorized -> zero evidence returned
+    if not auth_sources:
+        logger.info("assemble_evidence: authorized_sources is empty; returning zero evidence (fail-closed).")
+        return EvidenceAssemblyResult(evidence=[], dropped_count=0, reliability_notes=[])
+
     notes: list[str] = []
     total_dropped = 0
 
     # Step A — structured
     structured, dropped_a = _assemble_structured(
-        scope=scope,
+        authorized_sources=auth_sources,
         scenario_id=scenario_id,
         anomaly_window_start=anomaly_window_start,
         anomaly_window_end=anomaly_window_end,
@@ -588,7 +627,7 @@ def assemble_evidence(
 
     # Step B — unstructured
     unstructured, dropped_b = _assemble_unstructured(
-        scope=scope,
+        authorized_sources=auth_sources,
         signals=signals,
         scenario_id=scenario_id,
         registry=registry,

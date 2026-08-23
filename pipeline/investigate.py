@@ -499,11 +499,11 @@ def investigate(
     # E4 — Evidence [SQL+RETRIEVAL]
     # Requirement: 6.1–6.7, 7.3–7.5
     # ------------------------------------------------------------------
-    logger.info("investigate: [E4] Evidence Engine")
+    logger.info("investigate: [E4] Evidence Engine (constrained by authorized_sources before assembly)")
     try:
         with telemetry_svc.measure_engine("evidence"):
             evidence_result = assemble_evidence(
-                scope=scope,
+                authorized_sources=scope.authorized_sources,
                 signals=signals,
                 registry=registry,
                 db_conn=deps.db_conn,
@@ -512,6 +512,7 @@ def investigate(
                 anomaly_window_start=window_start,
                 anomaly_window_end=window_end,
                 provider=provider,
+                scope=scope,
             )
         evidence_items = evidence_result.evidence
         if evidence_result.reliability_notes:

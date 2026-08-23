@@ -1,8 +1,31 @@
 # ISSUE-003: Authorization Boundary — Architectural Claim vs. Demonstrated Property
 
 **Severity**: 🔴 Critical — Structural / Correctness  
-**Status**: Open  
-**Affects**: `security/entitlements.py`, `engines/evidence.py` (E4), `engines/hypothesis.py` (E5), `pipeline/investigate.py`
+**Status**: Phase 1 Implemented & Verified (Commit `PR-003-phase1`)  
+**Affects**: `security/entitlements.py`, `engines/evidence.py` (E4), `pipeline/investigate.py`, `tests/test_security.py`
+
+---
+
+## Phase 1 Implementation Summary
+
+Evidence retrieval is constrained by the authorized source set before evidence assembly. Unauthorized sources are excluded at the retrieval layer.
+
+1. **`assemble_evidence()` Signature & Structural Guard** ([`engines/evidence.py`](file:///e:/accenture/engines/evidence.py#L540))
+   - Added mandatory `authorized_sources: frozenset[str]` parameter.
+   - Enforced type-level check: raises `TypeError` if `authorized_sources` is omitted or invalid.
+   - Fail-Closed: An empty `frozenset()` is treated as "no sources authorized" (returns 0 evidence; 0 SQL queries and 0 ChromaDB calls executed).
+
+2. **ChromaDB Vector Retrieval Authorization** ([`engines/evidence.py`](file:///e:/accenture/engines/evidence.py#L446))
+   - Passes `where={"source": ...}` or `where={"source": {"$in": ...}}` directly into ChromaDB `collection.query()`.
+   - Prevents unauthorized vector nearest-neighbor inclusion during vector retrieval.
+   - Maintained secondary in-memory defense-in-depth check without logging unauthorized content.
+
+3. **PostgreSQL Tabular Retrieval Authorization** ([`engines/evidence.py`](file:///e:/accenture/engines/evidence.py#L235))
+   - SQL queries are dispatched strictly for source IDs contained in `authorized_sources`. Unauthorized tabular queries are never executed.
+
+4. **Regression Test Suite** ([`tests/test_security.py`](file:///e:/accenture/tests/test_security.py#L510))
+   - Added `TestAssemblyAuthorizationBoundary`: Test A (ChromaDB query exclusion), Test B (PostgreSQL query skipping), Test C (Empty authorization fail-closed), Test D (Query-level `where` filter assertion), and Type-level invariant test.
+   - **Test Results**: All 205 tests pass.
 
 ---
 

@@ -506,3 +506,189 @@ class TestPerformance:
         assert len(authorized) + sum(
             1 for c in candidates if c.source_id in denied_set
         ) == 10_000
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-003 Phase 1 — Evidence Assembly Authorization Boundary Tests
+# ---------------------------------------------------------------------------
+
+class TestAssemblyAuthorizationBoundary:
+    def setup_method(self):
+        from datetime import datetime, timedelta
+        self.now = datetime.utcnow()
+        self.start = self.now - timedelta(hours=2)
+        self.end = self.now
+
+    def _make_entry(self, source_id: str, data_quality: float = 0.9, sla_minutes: int = 60):
+        from datetime import datetime, timedelta
+        from models import FreshnessStatus, SourceRegistryEntry
+        return SourceRegistryEntry(
+            source_id=source_id,
+            name=source_id,
+            grain="hourly",
+            cadence_minutes=60,
+            last_refresh=datetime.utcnow() - timedelta(minutes=5),
+            sla_minutes=sla_minutes,
+            freshness_status=FreshnessStatus.FRESH,
+            data_quality=data_quality,
+            lineage=[],
+            owner="test",
+        )
+
+    def test_a_chromadb_authorization_boundary(self):
+        """Test A: Verify ChromaDB evidence retrieval excludes unauthorized source B."""
+        from unittest.mock import MagicMock
+        from engines.evidence import assemble_evidence
+        from config.registry import SourceRegistry
+
+        reg_a = self._make_entry("support_tickets", data_quality=0.9, sla_minutes=120)
+        reg_b = self._make_entry("confidential_hr", data_quality=0.9, sla_minutes=120)
+        registry = SourceRegistry.from_entries([reg_a, reg_b]) if hasattr(SourceRegistry, "from_entries") else MagicMock()
+        registry.get.side_effect = lambda sid: {"support_tickets": reg_a, "confidential_hr": reg_b}[sid]
+
+        chroma = MagicMock()
+        col = MagicMock()
+        chroma.get_collection.return_value = col
+        col.query.return_value = {
+            "ids": [["doc_1", "doc_2"]],
+            "documents": [["Support ticket text", "HR confidential text"]],
+            "metadatas": [[{"source": "support_tickets"}, {"source": "confidential_hr"}]],
+            "distances": [[0.1, 0.2]],
+        }
+
+        # Authorize source A (support_tickets) ONLY
+        res = assemble_evidence(
+            authorized_sources=frozenset({"support_tickets"}),
+            signals=[],
+            registry=registry,
+            db_conn=None,
+            chroma_client=chroma,
+            scenario_id="INC_001",
+            anomaly_window_start=self.start,
+            anomaly_window_end=self.end,
+        )
+
+        sources = [e.source_id for e in res.evidence]
+        assert "support_tickets" in sources
+        assert "confidential_hr" not in sources
+
+    def test_b_postgresql_authorization_boundary(self):
+        """Test B: Verify PostgreSQL SQL queries for unauthorized source B are skipped/not returned."""
+        from unittest.mock import MagicMock
+        from engines.evidence import assemble_evidence
+
+        reg_a = self._make_entry("inventory", data_quality=0.9, sla_minutes=2880)
+        reg_b = self._make_entry("payment_gateway", data_quality=0.95, sla_minutes=30)
+        registry = MagicMock()
+        registry.get.side_effect = lambda sid: {"inventory": reg_a, "payment_gateway": reg_b}[sid]
+
+        db_conn = MagicMock()
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(0.98,)]  # fill_rate row
+        db_conn.cursor.return_value = cursor
+
+        # Authorize inventory ONLY (payment_gateway NOT authorized)
+        res = assemble_evidence(
+            authorized_sources=frozenset({"inventory"}),
+            signals=[],
+            registry=registry,
+            db_conn=db_conn,
+            chroma_client=None,
+            scenario_id="INC_001",
+            anomaly_window_start=self.start,
+            anomaly_window_end=self.end,
+        )
+
+        sources = [e.source_id for e in res.evidence]
+        assert "inventory" in sources
+        assert "payment_gateway" not in sources
+
+    def test_c_empty_authorization_returns_zero_evidence(self):
+        """Test C: Verify empty authorized_sources returns zero evidence (fail-closed, not all sources)."""
+        from unittest.mock import MagicMock
+        from engines.evidence import assemble_evidence
+
+        entry = self._make_entry("payment_gateway", data_quality=0.95, sla_minutes=30)
+        registry = MagicMock()
+        registry.get.return_value = entry
+
+        db_conn = MagicMock()
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(1000, 40, 250.0)]
+        db_conn.cursor.return_value = cursor
+
+        chroma = MagicMock()
+
+        # Call with empty frozenset
+        res = assemble_evidence(
+            authorized_sources=frozenset(),
+            signals=[],
+            registry=registry,
+            db_conn=db_conn,
+            chroma_client=chroma,
+            scenario_id="INC_001",
+            anomaly_window_start=self.start,
+            anomaly_window_end=self.end,
+        )
+
+        assert res.evidence == []
+        # DB and Chroma DB should NOT be queried when authorized_sources is empty
+        cursor.execute.assert_not_called()
+        chroma.get_collection.assert_not_called()
+
+    def test_d_query_level_chroma_where_filter_enforcement(self):
+        """Test D: Intercept ChromaDB query and assert 'where' filter received authorized sources constraint."""
+        from unittest.mock import MagicMock
+        from engines.evidence import assemble_evidence
+
+        entry = self._make_entry("support_tickets", data_quality=0.9, sla_minutes=120)
+        registry = MagicMock()
+        registry.get.return_value = entry
+
+        chroma = MagicMock()
+        col = MagicMock()
+        chroma.get_collection.return_value = col
+        col.query.return_value = {
+            "ids": [["doc_1"]],
+            "documents": [["Support ticket text"]],
+            "metadatas": [[{"source": "support_tickets"}]],
+            "distances": [[0.1]],
+        }
+
+        res = assemble_evidence(
+            authorized_sources=frozenset({"support_tickets"}),
+            signals=[],
+            registry=registry,
+            db_conn=None,
+            chroma_client=chroma,
+            scenario_id="INC_001",
+            anomaly_window_start=self.start,
+            anomaly_window_end=self.end,
+        )
+
+        assert len(res.evidence) == 1
+        # Assert where parameter was passed to collection.query
+        col.query.assert_called_once()
+        kwargs = col.query.call_args.kwargs
+        assert "where" in kwargs
+        assert kwargs["where"] == {"source": "support_tickets"}
+
+    def test_type_error_raised_if_authorized_sources_not_provided(self):
+        """Type-level invariant: assemble_evidence raises TypeError if authorized_sources is not set/frozenset."""
+        from unittest.mock import MagicMock
+        from engines.evidence import assemble_evidence
+
+        registry = MagicMock()
+
+        with pytest.raises(TypeError, match="requires authorized_sources"):
+            assemble_evidence(
+                authorized_sources="invalid_string_type",
+                signals=[],
+                registry=registry,
+                db_conn=None,
+                chroma_client=None,
+                scenario_id="INC_001",
+                anomaly_window_start=self.start,
+                anomaly_window_end=self.end,
+            )
+
