@@ -70,10 +70,15 @@ def _to_json(obj: Any) -> Any:
     - Everything else (str, int, float, bool, None) â†’ pass through
     """
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return {
+        d = {
             f.name: _to_json(getattr(obj, f.name))
             for f in dataclasses.fields(obj)
         }
+        if hasattr(obj, "supporting_evidence_ids"):
+            d["supporting_evidence_ids"] = _to_json(obj.supporting_evidence_ids)
+        if hasattr(obj, "contradictory_evidence_ids"):
+            d["contradictory_evidence_ids"] = _to_json(obj.contradictory_evidence_ids)
+        return d
     if isinstance(obj, enum.Enum):
         return obj.value
     if isinstance(obj, (list, tuple)):

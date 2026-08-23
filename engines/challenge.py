@@ -22,14 +22,17 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import NamedTuple, Optional
+from typing import Literal, NamedTuple, Optional
 
 from models import (
     AnomalySignal,
+    CitationViolation,
     ConfidenceState,
     DimensionContribution,
     Evidence,
+    EvidenceCitation,
     Hypothesis,
+    HypothesisScore,
     MethodTag,
     RuleResult,
     RuleVerdict,
@@ -825,6 +828,43 @@ def _rule_contradiction(
     )
 
 
+def validate_citations(
+    hypothesis: Hypothesis,
+    evidence_by_id: dict[str, Evidence],
+) -> list[CitationViolation]:
+    violations = []
+    seen_ids: set[str] = set()
+
+    for citation in hypothesis.citations:
+
+        # Rule 1: no duplicate citations
+        if citation.evidence_id in seen_ids:
+            violations.append(CitationViolation(
+                citation.evidence_id, "duplicate_citation",
+                detail="Same evidence ID cited more than once",
+            ))
+            continue
+        seen_ids.add(citation.evidence_id)
+
+        # Rule 2: ID must exist
+        if citation.evidence_id not in evidence_by_id:
+            violations.append(CitationViolation(
+                citation.evidence_id, "phantom_id",
+                detail="Evidence ID not found in evidence_by_id",
+            ))
+            continue
+
+        # Rule 3: quoted_summary must match exactly (strip only)
+        actual = evidence_by_id[citation.evidence_id].summary
+        if citation.quoted_summary.strip() != actual.strip():
+            violations.append(CitationViolation(
+                citation.evidence_id, "summary_mismatch",
+                detail=f"Expected: '{actual.strip()}'",
+            ))
+
+    return violations
+
+
 # ---------------------------------------------------------------------------
 # Task 9.2 — score_hypothesis
 # ---------------------------------------------------------------------------
@@ -833,9 +873,9 @@ def _rule_contradiction(
 def score_hypothesis(
     h: Hypothesis,
     evidence_by_id: dict[str, Evidence],
-    signals: list[AnomalySignal],
-    contributions: list[DimensionContribution],
-    thresholds: ChallengeThresholds,
+    signals: Optional[list[AnomalySignal]] = None,
+    contributions: Optional[list[DimensionContribution]] = None,
+    thresholds: Optional[ChallengeThresholds] = None,
 ) -> ScoredHypothesis:
     """
     Score a single hypothesis deterministically.
@@ -859,6 +899,25 @@ def score_hypothesis(
 
     Requirements: 9.1, 9.2, 9.3, 9.8, 6.7
     """
+    if signals is None:
+        signals = []
+    if contributions is None:
+        contributions = []
+    if thresholds is None:
+        thresholds = ChallengeThresholds()
+
+    violations = validate_citations(h, evidence_by_id)
+    if violations:
+        return ScoredHypothesis(
+            hypothesis_id=h.hypothesis_id,
+            final_score=0.0,
+            confidence_state=ConfidenceState.ABSTAIN,
+            disqualification_reason=(
+                f"{len(violations)} citation violation(s): "
+                f"{[v.violation_type for v in violations]}"
+            ),
+            violations=violations,
+        )
     # Step 1: Evaluate all rules
     rule_results: list[RuleResult] = [
         evaluate_rule(name, h, evidence_by_id, signals, contributions)

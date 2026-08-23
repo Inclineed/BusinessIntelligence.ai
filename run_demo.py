@@ -29,12 +29,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from models import (
     AnomalySignal,
     ConfidenceState,
     Decision,
     DimensionContribution,
     Evidence,
+    EvidenceCitation,
     FreshnessStatus,
     Hypothesis,
     InvestigationResult,
@@ -297,7 +301,7 @@ def _build_mock_inc001_result() -> InvestigationResult:
     ]
 
     # ------------------------------------------------------------------
-    # Hypotheses â€” H1 (checkout/payment) and H3 (inventory shortage)
+    # Hypotheses — H1 (checkout/payment) and H3 (inventory shortage)
     # ------------------------------------------------------------------
     h1 = Hypothesis(
         hypothesis_id="H1",
@@ -306,8 +310,12 @@ def _build_mock_inc001_result() -> InvestigationResult:
             "checkout-service release caused elevated transaction timeouts, "
             "disproportionately affecting mobile app checkout flows."
         ),
-        supporting_evidence_ids=["EV_PAY_001", "EV_PAY_002", "EV_DEPLOY_001", "EV_TICKETS_001"],
-        contradictory_evidence_ids=[],
+        citations=[
+            EvidenceCitation("EV_PAY_001", ev_pay1.summary, "supports", "Payment failure rate elevated 4x."),
+            EvidenceCitation("EV_PAY_002", ev_pay2.summary, "supports", "Android failure share 72%."),
+            EvidenceCitation("EV_DEPLOY_001", ev_deploy.summary, "supports", "Release v4.3 deployed before onset."),
+            EvidenceCitation("EV_TICKETS_001", ev_tickets.summary, "supports", "Support ticket volume tripled on Android."),
+        ],
         reasoning=(
             "Payment failure evidence aligns tightly with the incident window. "
             "Android and iOS app channels are most affected, consistent with app-layer "
@@ -323,8 +331,10 @@ def _build_mock_inc001_result() -> InvestigationResult:
             "A competitor promotional campaign drew customers away from the platform, "
             "reducing conversion through lower purchase intent rather than technical failure."
         ),
-        supporting_evidence_ids=[],
-        contradictory_evidence_ids=["EV_PAY_001", "EV_PAY_002"],
+        citations=[
+            EvidenceCitation("EV_PAY_001", ev_pay1.summary, "contradicts", "Payment failures point to technical defect."),
+            EvidenceCitation("EV_PAY_002", ev_pay2.summary, "contradicts", "Android skew indicates technical defect."),
+        ],
         reasoning=(
             "Marketing data shows a modest impression dip during the competitor promo "
             "window, but payment failure rates and support ticket volume are inconsistent "
@@ -339,8 +349,9 @@ def _build_mock_inc001_result() -> InvestigationResult:
             "An inventory shortage across key SKUs reduced available products for "
             "purchase, lowering conversion and revenue during the incident window."
         ),
-        supporting_evidence_ids=[],
-        contradictory_evidence_ids=["EV_INV_001"],
+        citations=[
+            EvidenceCitation("EV_INV_001", ev_inventory.summary, "contradicts", "Fill rate remained stable."),
+        ],
         reasoning=(
             "Inventory fill_rate data shows no stockouts or supply disruption. "
             "The evidence directly contradicts the inventory-shortage hypothesis."

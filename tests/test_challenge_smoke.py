@@ -28,6 +28,7 @@ from models import (
     ConfidenceState,
     DimensionContribution,
     Evidence,
+    EvidenceCitation,
     Hypothesis,
     MethodTag,
     RuleVerdict,
@@ -156,6 +157,7 @@ def make_contributions():
 
 
 def make_hypotheses():
+    evidence_set = make_evidence_set()
     h1 = Hypothesis(
         hypothesis_id="H1",
         statement=(
@@ -164,8 +166,26 @@ def make_hypotheses():
             "payment failures and gateway latency that disproportionately affected "
             "Android users."
         ),
-        supporting_evidence_ids=["ev_payment_001", "ev_deploy_001", "ev_support_001"],
-        contradictory_evidence_ids=[],
+        citations=[
+            EvidenceCitation(
+                evidence_id="ev_payment_001",
+                quoted_summary=evidence_set["ev_payment_001"].summary,
+                role="supports",
+                relevance_explanation="Payment failures increased substantially.",
+            ),
+            EvidenceCitation(
+                evidence_id="ev_deploy_001",
+                quoted_summary=evidence_set["ev_deploy_001"].summary,
+                role="supports",
+                relevance_explanation="Deployment occurred within 48h before anomaly.",
+            ),
+            EvidenceCitation(
+                evidence_id="ev_support_001",
+                quoted_summary=evidence_set["ev_support_001"].summary,
+                role="supports",
+                relevance_explanation="Support tickets corroborate payment failures.",
+            ),
+        ],
         reasoning=(
             "The deployment of a new version of the checkout service coincided with "
             "the onset of increased payment failures and gateway latency. The Android "
@@ -180,8 +200,14 @@ def make_hypotheses():
             "A competitor launched a promotional pricing campaign that drew customers "
             "away, reducing conversion and revenue across channels."
         ),
-        supporting_evidence_ids=["ev_marketing_001"],
-        contradictory_evidence_ids=[],
+        citations=[
+            EvidenceCitation(
+                evidence_id="ev_marketing_001",
+                quoted_summary=evidence_set["ev_marketing_001"].summary,
+                role="supports",
+                relevance_explanation="Marketing data indicates external competitive pressure.",
+            ),
+        ],
         reasoning=(
             "Marketing data suggests competitive activity. However, the evidence is "
             "based on stale marketing intelligence that may not reflect current conditions."
@@ -194,8 +220,14 @@ def make_hypotheses():
             "An inventory shortage reduced the availability of products, causing "
             "customers to abandon the checkout process."
         ),
-        supporting_evidence_ids=[],
-        contradictory_evidence_ids=["ev_inventory_001"],
+        citations=[
+            EvidenceCitation(
+                evidence_id="ev_inventory_001",
+                quoted_summary=evidence_set["ev_inventory_001"].summary,
+                role="contradicts",
+                relevance_explanation="Inventory levels are normal with no shortage.",
+            ),
+        ],
         reasoning=(
             "An inventory shortage could explain conversion decline if customers cannot "
             "find products. However, contradictory evidence from the inventory system "
@@ -330,8 +362,7 @@ class TestAbstention:
         h_weak = Hypothesis(
             hypothesis_id="H_WEAK",
             statement="An unknown factor caused the movement.",
-            supporting_evidence_ids=[],
-            contradictory_evidence_ids=[],
+            citations=[],
             reasoning="No supporting evidence available.",
             method=MethodTag.LLM,
         )
@@ -371,16 +402,18 @@ class TestAbstention:
         h_a = Hypothesis(
             hypothesis_id="HA",
             statement="checkout payment degradation",
-            supporting_evidence_ids=["ev_a"],
-            contradictory_evidence_ids=[],
+            citations=[
+                EvidenceCitation("ev_a", "some evidence", "supports", "Some reason a."),
+            ],
             reasoning="payment",
             method=MethodTag.LLM,
         )
         h_b = Hypothesis(
             hypothesis_id="HB",
             statement="checkout payment degradation similar",
-            supporting_evidence_ids=["ev_b"],
-            contradictory_evidence_ids=[],
+            citations=[
+                EvidenceCitation("ev_b", "some evidence b", "supports", "Some reason b."),
+            ],
             reasoning="payment",
             method=MethodTag.LLM,
         )
@@ -421,14 +454,15 @@ class TestHallucinatedIds:
         h_hallucinated = Hypothesis(
             hypothesis_id="H_HALL",
             statement="checkout payment degradation caused by a system issue",
-            supporting_evidence_ids=["FAKE_ID_999"],  # not in evidence_by_id
-            contradictory_evidence_ids=[],
+            citations=[
+                EvidenceCitation("FAKE_ID_999", "anything", "supports", "Fake reasoning."),
+            ],
             reasoning="some reasoning about payment",
             method=MethodTag.LLM,
         )
         thresholds = ChallengeThresholds()
         sh = score_hypothesis(h_hallucinated, evidence_by_id, signals, contributions, thresholds)
-        # support_score should be 0.0 (hallucinated id skipped)
+        # support_score should be 0.0 (hallucinated id skipped or gated with 0 score)
         assert sh.support_score == 0.0, f"Expected support_score=0.0, got {sh.support_score}"
         assert 0.0 <= sh.final_score <= 1.0
 

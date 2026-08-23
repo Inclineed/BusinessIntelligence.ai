@@ -34,6 +34,7 @@ from models import (
     Persona,
     ScoredHypothesis,
 )
+from engines.challenge import validate_citations
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +78,20 @@ _PERSONA_AUTHORIZED_SOURCES: dict[str, frozenset[str]] = {
 class DimensionScore:
     """Per-dimension evaluation result."""
 
-    dimension_id: int     # 1–15
+    dimension_id: int     # 1–16
     dimension_name: str
     score: float          # [0, 1]
     passed: bool          # True when score == 1.0
     detail: str           # human-readable explanation
+    is_hard_requirement: bool = False
+
+    @property
+    def dimension(self) -> str:
+        return f"D{self.dimension_id:02d}"
+
+    @property
+    def name(self) -> str:
+        return self.dimension_name
 
 
 @dataclass
@@ -308,7 +318,7 @@ class Evaluator:
         ]
         auth_violation_count = len(auth_violation_items)
 
-        # Score all 15 dimensions
+        # Score all 16 dimensions
         dimensions: list[DimensionScore] = [
             self._dim_01_anomaly_detected(result, scenario_gt),
             self._dim_02_localization(result, scenario_gt),
@@ -325,10 +335,15 @@ class Evaluator:
             self._dim_13_provenance_correctness(result, scenario_gt),
             self._dim_14_hallucinated_evidence(result, hallucinated_count),
             self._dim_15_authorization_violations(result, auth_violation_count),
+            self._dim_16_citation_fidelity(result),
         ]
 
-        # Overall pass: hallucinated == 0 AND auth_violations == 0 (Req 18.5)
-        hard_pass = (hallucinated_count == 0 and auth_violation_count == 0)
+        # Overall pass: D14, D15, and D16 are the three hard requirements (Req 18.5 + D16)
+        hard_pass = (
+            hallucinated_count == 0
+            and auth_violation_count == 0
+            and all(d.passed for d in dimensions if getattr(d, "is_hard_requirement", False))
+        )
         all_dims_pass = all(d.passed for d in dimensions)
         overall_pass = hard_pass and all_dims_pass
 
@@ -548,7 +563,7 @@ class Evaluator:
             )
         )
 
-        # ---- D08–D15: provenance + authorization + hallucination ----
+        # ---- D08–D16: provenance + authorization + hallucination + citation fidelity ----
         # Always enforced regardless of scenario.
         dimensions.append(
             self._dim_13_provenance_correctness(result, scenario_gt)
@@ -559,8 +574,16 @@ class Evaluator:
         dimensions.append(
             self._dim_15_authorization_violations(result, auth_violation_count)
         )
+        dimensions.append(
+            self._dim_16_citation_fidelity(result)
+        )
 
-        hard_pass = (hallucinated_count == 0 and auth_violation_count == 0)
+        # Overall pass: D14, D15, and D16 are the three hard requirements
+        hard_pass = (
+            hallucinated_count == 0
+            and auth_violation_count == 0
+            and all(d.passed for d in dimensions if getattr(d, "is_hard_requirement", False))
+        )
         overall_pass = hard_pass and all(d.passed for d in dimensions)
 
         scorecard_text = format_scorecard(
@@ -1040,7 +1063,7 @@ class Evaluator:
             f"{'✓' if passed else '✗'} hallucinated_evidence_references={hallucinated_count} "
             f"(expected=0)"
         )
-        return DimensionScore(14, "Hallucinated evidence references = 0", score, passed, detail)
+        return DimensionScore(14, "Hallucinated evidence references = 0", score, passed, detail, is_hard_requirement=True)
 
     def _dim_15_authorization_violations(
         self,
@@ -1057,7 +1080,37 @@ class Evaluator:
             f"{'✓' if passed else '✗'} authorization_violations={auth_violation_count} "
             f"(expected=0)"
         )
-        return DimensionScore(15, "Authorization violations = 0", score, passed, detail)
+        return DimensionScore(15, "Authorization violations = 0", score, passed, detail, is_hard_requirement=True)
+
+    def _dim_16_citation_fidelity(
+        self,
+        result: InvestigationResult,
+    ) -> DimensionScore:
+        """
+        Verifies citation structural integrity: no phantom IDs, no summary
+        mismatches, no duplicates.
+
+        Scope: proves quotation fidelity only — not semantic correctness of
+        role assignments or relevance explanations, which require human judgment.
+        A D16 pass means the LLM copied evidence accurately; it does not mean
+        the LLM interpreted evidence correctly.
+        """
+        evidence_by_id = {e.evidence_id: e for e in result.evidence}
+        all_violations = []
+        for h in result.hypotheses:
+            all_violations.extend(
+                validate_citations(h, evidence_by_id)
+            )
+        passed = len(all_violations) == 0
+        detail = f"{'✓' if passed else '✗'} {len(all_violations)} citation violation(s) across all hypotheses"
+        return DimensionScore(
+            dimension_id=16,
+            dimension_name="Citation Fidelity (D16)",
+            score=1.0 if passed else 0.0,
+            passed=passed,
+            detail=detail,
+            is_hard_requirement=True,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Literal, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -197,18 +197,59 @@ class Evidence:
     reliability_weight and relevance are clamped to [0, 1].
     """
 
-    evidence_id: str
-    kind: str                   # "structured" | "unstructured"
-    summary: str
-    source_id: str
-    reliability_weight: float   # [0, 1] — freshness-decayed
-    relevance: float            # [0, 1] — retrieval / relevance score
-    raw_ref: str                # table row id or document chunk id
-    method: MethodTag           # SQL for structured, RETRIEVAL for unstructured
+    evidence_id: str = ""
+    kind: str = "structured"   # "structured" | "unstructured"
+    summary: str = ""
+    source_id: str = "test_source"
+    reliability_weight: float = 1.0   # [0, 1] — freshness-decayed
+    relevance: float = 1.0            # [0, 1] — retrieval / relevance score
+    raw_ref: str = "raw_ref"          # table row id or document chunk id
+    method: MethodTag = MethodTag.SQL # SQL for structured, RETRIEVAL for unstructured
 
-    def __post_init__(self) -> None:
-        validate_weight(self.reliability_weight)
-        validate_weight(self.relevance)
+    def __init__(
+        self,
+        evidence_id: str = "",
+        kind: str = "structured",
+        summary: str = "",
+        source_id: str = "test_source",
+        reliability_weight: float = 1.0,
+        relevance: float = 1.0,
+        raw_ref: str = "raw_ref",
+        method: MethodTag = MethodTag.SQL,
+        id: Optional[str] = None,
+    ) -> None:
+        self.evidence_id = id if id is not None else evidence_id
+        self.kind = kind
+        self.summary = summary
+        self.source_id = source_id
+        self.reliability_weight = validate_weight(reliability_weight)
+        self.relevance = validate_weight(relevance)
+        self.raw_ref = raw_ref
+        self.method = method
+
+    @property
+    def id(self) -> str:
+        return self.evidence_id
+
+
+@dataclass
+class EvidenceCitation:
+    evidence_id: str
+    quoted_summary: str        # copied verbatim from Evidence.summary
+    role: Literal["supports", "contradicts", "neutral"]
+    relevance_explanation: str # one sentence — must not reference evidence IDs
+                               # or assert factual claims about evidence content
+
+
+@dataclass
+class CitationViolation:
+    evidence_id: str
+    violation_type: Literal[
+        "phantom_id",
+        "summary_mismatch",
+        "duplicate_citation",
+    ]
+    detail: str = ""
 
 
 @dataclass
@@ -218,12 +259,21 @@ class Hypothesis:
     truth in the statement (Requirements 8.1 – 8.7).
     """
 
-    hypothesis_id: str                        # e.g. "H1"
-    statement: str                            # LLM prose, 1–2000 chars, NO numbers
-    supporting_evidence_ids: list[str] = field(default_factory=list)
-    contradictory_evidence_ids: list[str] = field(default_factory=list)
+    hypothesis_id: str = "H1"                 # e.g. "H1"
+    statement: str = ""                       # LLM prose, 1–2000 chars, NO numbers
+    citations: list[EvidenceCitation] = field(default_factory=list)
     reasoning: str = ""                       # 1–5000 chars
+    # Narrative prose only. Must not reference evidence IDs or assert
+    # what any evidence item says. All evidence references belong in citations.
     method: MethodTag = MethodTag.LLM
+
+    @property
+    def supporting_evidence_ids(self) -> list[str]:
+        return [c.evidence_id for c in self.citations if c.role == "supports"]
+
+    @property
+    def contradictory_evidence_ids(self) -> list[str]:
+        return [c.evidence_id for c in self.citations if c.role == "contradicts"]
 
 
 @dataclass
@@ -255,9 +305,19 @@ class ScoredHypothesis:
     confidence_state: ConfidenceState = ConfidenceState.LOW
     narrative: str = ""               # optional LLM_NARRATIVE; never alters score
     method: MethodTag = MethodTag.RULES
+    disqualification_reason: Optional[str] = None
+    violations: list[CitationViolation] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.final_score = clamp(self.final_score, 0.0, 1.0)
+
+    @property
+    def confidence(self) -> ConfidenceState:
+        return self.confidence_state
+
+
+# Alias for backward/test compatibility
+HypothesisScore = ScoredHypothesis
 
 
 @dataclass

@@ -17,7 +17,15 @@ import logging
 import re
 from typing import Any, NamedTuple, Optional
 
-from models import AnomalySignal, DimensionContribution, Evidence, Hypothesis, MethodTag, Telemetry
+from models import (
+    AnomalySignal,
+    DimensionContribution,
+    Evidence,
+    EvidenceCitation,
+    Hypothesis,
+    MethodTag,
+    Telemetry,
+)
 from llm.provider import LLMProvider
 from llm.telemetry_wrapper import record_llm_call
 
@@ -141,6 +149,27 @@ def _build_user_prompt(
     # --- Driver reminder ---
     driver_list = ", ".join(drivers) if drivers else "payment_success_rate, checkout_code_quality, inventory_availability"
 
+    # --- Citation rules ---
+    citation_rules = (
+        "EVIDENCE CITATION RULES — MANDATORY:\n\n"
+        "Every piece of evidence you use to support, contradict, or contextualize your\n"
+        "hypothesis must appear in the citations list. No exceptions.\n\n"
+        "For each citation:\n"
+        "- evidence_id: use the exact ID from the evidence provided to you.\n"
+        "- quoted_summary: copy the evidence summary character-for-character.\n"
+        "  Do not paraphrase. Do not shorten. Do not rephrase. Do not reorder words.\n"
+        "  Any deviation will automatically disqualify your entire hypothesis.\n"
+        "- role: set to \"supports\", \"contradicts\", or \"neutral\" based on how this\n"
+        "  evidence relates to your hypothesis.\n"
+        "- relevance_explanation: one sentence connecting this evidence to your\n"
+        "  hypothesis. Do not repeat the summary. Do not reference other evidence IDs.\n\n"
+        "In the reasoning field: write narrative prose explaining your hypothesis.\n"
+        "Do not reference evidence IDs in reasoning.\n"
+        "Do not assert what any evidence item says in reasoning.\n"
+        "All factual evidence references belong in citations only.\n\n"
+        "The same evidence ID must not appear more than once in citations."
+    )
+
     # --- Output format instructions ---
     output_instructions = (
         "Generate EXACTLY 3 hypotheses that explain the KPI movement. "
@@ -155,9 +184,15 @@ def _build_user_prompt(
         "    {\n"
         '      "hypothesis_id": "H1",\n'
         '      "statement": "<qualitative statement, NO numbers>",\n'
-        '      "supporting_evidence_ids": ["<ev_id_from_list_above>"],\n'
-        '      "contradictory_evidence_ids": [],\n'
-        '      "reasoning": "<qualitative reasoning, NO numbers>"\n'
+        '      "citations": [\n'
+        "        {\n"
+        '          "evidence_id": "<ev_id_from_list_above>",\n'
+        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
+        '          "role": "supports",\n'
+        '          "relevance_explanation": "<one sentence connecting this evidence to hypothesis>"\n'
+        "        }\n"
+        "      ],\n"
+        '      "reasoning": "<qualitative narrative prose, NO numbers, NO evidence IDs>"\n'
         "    },\n"
         "    ... (H2, H3)\n"
         "  ]\n"
@@ -165,11 +200,12 @@ def _build_user_prompt(
         "CRITICAL REMINDER:\n"
         "- Do NOT put any digits, percentages, ratios, probabilities, scores, "
         "counts, or rankings in 'statement' or 'reasoning'.\n"
-        "- Only reference evidence IDs from the list above.\n"
+        "- Only reference evidence IDs from the list above in citations.\n"
+        "- Do NOT reference evidence IDs in 'reasoning'.\n"
         f"- Ground hypotheses in these KPI drivers: {driver_list}."
     )
 
-    return "\n\n".join([anomaly_summary, contrib_summary, evidence_block, output_instructions])
+    return "\n\n".join([anomaly_summary, contrib_summary, evidence_block, citation_rules, output_instructions])
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +305,7 @@ def validate_hypothesis(
     reasoning = raw_hyp.get("reasoning", "")
     supporting = raw_hyp.get("supporting_evidence_ids", [])
     contradictory = raw_hyp.get("contradictory_evidence_ids", [])
+    citations_raw = raw_hyp.get("citations", [])
 
     # (c) Statement length
     if not isinstance(statement, str) or len(statement) < 1:
@@ -284,6 +321,11 @@ def validate_hypothesis(
 
     # (a) Hallucinated evidence IDs
     all_referenced: list[str] = list(supporting) + list(contradictory)
+    if isinstance(citations_raw, list):
+        for c in citations_raw:
+            if isinstance(c, dict) and "evidence_id" in c:
+                all_referenced.append(c["evidence_id"])
+
     for eid in all_referenced:
         if not isinstance(eid, str):
             return False, f"evidence ID {eid!r} is not a string"
@@ -471,12 +513,36 @@ def generate_hypotheses(
             )
             continue
 
+        # Extract citations
+        citations_raw = raw.get("citations", [])
+        citations: list[EvidenceCitation] = []
+        if isinstance(citations_raw, list):
+            for c in citations_raw:
+                if isinstance(c, dict):
+                    role_val = str(c.get("role", "supports")).lower()
+                    if role_val not in ("supports", "contradicts", "neutral"):
+                        role_val = "supports"
+                    citations.append(
+                        EvidenceCitation(
+                            evidence_id=str(c.get("evidence_id", "")),
+                            quoted_summary=str(c.get("quoted_summary", "")),
+                            role=role_val,  # type: ignore[arg-type]
+                            relevance_explanation=str(c.get("relevance_explanation", "")),
+                        )
+                    )
+
+        if not citations:
+            # Fallback for legacy format if any
+            for eid in raw.get("supporting_evidence_ids", []):
+                citations.append(EvidenceCitation(evidence_id=str(eid), quoted_summary="", role="supports", relevance_explanation=""))
+            for eid in raw.get("contradictory_evidence_ids", []):
+                citations.append(EvidenceCitation(evidence_id=str(eid), quoted_summary="", role="contradicts", relevance_explanation=""))
+
         # Build the Hypothesis dataclass (Requirement 8.1, 8.6)
         hyp = Hypothesis(
             hypothesis_id=str(raw.get("hypothesis_id", f"H{len(validated) + 1}")),
             statement=raw["statement"],
-            supporting_evidence_ids=list(raw.get("supporting_evidence_ids", [])),
-            contradictory_evidence_ids=list(raw.get("contradictory_evidence_ids", [])),
+            citations=citations,
             reasoning=raw["reasoning"],
             method=MethodTag.LLM,  # Requirement 8.6
         )
