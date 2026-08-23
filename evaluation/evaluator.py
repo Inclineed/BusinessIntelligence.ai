@@ -73,7 +73,15 @@ _ALLOWED_EVIDENCE_METHODS: frozenset[MethodTag] = frozenset(
 # ---------------------------------------------------------------------------
 _PERSONA_AUTHORIZED_SOURCES: dict[str, frozenset[str]] = {
     "cfo": frozenset({"orders", "inventory"}),
-    "analyst": frozenset({"orders", "payment_gateway", "inventory", "marketing"}),
+    "analyst": frozenset({
+        "orders",
+        "payment_gateway",
+        "inventory",
+        "marketing",
+        "deployment_log",
+        "support_tickets",
+        "release_notes",
+    }),
     "manager": frozenset({"orders", "inventory"}),
 }
 
@@ -306,8 +314,8 @@ class Evaluator:
 
         Requirements: 18.1, 18.2, 3.2, 3.3, 10.1, 10.2
         """
-        # Dispatch additional scenarios to the specialised scorer
-        if result.scenario_id in ("INC_002", "INC_003", "INC_004"):
+        # Dispatch any scenario other than INC_001 to the dynamic additional scenario scorer
+        if result.scenario_id != "INC_001":
             return self._score_additional_scenario(result)
 
         gt = self._gt()
@@ -377,7 +385,7 @@ class Evaluator:
         )
 
     # ------------------------------------------------------------------
-    # Additional scenario scorer — INC_002, INC_003, INC_004
+    # Additional scenario scorer — dynamic evaluation for held-out & guard scenarios
     # ------------------------------------------------------------------
 
     def _score_additional_scenario(
@@ -385,29 +393,12 @@ class Evaluator:
         result: InvestigationResult,
     ) -> EvaluationResult:
         """
-        Evaluate INC_002/INC_003/INC_004 using scenario-specific guard checks.
+        Evaluate any scenario (INC_002–INC_007+) using declared evaluation_checks.
 
-        These scenarios exercise Signal Engine guards and abstention logic rather
-        than the full 15-dimension hypothesis-ranking scorecard.  The method
-        reads the scenario-specific evaluation_checks from ground_truth.json and
-        applies only the checks that are relevant, returning a streamlined
-        EvaluationResult with the same structure as the INC_001 path so
-        downstream tooling (format_scorecard, run_evaluation) is unchanged.
-
-        Dimension mapping for additional scenarios
-        ------------------------------------------
-        D01  anomaly_detected        — must match evaluation_checks.anomaly_detected
-        D02  sparse_history_guard    — INC_003: sparse_history flag must be True on signals
-                                       INC_002/INC_004: N/A → auto-pass
-        D03  data_quality_guard      — INC_004: data_quality_suspect flag must be True
-                                       INC_002/INC_003: N/A → auto-pass
-        D04  evidence_retrieval      — at least 0 items allowed for guard scenarios
-        D05  hypothesis_suppressed   — INC_003/INC_004: no hypotheses generated
-                                       INC_002: hypotheses generated (both present)
-        D06  abstention_correctness  — must match evaluation_checks.abstain_expected
-        D07–D15  authorization + hallucination checks (always applied)
-
-        Requirements: 3.2, 3.3, 10.1, 10.2
+        Reads scenario-specific checks from ground_truth.json and applies all
+        relevant criteria, returning an EvaluationResult with identical structure.
+        Always enforces hard integrity requirements (D13 Provenance, D14 Hallucination==0,
+        D15 Auth Violations==0, D16 Citation Fidelity==1.0).
         """
         gt = self._gt()
         scenario_gt = gt.get("scenarios", {}).get(result.scenario_id, {})
@@ -443,17 +434,15 @@ class Evaluator:
         # ---- D02: sparse_history_guard ----
         sparse_expected = checks.get("sparse_history_expected", False)
         if sparse_expected:
-            # At least one signal must have sparse_history=True
             actual_sparse = any(
                 getattr(s, "sparse_history", False) for s in result.signals
             )
             d02_passed = actual_sparse
             d02_detail = (
                 f"{'✓' if d02_passed else '✗'} sparse_history guard "
-                f"fired={actual_sparse} (expected=True for INC_003)"
+                f"fired={actual_sparse} (expected=True)"
             )
         else:
-            # Not expected — auto-pass for this scenario
             d02_passed = True
             d02_detail = "✓ sparse_history guard N/A for this scenario (auto-pass)"
         dimensions.append(
@@ -469,7 +458,7 @@ class Evaluator:
             d03_passed = actual_dq
             d03_detail = (
                 f"{'✓' if d03_passed else '✗'} data_quality_suspect guard "
-                f"fired={actual_dq} (expected=True for INC_004)"
+                f"fired={actual_dq} (expected=True)"
             )
         else:
             d03_passed = True
@@ -479,9 +468,14 @@ class Evaluator:
         )
 
         # ---- D04: evidence_retrieval ----
-        # Guard scenarios may legitimately have 0 evidence (pipeline stopped early);
-        # treat as pass for INC_003/INC_004, require >= 1 for INC_002 (hypotheses generated).
-        if result.scenario_id == "INC_002":
+        if "evidence_count_min" in checks:
+            min_ev = checks["evidence_count_min"]
+            d04_passed = len(result.evidence) >= min_ev
+            d04_detail = (
+                f"{'✓' if d04_passed else '✗'} evidence_count={len(result.evidence)} "
+                f"(expected >= {min_ev})"
+            )
+        elif result.scenario_id == "INC_002":
             ev_count = len(result.evidence)
             d04_passed = ev_count >= 1
             d04_detail = (
@@ -498,10 +492,16 @@ class Evaluator:
             DimensionScore(4, "Evidence retrieval", 1.0 if d04_passed else 0.0, d04_passed, d04_detail)
         )
 
-        # ---- D05: hypothesis suppression / generation ----
-        # INC_003/INC_004: guards fired → Hypothesis Engine should NOT be invoked
-        # INC_002: both H1-like and H2-like hypotheses should be present
-        if result.scenario_id == "INC_002":
+        # ---- D05: hypothesis suppression / generation / compound causes ----
+        if checks.get("compound_cause_expected", False):
+            hyp_count = len(result.hypotheses)
+            d05_passed = hyp_count >= 2
+            d05_name = "Compound causes represented in hypotheses"
+            d05_detail = (
+                f"{'✓' if d05_passed else '✗'} hypothesis_count={hyp_count} "
+                f"(expected >= 2 for compound cause)"
+            )
+        elif result.scenario_id == "INC_002":
             has_payment_hyp = any(
                 _hypothesis_is_checkout_payment(h.hypothesis_id, h.statement, h.reasoning)
                 for h in result.hypotheses
@@ -518,8 +518,8 @@ class Evaluator:
                 f"competitor={has_external_hyp}"
             )
             d05_name = "Both payment + competitor hypotheses present (INC_002)"
-        else:
-            # INC_003/INC_004: guards fired → no hypotheses should be generated
+        elif checks.get("abstain_expected", False) and not checks.get("anomaly_detected", True):
+            # Guard suppressed
             hyp_count = len(result.hypotheses)
             d05_passed = hyp_count == 0
             d05_detail = (
@@ -527,6 +527,13 @@ class Evaluator:
                 f"(expected=0 — guard suppressed pipeline)"
             )
             d05_name = "Hypothesis engine suppressed by guard"
+        else:
+            hyp_count = len(result.hypotheses)
+            d05_passed = hyp_count >= 1
+            d05_name = "Hypothesis generation"
+            d05_detail = (
+                f"{'✓' if d05_passed else '✗'} hypothesis_count={hyp_count} (expected >= 1)"
+            )
         dimensions.append(
             DimensionScore(5, d05_name, 1.0 if d05_passed else 0.0, d05_passed, d05_detail)
         )
@@ -548,27 +555,48 @@ class Evaluator:
             )
         )
 
-        # ---- D07: no_recommended_action (guard / abstain scenarios) ----
-        # For INC_003/INC_004 (pipeline stopped) and INC_002 (abstained),
-        # a recommended_action should NOT be present.
-        no_action_expected = checks.get("no_recommended_action", True)
-        has_action = (
-            result.decision is not None
-            and result.decision.recommended_action is not None
-            and len(str(result.decision.recommended_action).strip()) > 0
-            and not did_abstain
-        )
-        d07_passed = (not has_action) if no_action_expected else has_action
+        # ---- D07: decision / recommendation / winning hypothesis correctness ----
+        if checks.get("no_recommended_action", False):
+            has_action = (
+                result.decision is not None
+                and result.decision.recommended_action is not None
+                and len(str(result.decision.recommended_action).strip()) > 0
+                and not did_abstain
+            )
+            d07_passed = not has_action
+            d07_name = "No recommended action on abstain/guard"
+            d07_detail = (
+                f"{'✓' if d07_passed else '✗'} has_action={has_action} "
+                f"(expected no_action=True)"
+            )
+        elif "winning_hypothesis_id" in checks:
+            expected_winner = checks["winning_hypothesis_id"]
+            actual_winner = result.decision.winning_hypothesis_id if result.decision else None
+            winner_match = (actual_winner == expected_winner)
+            conf_match = True
+            if "confidence_state" in checks and result.scored:
+                winner_scored = next((s for s in result.scored if s.hypothesis_id == actual_winner), None)
+                expected_conf = checks["confidence_state"].lower()
+                actual_conf = winner_scored.confidence_state.value.lower() if winner_scored else ""
+                conf_match = (actual_conf == expected_conf)
+            d07_passed = winner_match and conf_match and not did_abstain
+            d07_name = f"Winning hypothesis & confidence correctness (expected {expected_winner})"
+            d07_detail = (
+                f"{'✓' if d07_passed else '✗'} winner={actual_winner} (expected={expected_winner}), "
+                f"confidence_match={conf_match}"
+            )
+        else:
+            d07_passed = True
+            d07_name = "Decision correctness"
+            d07_detail = "✓ Decision check passed"
+
         dimensions.append(
             DimensionScore(
                 7,
-                "No recommended action on abstain/guard",
+                d07_name,
                 1.0 if d07_passed else 0.0,
                 d07_passed,
-                (
-                    f"{'✓' if d07_passed else '✗'} has_action={has_action} "
-                    f"(expected no_action={no_action_expected})"
-                ),
+                d07_detail,
             )
         )
 

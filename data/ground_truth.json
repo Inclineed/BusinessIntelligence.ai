@@ -203,6 +203,98 @@
         "anomaly_detected": false,
         "abstain_expected": true
       }
+    },
+    "INC_005": {
+      "scenario_id": "INC_005",
+      "name": "Seasonal Demand Pattern — Not Anomaly",
+      "true_cause": "Expected recurring seasonal/weekend demand pattern. Baseline model accounts for periodicity; no operational or conversion incident.",
+      "affected_kpi": [
+        "hourly_revenue"
+      ],
+      "affected_dimensions": {},
+      "anomaly_window": null,
+      "expected_confidence_state": "ABSTAIN",
+      "expected_winning_hypothesis": null,
+      "expected_hypotheses": {},
+      "evaluation_checks": {
+        "anomaly_detected": false,
+        "abstain_expected": true,
+        "no_recommended_action": true,
+        "seasonal_pattern_expected": true
+      }
+    },
+    "INC_006": {
+      "scenario_id": "INC_006",
+      "name": "Multi-Root-Cause Incident (Network + Deployment)",
+      "true_cause": "Compound incident: simultaneous upstream network packet loss and checkout-service v4.3.1 gateway client latency regression.",
+      "affected_kpi": [
+        "hourly_revenue",
+        "hourly_conversion",
+        "payment_failure_rate_15min",
+        "gateway_latency_15min"
+      ],
+      "affected_dimensions": {
+        "device": "android",
+        "component": "checkout-service"
+      },
+      "anomaly_window": {
+        "start": "2024-01-15T09:00:00+00:00",
+        "end": "2024-01-15T15:00:00+00:00"
+      },
+      "expected_confidence_state": "MEDIUM",
+      "expected_winning_hypothesis": "H1",
+      "expected_hypotheses": {
+        "H1": {
+          "label": "Payment gateway client latency regression",
+          "expected_confidence_state": "MEDIUM",
+          "must_be_winner": true
+        },
+        "H2": {
+          "label": "Upstream network packet loss",
+          "expected_confidence_state": "MEDIUM",
+          "must_not_be_winner": true
+        }
+      },
+      "evaluation_checks": {
+        "anomaly_detected": true,
+        "abstain_expected": false,
+        "winning_hypothesis_id": "H1",
+        "confidence_state": "MEDIUM",
+        "compound_cause_expected": true
+      }
+    },
+    "INC_007": {
+      "scenario_id": "INC_007",
+      "name": "Gradual Performance Degradation (Memory Leak)",
+      "true_cause": "Gradual memory leak in checkout service worker causing progressive latency elevation and failure rate drift over 48 hours without a sharp step-function spike.",
+      "affected_kpi": [
+        "hourly_revenue",
+        "hourly_conversion",
+        "gateway_latency_15min"
+      ],
+      "affected_dimensions": {
+        "component": "checkout-service"
+      },
+      "anomaly_window": {
+        "start": "2024-01-14T12:00:00+00:00",
+        "end": "2024-01-16T12:00:00+00:00"
+      },
+      "expected_confidence_state": "MEDIUM",
+      "expected_winning_hypothesis": "H1",
+      "expected_hypotheses": {
+        "H1": {
+          "label": "Progressive service memory leak",
+          "expected_confidence_state": "MEDIUM",
+          "must_be_winner": true
+        }
+      },
+      "evaluation_checks": {
+        "anomaly_detected": true,
+        "abstain_expected": false,
+        "winning_hypothesis_id": "H1",
+        "confidence_state": "MEDIUM",
+        "gradual_degradation_expected": true
+      }
     }
   },
   "INC_002": {
