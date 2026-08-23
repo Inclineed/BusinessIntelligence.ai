@@ -1,9 +1,18 @@
 """
-evaluation/evaluator.py — 15-dimension scorecard evaluator.
+evaluation/evaluator.py — 16-dimension scorecard evaluator.
 
 Reads data/ground_truth.json ONLY within this module — the pipeline
-never imports this file.  Scores an InvestigationResult across 15 dimensions.
+never imports this file. Scores an InvestigationResult across 16 dimensions.
 Ground truth is NEVER passed to the pipeline.
+
+SCOPE & LIMITATIONS NOTE:
+-------------------------
+A 16/16 pass proves structural integrity, evidence quotation fidelity (D16),
+authorization compliance (D15), zero hallucinated evidence IDs (D14), and
+deterministic score alignment.
+It does NOT prove that the LLM's causal interpretation of the evidence is
+semantically correct. Semantic correctness of role assignments and reasoning
+prose requires human review.
 
 ISOLATION GUARD (Task 13.2)
 ----------------------------

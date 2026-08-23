@@ -216,3 +216,70 @@ def test_legacy_field_consistency_with_citations():
     )
     assert h.supporting_evidence_ids == ["ev_001", "ev_002"]
     assert h.contradictory_evidence_ids == ["ev_003"]
+
+
+def test_malformed_citations_field_rejected():
+    from engines.hypothesis import validate_hypothesis
+    raw = {
+        "hypothesis_id": "H1",
+        "statement": "Statement",
+        "reasoning": "Reasoning",
+        "citations": "not a list",
+    }
+    is_valid, reason = validate_hypothesis(raw, frozenset(["ev_001"]))
+    assert not is_valid
+    assert "citations field is present but not a list" in reason
+
+
+def test_invalid_citation_role_rejected():
+    from engines.hypothesis import validate_hypothesis
+    raw = {
+        "hypothesis_id": "H1",
+        "statement": "Statement",
+        "reasoning": "Reasoning",
+        "citations": [
+            {
+                "evidence_id": "ev_001",
+                "quoted_summary": "Summary 1.",
+                "role": "invalid_role_name",
+                "relevance_explanation": "Explanation",
+            }
+        ],
+    }
+    is_valid, reason = validate_hypothesis(raw, frozenset(["ev_001"]))
+    assert not is_valid
+    assert "invalid role" in reason
+
+
+def test_evidence_id_in_reasoning_rejected():
+    from engines.hypothesis import validate_hypothesis
+    raw = {
+        "hypothesis_id": "H1",
+        "statement": "Statement",
+        "reasoning": "As shown in ev_001, the system failed.",
+        "citations": [
+            {
+                "evidence_id": "ev_001",
+                "quoted_summary": "Summary 1.",
+                "role": "supports",
+                "relevance_explanation": "Explanation",
+            }
+        ],
+    }
+    is_valid, reason = validate_hypothesis(raw, frozenset(["ev_001"]))
+    assert not is_valid
+    assert "reasoning contains prohibited evidence ID reference" in reason
+
+
+def test_zero_citations_rejected_when_evidence_available():
+    from engines.hypothesis import validate_hypothesis
+    raw = {
+        "hypothesis_id": "H1",
+        "statement": "Statement",
+        "reasoning": "Reasoning",
+        "citations": [],
+    }
+    is_valid, reason = validate_hypothesis(raw, frozenset(["ev_001"]))
+    assert not is_valid
+    assert "hypothesis contains zero citations when evidence is available" in reason
+

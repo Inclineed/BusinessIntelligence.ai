@@ -39,8 +39,11 @@
 | 13 | Provenance | SQL/RETRIEVAL/ETL | compliant | ✓ |
 | 14 | Hallucinated evidence | 0 | 0 | ✓ |
 | 15 | Authorization violations | 0 | 0 | ✓ |
+| 16 | Citation fidelity | 0 violations | 0 violations | ✓ |
 
-**Overall: 15/15 | PASS**
+**Overall: 16/16 | PASS**
+
+> **Note on Evaluator Scope:** A 16/16 pass proves quotation fidelity and structural compliance, but does NOT guarantee semantic interpretation correctness (which requires human review).
 
 ## Round 2 Requirement Coverage
 

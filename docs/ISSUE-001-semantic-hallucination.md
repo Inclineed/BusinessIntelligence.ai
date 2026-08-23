@@ -1,10 +1,41 @@
 # ISSUE-001: Semantic Hallucination — LLM Misrepresentation of Evidence Content
 
 **Severity**: 🔴 Critical — Structural / Correctness  
-**Status**: Open  
-**Affects**: `engines/hypothesis.py` (E5), `engines/challenge.py` (E6), `evaluation/evaluator.py`
+**Status**: Resolved (Fixed in Commit `bef715c`, Hardened in Commit `PR-001-fix`)  
+**Affects**: `models.py`, `engines/hypothesis.py` (E5), `engines/challenge.py` (E6), `evaluation/evaluator.py`
 
 ---
+
+## Resolution & Implementation Summary
+
+The structural solution chosen was a **verbatim citation contract** with deterministic string matching (`quoted_summary.strip() == actual.strip()`). This avoids fuzzy similarity thresholds and eliminates semantic paraphrase hallucination entirely.
+
+### Core Architectural Fixes
+
+1. **`EvidenceCitation` Schema & Derived Properties** ([`models.py`](file:///e:/accenture/models.py#L235))
+   - Introduced `EvidenceCitation(evidence_id, quoted_summary, role, relevance_explanation)`.
+   - `supporting_evidence_ids` and `contradictory_evidence_ids` are now derived `@property` methods on `Hypothesis.citations`. They cannot be written independently.
+   - `reasoning` is strictly scoped to narrative prose and prohibited from referencing evidence IDs or asserting evidence content.
+
+2. **Deterministic Citation Hard Gate** ([`engines/challenge.py`](file:///e:/accenture/engines/challenge.py#L831))
+   - Implemented `validate_citations(hypothesis, evidence_by_id)`.
+   - Checks for `duplicate_citation`, `phantom_id`, and exact `summary_mismatch`.
+   - `score_hypothesis()` hard-gates on any citation violation before evaluating rules: immediately returns `final_score=0.0`, `confidence_state=ABSTAIN`, and logs violations.
+
+3. **E5 Prompt & Parser Security Boundary** ([`engines/hypothesis.py`](file:///e:/accenture/engines/hypothesis.py))
+   - Added mandatory verbatim quote rules in E5 prompts.
+   - **Malformed schema handling**: `validate_hypothesis` rejects malformed citation objects, invalid roles outside `{"supports", "contradicts", "neutral"}`, or non-string summaries.
+   - **Reasoning isolation check**: `validate_hypothesis` rejects any hypothesis where `reasoning` contains evidence ID tokens (e.g. `ev_001`).
+   - **Zero-citation policy**: When `valid_evidence_ids` is non-empty, `validate_hypothesis` rejects hypotheses that provide zero citations, preventing evidence-free hypotheses from bypassing validation.
+
+4. **Dimension 16 Scorecard Integration** ([`evaluation/evaluator.py`](file:///e:/accenture/evaluation/evaluator.py#L1084))
+   - Added **D16: Citation Fidelity** to the evaluator scorecard.
+   - Explicitly configured D14, D15, and D16 as **Hard Requirements**: failing D16 forces `overall_pass = False`.
+   - **Scope Distinction Documented**: A 16/16 pass proves structural quotation fidelity, schema compliance, and authorization safety. It does not certify LLM semantic interpretation correctness (which requires human review).
+
+5. **Test Suite Verification** ([`tests/test_fidelity.py`](file:///e:/accenture/tests/test_fidelity.py))
+   - 13 dedicated unit and integration tests covering exact matches, mismatch violations, phantom IDs, duplicate IDs, hard-gate disqualifications, derived fields, neutral citations, malformed JSON structures, invalid roles, reasoning ID references, zero-citation policy, and D16 evaluator hard pass.
+   - **Test Results**: 200/200 passed cleanly in pytest; `run_demo.py` achieves 16/16 PASS.
 
 ## Problem Statement
 

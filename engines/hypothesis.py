@@ -293,19 +293,21 @@ def validate_hypothesis(
 
     Returns (is_valid, rejection_reason).
 
-    Rejects when (Requirements 8.3, 8.4, 8.5):
-    (a) Any evidence ID in supporting or contradictory lists is not in
+    Rejects when (Requirements 8.3, 8.4, 8.5 & Citation Security Boundary):
+    (a) Any evidence ID in citations, supporting, or contradictory lists is not in
         valid_evidence_ids  → "hallucinated evidence ID: {id}"
-    (b) The statement contains a quantitative-truth value (digits forming a
-        number, %, ratio, probability)  → "statement contains quantitative-truth value"
+    (b) The statement contains a quantitative-truth value  → "statement contains quantitative-truth value"
     (c) statement length < 1 or > 2000 chars
     (d) reasoning length < 1 or > 5000 chars
+    (e) citations is missing, not a list, or contains malformed citation objects / invalid roles
+    (f) reasoning contains evidence ID references
+    (g) zero citations when evidence is available
     """
     statement = raw_hyp.get("statement", "")
     reasoning = raw_hyp.get("reasoning", "")
     supporting = raw_hyp.get("supporting_evidence_ids", [])
     contradictory = raw_hyp.get("contradictory_evidence_ids", [])
-    citations_raw = raw_hyp.get("citations", [])
+    citations_raw = raw_hyp.get("citations", None)
 
     # (c) Statement length
     if not isinstance(statement, str) or len(statement) < 1:
@@ -318,6 +320,43 @@ def validate_hypothesis(
         return False, "reasoning is empty or not a string"
     if len(reasoning) > 5000:
         return False, f"reasoning length {len(reasoning)} exceeds 5000 characters"
+
+    # (e) Citations structure and malformed object validation
+    parsed_citations_count = 0
+    if citations_raw is not None:
+        if not isinstance(citations_raw, list):
+            return False, "citations field is present but not a list"
+
+        for idx, item in enumerate(citations_raw):
+            if not isinstance(item, dict):
+                return False, f"citation item at index {idx} is not a dict"
+
+            eid = item.get("evidence_id")
+            if not isinstance(eid, str) or not eid.strip():
+                return False, f"citation at index {idx} missing valid evidence_id string"
+
+            summary_quote = item.get("quoted_summary")
+            if not isinstance(summary_quote, str):
+                return False, f"citation '{eid}' missing quoted_summary string"
+
+            role = item.get("role")
+            if role not in ("supports", "contradicts", "neutral"):
+                return False, f"citation '{eid}' has invalid role {role!r} (must be supports, contradicts, or neutral)"
+
+            parsed_citations_count += 1
+    else:
+        parsed_citations_count = len(supporting) + len(contradictory)
+
+    # (g) Zero citations policy: when evidence is available, hypothesis must cite at least one item
+    if valid_evidence_ids and parsed_citations_count == 0:
+        return False, "hypothesis contains zero citations when evidence is available"
+
+    # (f) Reasoning evidence ID prohibition check
+    if isinstance(reasoning, str):
+        for eid in valid_evidence_ids:
+            pattern = r'\b' + re.escape(eid) + r'\b'
+            if re.search(pattern, reasoning, re.IGNORECASE):
+                return False, f"reasoning contains prohibited evidence ID reference: '{eid}'"
 
     # (a) Hallucinated evidence IDs
     all_referenced: list[str] = list(supporting) + list(contradictory)
