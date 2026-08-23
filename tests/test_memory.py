@@ -337,6 +337,7 @@ def test_retrieve_precedents_includes_above_threshold():
             "winning_hypothesis": "H1",
             "recommendation": "Roll back v4.3.",
             "confidence_state": "high",
+            "outcome_type": "observed",
             "timestamp": "2024-01-01T00:00:00+00:00",
             "summary": "Previous payment degradation.",
         }],
@@ -367,6 +368,7 @@ def test_retrieve_precedents_stamps_retrieval_tag():
             "winning_hypothesis": "H1",
             "recommendation": "Rollback.",
             "confidence_state": "high",
+            "outcome_type": "observed",
             "timestamp": "2024-01-01T00:00:00+00:00",
             "summary": "Prior investigation.",
         }],
@@ -393,11 +395,11 @@ def test_retrieve_precedents_sorted_by_relevance_descending():
         query_distances=[0.5, 0.1, 0.3],  # relevances: 0.75, 0.95, 0.85
         query_metadatas=[
             {"scenario_id": "A", "winning_hypothesis": "", "recommendation": "",
-             "confidence_state": "", "timestamp": "", "summary": "A"},
+             "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": "A"},
             {"scenario_id": "B", "winning_hypothesis": "", "recommendation": "",
-             "confidence_state": "", "timestamp": "", "summary": "B"},
+             "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": "B"},
             {"scenario_id": "C", "winning_hypothesis": "", "recommendation": "",
-             "confidence_state": "", "timestamp": "", "summary": "C"},
+             "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": "C"},
         ],
         query_documents=["A", "B", "C"],
     )
@@ -422,7 +424,7 @@ def test_retrieve_precedents_respects_max_results():
     distances = [0.1] * n  # all above threshold
     metadatas = [
         {"scenario_id": s, "winning_hypothesis": "", "recommendation": "",
-         "confidence_state": "", "timestamp": "", "summary": s}
+         "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": s}
         for s in ids
     ]
     documents = ids
@@ -719,3 +721,51 @@ class TestMemoryContaminationRemediation:
         )
         assert res.evidence == []
         col.query.assert_not_called()
+
+    def test_k_legacy_unknown_provenance_records_excluded_from_normal_retrieval(self):
+        """
+        Test K: Legacy records lacking outcome_type or tagged unknown are NEVER
+        treated as observed historical evidence and are excluded from normal retrieval.
+        """
+        chroma = _make_chroma_client(
+            count=3,
+            query_ids=["LEGACY_NO_KEY", "LEGACY_UNKNOWN", "VALID_OBSERVED"],
+            query_distances=[0.1, 0.1, 0.1],  # all high relevance (0.95)
+            query_metadatas=[
+                {
+                    "scenario_id": "LEGACY_NO_KEY",
+                    "confidence_state": "high",
+                    "summary": "Legacy record without outcome_type key.",
+                },
+                {
+                    "scenario_id": "LEGACY_UNKNOWN",
+                    "confidence_state": "high",
+                    "outcome_type": "unknown",
+                    "summary": "Record with unknown outcome_type.",
+                },
+                {
+                    "scenario_id": "VALID_OBSERVED",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "summary": "Properly tagged observed precedent.",
+                },
+            ],
+            query_documents=[
+                "Legacy record without outcome_type key.",
+                "Record with unknown outcome_type.",
+                "Properly tagged observed precedent.",
+            ],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        # Normal retrieval (include_simulated=False) must ONLY return VALID_OBSERVED
+        results = engine.retrieve_precedents("QUERY", include_simulated=False)
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "VALID_OBSERVED"
+        assert results[0]["outcome_type"] == "observed"
+
+        # Verify ChromaDB query received where={"outcome_type": "observed"}
+        collection = chroma.get_or_create_collection.return_value
+        collection.query.assert_called_once()
+        assert collection.query.call_args.kwargs.get("where") == {"outcome_type": "observed"}
+

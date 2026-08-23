@@ -486,7 +486,7 @@ class MemoryEngine:
             n_results = min(self.MAX_RESULTS, count)
             where_filter = None
             if not include_simulated:
-                where_filter = {"outcome_type": {"$ne": OutcomeType.SIMULATED.value}}
+                where_filter = {"outcome_type": OutcomeType.OBSERVED.value}
 
             try:
                 query_result = collection.query(
@@ -525,10 +525,11 @@ class MemoryEngine:
             ids_list, distances_list, metadatas_list, documents_list
         ):
             meta = meta or {}
-            outcome_type_val = meta.get("outcome_type", OutcomeType.OBSERVED.value)
+            outcome_type_val = meta.get("outcome_type", "unknown")
 
-            # Simulated outcome protection: exclude simulated results from normal precedent retrieval
-            if not include_simulated and outcome_type_val == OutcomeType.SIMULATED.value:
+            # Legacy / unknown provenance and simulated outcome protection:
+            # Normal precedent retrieval strictly requires verified OBSERVED provenance.
+            if not include_simulated and outcome_type_val != OutcomeType.OBSERVED.value:
                 continue
 
             relevance = _cosine_to_relevance(distance)
@@ -550,7 +551,7 @@ class MemoryEngine:
                 "summary": meta.get("summary") or document,
                 "relevance": round(relevance, 4),
                 "confidence_state": conf_state_str or (conf_state.value if conf_state else "unknown"),
-                "original_confidence_state": meta.get("original_confidence_state", conf_state_str),
+                "original_confidence_state": meta.get("original_confidence_state", conf_state_str or "unknown"),
                 "retrieval_weight": conf_weight,
                 "retrieval_score": retrieval_score,
                 "outcome_type": outcome_type_val,
