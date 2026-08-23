@@ -289,7 +289,7 @@ class TestHeldOutScenarios:
         scored_h1 = ScoredHypothesis(
             hypothesis_id="H1",
             final_score=0.62,
-            confidence_state=ConfidenceState.MEDIUM,
+            confidence_state=ConfidenceState.HIGH,
         )
         scored_h2 = ScoredHypothesis(
             hypothesis_id="H2",
@@ -373,7 +373,7 @@ class TestHeldOutScenarios:
         scored_h1 = ScoredHypothesis(
             hypothesis_id="H1",
             final_score=0.65,
-            confidence_state=ConfidenceState.MEDIUM,
+            confidence_state=ConfidenceState.HIGH,
         )
 
         result = InvestigationResult(

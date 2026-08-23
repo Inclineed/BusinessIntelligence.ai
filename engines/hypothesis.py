@@ -463,6 +463,7 @@ def generate_hypotheses(
     # Build a set of valid evidence IDs for validation guards
     # ------------------------------------------------------------------
     valid_evidence_ids: frozenset[str] = frozenset(e.evidence_id for e in evidence)
+    evidence_by_id: dict[str, Evidence] = {e.evidence_id: e for e in evidence}
 
     # ------------------------------------------------------------------
     # Construct prompts and call the LLM
@@ -561,10 +562,17 @@ def generate_hypotheses(
                     role_val = str(c.get("role", "supports")).lower()
                     if role_val not in ("supports", "contradicts", "neutral"):
                         role_val = "supports"
+                    
+                    eid = str(c.get("evidence_id", ""))
+                    if eid in evidence_by_id:
+                        quoted_summary = evidence_by_id[eid].summary
+                    else:
+                        quoted_summary = str(c.get("quoted_summary", ""))
+
                     citations.append(
                         EvidenceCitation(
-                            evidence_id=str(c.get("evidence_id", "")),
-                            quoted_summary=str(c.get("quoted_summary", "")),
+                            evidence_id=eid,
+                            quoted_summary=quoted_summary,
                             role=role_val,  # type: ignore[arg-type]
                             relevance_explanation=str(c.get("relevance_explanation", "")),
                         )

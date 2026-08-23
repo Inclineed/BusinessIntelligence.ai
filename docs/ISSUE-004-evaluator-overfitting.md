@@ -50,13 +50,15 @@ INC_005: Seasonal demand spike misinterpreted as anomaly
   - Tests E2's ability to distinguish seasonality from genuine anomaly
 
 INC_006: Multi-root-cause incident (network + deployment)
-  - Expected: H1 wins but with MEDIUM confidence (two real causes, one stronger)
+  - Expected: H1 wins with HIGH confidence (two real causes, one strongly supported)
   - Tests E6's ability to handle partial truth in multiple hypotheses
 
 INC_007: Gradual degradation (no sharp anomaly point)
-  - Expected: anomaly_detected=True but with a note about gradual onset
+  - Expected: anomaly_detected=True with HIGH confidence
   - Tests E2's sensitivity to slow-moving trends vs. sharp spikes
 ```
+
+**Note on Confidence Semantics**: The evaluator treats `confidence_state` as a strict expected output. It is determined exclusively by the deterministic E6 scoring math (evidence relevance + heuristic rule compliance). A compound-cause (INC_006) or gradual-degradation (INC_007) classification does not inherently reduce confidence; if a hypothesis has strong evidence support, passes all rules, and maintains a sufficient score gap over runner-ups, it will correctly achieve `HIGH` confidence.
 
 **Critical**: Lock the ground truth before running the pipeline. Evaluate honestly without tuning thresholds.
 

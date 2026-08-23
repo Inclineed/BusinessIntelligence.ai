@@ -367,6 +367,8 @@ def _execute_kpi_query(
     Raises psycopg2.Error (or any other DB exception) on failure — the caller
     wraps this in a try/except.
     """
+    from datetime import timedelta
+
     if kpi_id not in _QUERIES:
         raise ValueError(f"No SQL query defined for kpi_id '{kpi_id}'")
 
@@ -377,7 +379,31 @@ def _execute_kpi_query(
         cur.execute(sql, params)
         rows = cur.fetchall()
 
-    return rows
+    valid_rows = []
+    for row in rows:
+        period_dt = row[0]
+        if isinstance(period_dt, datetime):
+            # Align naive vs aware for comparison
+            w_end = window_end
+            p_dt = period_dt
+            if w_end.tzinfo is None and p_dt.tzinfo is not None:
+                p_dt = p_dt.replace(tzinfo=None)
+            elif w_end.tzinfo is not None and p_dt.tzinfo is None:
+                p_dt = p_dt.replace(tzinfo=w_end.tzinfo)
+            
+            # Filter incomplete trailing periods
+            if "hourly" in kpi_id:
+                if p_dt + timedelta(hours=1) > w_end:
+                    continue
+            elif "15min" in kpi_id:
+                if p_dt + timedelta(minutes=15) > w_end:
+                    continue
+            elif "daily" in kpi_id:
+                if p_dt + timedelta(days=1) > w_end:
+                    continue
+        valid_rows.append(row)
+
+    return valid_rows
 
 
 def _build_kpi_values(

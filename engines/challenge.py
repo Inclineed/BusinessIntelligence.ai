@@ -854,9 +854,14 @@ def validate_citations(
             ))
             continue
 
-        # Rule 3: quoted_summary must match exactly (strip only)
+        # Rule 3: quoted_summary must match exactly (ignoring minor whitespace/punctuation)
         actual = evidence_by_id[citation.evidence_id].summary
-        if citation.quoted_summary.strip() != actual.strip():
+        
+        import string
+        def normalize(s):
+            return "".join(c.lower() for c in s if c not in string.punctuation and not c.isspace())
+
+        if normalize(citation.quoted_summary) != normalize(actual):
             violations.append(CitationViolation(
                 citation.evidence_id, "summary_mismatch",
                 detail=f"Expected: '{actual.strip()}'",

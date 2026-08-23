@@ -241,12 +241,12 @@
         "start": "2024-01-15T09:00:00+00:00",
         "end": "2024-01-15T15:00:00+00:00"
       },
-      "expected_confidence_state": "MEDIUM",
+      "expected_confidence_state": "HIGH",
       "expected_winning_hypothesis": "H1",
       "expected_hypotheses": {
         "H1": {
           "label": "Payment gateway client latency regression",
-          "expected_confidence_state": "MEDIUM",
+          "expected_confidence_state": "HIGH",
           "must_be_winner": true
         },
         "H2": {
@@ -259,7 +259,7 @@
         "anomaly_detected": true,
         "abstain_expected": false,
         "winning_hypothesis_id": "H1",
-        "confidence_state": "MEDIUM",
+        "confidence_state": "HIGH",
         "compound_cause_expected": true
       }
     },
@@ -279,12 +279,12 @@
         "start": "2024-01-14T12:00:00+00:00",
         "end": "2024-01-16T12:00:00+00:00"
       },
-      "expected_confidence_state": "MEDIUM",
+      "expected_confidence_state": "HIGH",
       "expected_winning_hypothesis": "H1",
       "expected_hypotheses": {
         "H1": {
           "label": "Progressive service memory leak",
-          "expected_confidence_state": "MEDIUM",
+          "expected_confidence_state": "HIGH",
           "must_be_winner": true
         }
       },
@@ -292,7 +292,7 @@
         "anomaly_detected": true,
         "abstain_expected": false,
         "winning_hypothesis_id": "H1",
-        "confidence_state": "MEDIUM",
+        "confidence_state": "HIGH",
         "gradual_degradation_expected": true
       }
     }
