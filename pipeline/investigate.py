@@ -513,6 +513,7 @@ def investigate(
                 anomaly_window_end=window_end,
                 provider=provider,
                 scope=scope,
+                allowed_collections=frozenset({f"evidence_{scenario_id}"}),
             )
         evidence_items = evidence_result.evidence
         if evidence_result.reliability_notes:

@@ -413,6 +413,17 @@ def _assemble_structured(
 
 
 # ---------------------------------------------------------------------------
+# Forbidden collections for evidence retrieval (ISSUE-002 Phase 2)
+# Precedent and memory collections must NEVER enter E4 evidence retrieval.
+# ---------------------------------------------------------------------------
+_FORBIDDEN_EVIDENCE_COLLECTIONS: frozenset[str] = frozenset({
+    "investigation_precedents",
+    "precedents",
+    "precedent_memory",
+})
+
+
+# ---------------------------------------------------------------------------
 # Unstructured evidence assembly (Step B)
 # ---------------------------------------------------------------------------
 
@@ -424,17 +435,37 @@ def _assemble_unstructured(
     chroma_client,
     notes: list[str],
     provider,
+    allowed_collections: Optional[frozenset[str]] = None,
 ) -> tuple[list[Evidence], int]:
     """
     Query ChromaDB for unstructured evidence tagged [RETRIEVAL].
 
     Evidence retrieval is constrained by the authorized source set before evidence assembly.
-    Unauthorized sources are excluded at the retrieval layer.
+    Unauthorized sources and forbidden precedent collections are excluded at the retrieval layer.
     """
     items: list[Evidence] = []
     dropped = 0
 
     if not authorized_sources or chroma_client is None:
+        return items, dropped
+
+    collection_name = f"evidence_{scenario_id}"
+
+    # Structural Collection Boundary Guard (ISSUE-002 Phase 2)
+    if collection_name in _FORBIDDEN_EVIDENCE_COLLECTIONS:
+        logger.error(
+            "_assemble_unstructured: collection '%s' is a forbidden precedent collection; "
+            "cannot be queried as raw evidence.",
+            collection_name,
+        )
+        return items, dropped
+
+    if allowed_collections is not None and collection_name not in allowed_collections:
+        logger.warning(
+            "_assemble_unstructured: collection '%s' is not in allowed_collections %s; skipping.",
+            collection_name,
+            allowed_collections,
+        )
         return items, dropped
 
     # Build retrieval query from signals
@@ -443,7 +474,6 @@ def _assemble_unstructured(
         f"checkout payment failure conversion drop deployment {kpi_ids}".strip()
     )
 
-    collection_name = f"evidence_{scenario_id}"
     try:
         collection = chroma_client.get_collection(collection_name)
     except Exception:  # noqa: BLE001
@@ -559,12 +589,13 @@ def assemble_evidence(
     anomaly_window_end: datetime,
     provider=None,
     scope: Optional[AuthorizationScope] = None,
+    allowed_collections: Optional[frozenset[str]] = None,
 ) -> EvidenceAssemblyResult:
     """
     Assemble authorized, freshness-weighted evidence (Engine E4).
 
     Evidence retrieval is constrained by the authorized source set before evidence assembly.
-    Unauthorized sources are excluded at the retrieval layer.
+    Unauthorized sources and precedent collections are excluded at the retrieval layer.
 
     Parameters
     ----------
@@ -581,13 +612,14 @@ def assemble_evidence(
     anomaly_window_end   : Window end datetime.
     provider      : Optional LLMProvider.
     scope         : Optional AuthorizationScope (extracted for backward compatibility).
+    allowed_collections : Optional frozenset[str] of permitted ChromaDB collection names.
 
     Returns
     -------
     EvidenceAssemblyResult with evidence sorted by (reliability_weight *
     relevance) descending, total dropped_count, and reliability_notes.
 
-    Requirements: 6.1–6.7, 7.3–7.5
+    Requirements: 6.1–6.7, 7.3–7.5; ISSUE-002 Phase 2; ISSUE-003 Phase 1
     """
     if isinstance(authorized_sources, AuthorizationScope):
         scope = authorized_sources
@@ -608,6 +640,12 @@ def assemble_evidence(
     if not auth_sources:
         logger.info("assemble_evidence: authorized_sources is empty; returning zero evidence (fail-closed).")
         return EvidenceAssemblyResult(evidence=[], dropped_count=0, reliability_notes=[])
+
+    # Filter out forbidden precedent collections from allowed_collections if supplied
+    if allowed_collections is not None:
+        allowed_collections = frozenset(
+            c for c in allowed_collections if c not in _FORBIDDEN_EVIDENCE_COLLECTIONS
+        )
 
     notes: list[str] = []
     total_dropped = 0
@@ -634,6 +672,7 @@ def assemble_evidence(
         chroma_client=chroma_client,
         notes=notes,
         provider=provider,
+        allowed_collections=allowed_collections,
     )
     total_dropped += dropped_b
 

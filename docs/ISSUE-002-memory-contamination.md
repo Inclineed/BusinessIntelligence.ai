@@ -1,8 +1,39 @@
 # ISSUE-002: Memory Contamination — Self-Reinforcing Error Loop in E9 → E4
 
 **Severity**: 🔴 Critical — Structural / Correctness  
-**Status**: Open  
-**Affects**: `engines/memory.py` (E9), `engines/evidence.py` (E4), `pipeline/investigate.py`
+**Status**: Phase 1 & 2 Implemented & Verified (Commit `PR-002-phase1-phase2`)  
+**Affects**: `engines/memory.py` (E9), `engines/evidence.py` (E4), `pipeline/investigate.py`, `tests/test_memory.py`
+
+---
+
+## Phase 1 & 2 Implementation Summary
+
+Adopted the core design principle: **STORE EVERYTHING, RETRIEVE SELECTIVELY.** Valid outcomes across all confidence states (`HIGH`, `MEDIUM`, `LOW`, `ABSTAIN`) are preserved, while retrieval selectively weights precedents by confidence and strictly separates simulated projections and precedent collections.
+
+1. **Selective Confidence Retrieval Weights** ([`engines/memory.py`](file:///e:/accenture/engines/memory.py#L35))
+   - Defined `RETRIEVAL_WEIGHTS = {HIGH: 1.0, MEDIUM: 0.6, ABSTAIN: 0.2, LOW: 0.1}`.
+   - Retrieval scores are computed as `round(relevance * confidence_weight, 4)`.
+   - Guaranteed ranking invariant: `HIGH > MEDIUM > ABSTAIN > LOW` for equivalent semantic relevance.
+   - Stored and retrieved precedents preserve both `confidence_state` and `original_confidence_state` so ambiguous/abstained precedents are never misrepresented as high-confidence evidence.
+
+2. **Simulated Outcome Protection** ([`engines/memory.py`](file:///e:/accenture/engines/memory.py#L275))
+   - Structured metadata explicitly records `outcome_type="observed"` vs `outcome_type="simulated"`.
+   - `retrieve_precedents()` by default filters out `outcome_type == "simulated"`, preventing E8 simulated future projections from contaminating historical precedent retrieval.
+
+3. **Structural Collection Boundary** ([`engines/evidence.py`](file:///e:/accenture/engines/evidence.py#L415))
+   - Hardcoded `_FORBIDDEN_EVIDENCE_COLLECTIONS = frozenset({"investigation_precedents", "precedents", "precedent_memory"})` in E4.
+   - `assemble_evidence()` accepts `allowed_collections: frozenset[str]` (passed from the orchestrator as `frozenset({f"evidence_{scenario_id}"})`).
+   - Prevents E4 from ever querying E9 precedent collections as raw evidence.
+
+4. **Regression Test Suite** ([`tests/test_memory.py`](file:///e:/accenture/tests/test_memory.py#L480))
+   - Added `TestMemoryContaminationRemediation` with Tests A through J covering:
+     - Storage of all 4 confidence states (HIGH, MEDIUM, LOW, ABSTAIN)
+     - Preservation of original confidence states on retrieval
+     - Strict ranking ordering (`HIGH > MEDIUM > ABSTAIN > LOW`)
+     - Retention of ABSTAIN precedents
+     - Exclusion of SIMULATED outcomes from standard precedent queries
+     - Rejection of precedent collections during E4 evidence assembly
+     - Structural collection boundary enforcement
 
 ---
 

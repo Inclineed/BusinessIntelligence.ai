@@ -474,3 +474,248 @@ def test_module_retrieve_precedents_empty():
     chroma = _make_chroma_client(count=0)
     results = retrieve_precedents("INC_001", "context", chroma, provider)
     assert results == []
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-002 Phase 1 & 2 — Memory Contamination Remediation Tests
+# ---------------------------------------------------------------------------
+
+class TestMemoryContaminationRemediation:
+    def setup_method(self):
+        self.provider = _make_llm_provider("Investigation summary.")
+
+    def _make_result_with_state(self, scenario_id: str, state: ConfidenceState) -> InvestigationResult:
+        abstained = (state == ConfidenceState.ABSTAIN)
+        decision = Decision(
+            abstained=abstained,
+            recommended_action=None if abstained else "Action",
+            verification_metric="metric",
+            winning_hypothesis_id=None if abstained else "H1",
+            persona_narrative="Narrative",
+        )
+        scored = [
+            ScoredHypothesis(
+                hypothesis_id="H1",
+                final_score=0.9 if state == ConfidenceState.HIGH else (0.6 if state == ConfidenceState.MEDIUM else (0.2 if state == ConfidenceState.LOW else 0.0)),
+                confidence_state=state,
+            )
+        ]
+        return InvestigationResult(
+            scenario_id=scenario_id,
+            persona=Persona.ANALYST,
+            decision=decision,
+            scored=scored,
+            telemetry=Telemetry(),
+        )
+
+    def test_a_high_outcomes_are_stored(self):
+        """Test A: HIGH confidence outcomes are stored with confidence_state=high."""
+        chroma = _make_chroma_client()
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = self._make_result_with_state("INC_HIGH", ConfidenceState.HIGH)
+        assert engine.store_precedent(res) is True
+        col = chroma.get_or_create_collection.return_value
+        meta = col.upsert.call_args.kwargs["metadatas"][0]
+        assert meta["confidence_state"] == "high"
+        assert meta["outcome_type"] == "observed"
+
+    def test_b_medium_outcomes_are_stored(self):
+        """Test B: MEDIUM confidence outcomes are stored with confidence_state=medium."""
+        chroma = _make_chroma_client()
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = self._make_result_with_state("INC_MED", ConfidenceState.MEDIUM)
+        assert engine.store_precedent(res) is True
+        col = chroma.get_or_create_collection.return_value
+        meta = col.upsert.call_args.kwargs["metadatas"][0]
+        assert meta["confidence_state"] == "medium"
+
+    def test_c_low_outcomes_are_stored(self):
+        """Test C: LOW confidence outcomes are stored with confidence_state=low."""
+        chroma = _make_chroma_client()
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = self._make_result_with_state("INC_LOW", ConfidenceState.LOW)
+        assert engine.store_precedent(res) is True
+        col = chroma.get_or_create_collection.return_value
+        meta = col.upsert.call_args.kwargs["metadatas"][0]
+        assert meta["confidence_state"] == "low"
+
+    def test_d_abstain_outcomes_are_stored(self):
+        """Test D: ABSTAIN outcomes are stored with confidence_state=abstain."""
+        chroma = _make_chroma_client()
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = self._make_result_with_state("INC_ABSTAIN", ConfidenceState.ABSTAIN)
+        assert engine.store_precedent(res) is True
+        col = chroma.get_or_create_collection.return_value
+        meta = col.upsert.call_args.kwargs["metadatas"][0]
+        assert meta["confidence_state"] == "abstain"
+
+    def test_e_retrieved_precedents_preserve_original_confidence_state(self):
+        """Test E: Retrieved precedents preserve their original confidence state and retrieval weight."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["INC_002"],
+            query_distances=[0.2],  # relevance 0.9
+            query_metadatas=[{
+                "scenario_id": "INC_002",
+                "confidence_state": "abstain",
+                "original_confidence_state": "abstain",
+                "outcome_type": "observed",
+                "summary": "Simultaneous causes caused abstention.",
+            }],
+            query_documents=["Simultaneous causes caused abstention."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("INC_002")
+        assert len(results) == 1
+        p = results[0]
+        assert p["confidence_state"] == "abstain"
+        assert p["original_confidence_state"] == "abstain"
+        assert p["retrieval_weight"] == 0.2
+        assert p["retrieval_score"] == round(0.9 * 0.2, 4)
+
+    def test_f_ranking_invariant_high_med_abstain_low(self):
+        """Test F: Equivalent semantic relevance is ranked strictly HIGH (1.0) > MEDIUM (0.6) > ABSTAIN (0.2) > LOW (0.1)."""
+        chroma = _make_chroma_client(
+            count=4,
+            query_ids=["P_LOW", "P_HIGH", "P_ABSTAIN", "P_MED"],
+            query_distances=[0.2, 0.2, 0.2, 0.2],  # identical distance / relevance = 0.9
+            query_metadatas=[
+                {"scenario_id": "P_LOW", "confidence_state": "low", "outcome_type": "observed"},
+                {"scenario_id": "P_HIGH", "confidence_state": "high", "outcome_type": "observed"},
+                {"scenario_id": "P_ABSTAIN", "confidence_state": "abstain", "outcome_type": "observed"},
+                {"scenario_id": "P_MED", "confidence_state": "medium", "outcome_type": "observed"},
+            ],
+            query_documents=["Low", "High", "Abstain", "Med"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("QUERY")
+        assert len(results) == 4
+        ordered_ids = [r["scenario_id"] for r in results]
+        assert ordered_ids == ["P_HIGH", "P_MED", "P_ABSTAIN", "P_LOW"]
+        scores = [r["retrieval_score"] for r in results]
+        assert scores[0] > scores[1] > scores[2] > scores[3]
+
+    def test_g_abstain_precedents_not_discarded(self):
+        """Test G: ABSTAIN precedents are retained and retrievable, not dropped due to ambiguity."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["P_ABSTAIN"],
+            query_distances=[0.1],  # relevance 0.95
+            query_metadatas=[{"scenario_id": "P_ABSTAIN", "confidence_state": "abstain", "outcome_type": "observed"}],
+            query_documents=["Ambiguous scenario text"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("QUERY")
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "P_ABSTAIN"
+        assert results[0]["confidence_state"] == "abstain"
+
+    def test_h_simulated_outcomes_excluded_from_normal_precedent_retrieval(self):
+        """Test H: SIMULATED outcomes are excluded from standard observed precedent retrieval."""
+        from models import OutcomeType
+        chroma = _make_chroma_client(
+            count=2,
+            query_ids=["OBS_1", "SIM_1"],
+            query_distances=[0.1, 0.1],
+            query_metadatas=[
+                {"scenario_id": "OBS_1", "confidence_state": "high", "outcome_type": OutcomeType.OBSERVED.value},
+                {"scenario_id": "SIM_1", "confidence_state": "high", "outcome_type": OutcomeType.SIMULATED.value},
+            ],
+            query_documents=["Observed", "Simulated projection"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        # Standard retrieval excludes SIMULATED
+        results = engine.retrieve_precedents("QUERY", include_simulated=False)
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "OBS_1"
+
+        # Explicit request with include_simulated=True returns both
+        results_all = engine.retrieve_precedents("QUERY", include_simulated=True)
+        assert len(results_all) == 2
+
+    def test_i_e9_precedent_collections_cannot_enter_e4_evidence_retrieval(self):
+        """Test I: E4 assemble_evidence rejects forbidden precedent collections."""
+        from datetime import datetime, timedelta
+        from engines.evidence import assemble_evidence
+        from models import FreshnessStatus, SourceRegistryEntry
+
+        entry = SourceRegistryEntry(
+            source_id="support_tickets",
+            name="support_tickets",
+            grain="hourly",
+            cadence_minutes=60,
+            last_refresh=datetime.utcnow() - timedelta(minutes=5),
+            sla_minutes=120,
+            freshness_status=FreshnessStatus.FRESH,
+            data_quality=0.9,
+            lineage=[],
+            owner="test",
+        )
+        registry = MagicMock()
+        registry.get.return_value = entry
+
+        chroma = MagicMock()
+        col = MagicMock()
+        chroma.get_collection.return_value = col
+        col.query.return_value = {
+            "ids": [["doc_1"]],
+            "documents": [["text"]],
+            "metadatas": [[{"source": "support_tickets"}]],
+            "distances": [[0.1]],
+        }
+
+        # Attempting to pass precedent collection as allowed_collections or scenario_id
+        res = assemble_evidence(
+            authorized_sources=frozenset({"support_tickets"}),
+            signals=[],
+            registry=registry,
+            db_conn=None,
+            chroma_client=chroma,
+            scenario_id="investigation_precedents",  # matching forbidden collection
+            anomaly_window_start=datetime.utcnow() - timedelta(hours=1),
+            anomaly_window_end=datetime.utcnow(),
+            allowed_collections=frozenset({"investigation_precedents"}),
+        )
+        # Should not query ChromaDB for precedent collection
+        assert res.evidence == []
+        col.query.assert_not_called()
+
+    def test_j_collection_boundary_enforced_structurally(self):
+        """Test J: Structural collection contract in assemble_evidence skips unauthorized collection names."""
+        from datetime import datetime, timedelta
+        from engines.evidence import assemble_evidence
+        from models import FreshnessStatus, SourceRegistryEntry
+
+        entry = SourceRegistryEntry(
+            source_id="support_tickets",
+            name="support_tickets",
+            grain="hourly",
+            cadence_minutes=60,
+            last_refresh=datetime.utcnow() - timedelta(minutes=5),
+            sla_minutes=120,
+            freshness_status=FreshnessStatus.FRESH,
+            data_quality=0.9,
+            lineage=[],
+            owner="test",
+        )
+        registry = MagicMock()
+        registry.get.return_value = entry
+
+        chroma = MagicMock()
+        col = MagicMock()
+        chroma.get_collection.return_value = col
+
+        # Allowed collections explicitly set to evidence_INC_001, but scenario_id is INC_002
+        res = assemble_evidence(
+            authorized_sources=frozenset({"support_tickets"}),
+            signals=[],
+            registry=registry,
+            db_conn=None,
+            chroma_client=chroma,
+            scenario_id="INC_002",
+            anomaly_window_start=datetime.utcnow() - timedelta(hours=1),
+            anomaly_window_end=datetime.utcnow(),
+            allowed_collections=frozenset({"evidence_INC_001"}),
+        )
+        assert res.evidence == []
+        col.query.assert_not_called()
