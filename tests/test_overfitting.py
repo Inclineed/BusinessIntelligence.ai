@@ -411,6 +411,220 @@ class TestHeldOutScenarios:
         assert eval_result.hallucinated_evidence_count == 0
         assert eval_result.authorization_violation_count == 0
 
+    def test_inc008_saas_churn_cross_domain(self):
+        """
+        Phase 3: Verify the evaluator generalizes to a completely novel domain (B2B SaaS)
+        without relying on hardcoded Retail metrics or structures.
+        """
+        ev_sso = Evidence(
+            evidence_id="EV_SSO_001",
+            kind="structured",
+            summary="Auth0 logs show a 95% spike in SSO failures for Okta integrations starting at 14:00.",
+            source_id="auth0_logs",
+            reliability_weight=0.98,
+            relevance=0.95,
+            raw_ref="logs:auth0",
+            method=MethodTag.SQL,
+        )
+
+        ev_churn = Evidence(
+            evidence_id="EV_CHURN_001",
+            kind="structured",
+            summary="Stripe webhooks indicate a massive spike in immediate subscription cancellations for Enterprise tier.",
+            source_id="stripe_subscriptions",
+            reliability_weight=0.95,
+            relevance=0.90,
+            raw_ref="api:stripe",
+            method=MethodTag.SQL,
+        )
+        
+        ev_ticket = Evidence(
+            evidence_id="EV_TICK_001",
+            kind="unstructured",
+            summary="Zendesk tickets complain about being unable to log in via Okta.",
+            source_id="zendesk_tickets",
+            reliability_weight=0.90,
+            relevance=0.92,
+            raw_ref="api:zendesk",
+            method=MethodTag.RETRIEVAL,
+        )
+
+        h1 = Hypothesis(
+            hypothesis_id="H1",
+            statement="Broken SSO integration in the new release caused login failures and enterprise churn.",
+            reasoning="Auth0 logs prove SSO failure, Stripe proves churn, and Zendesk tickets link the two.",
+            citations=[
+                EvidenceCitation(
+                    evidence_id="EV_SSO_001",
+                    role="supports",
+                    quoted_summary="Auth0 logs show a 95% spike in SSO failures for Okta integrations starting at 14:00.",
+                    relevance_explanation="Directly proves the auth failure.",
+                ),
+                EvidenceCitation(
+                    evidence_id="EV_CHURN_001",
+                    role="supports",
+                    quoted_summary="Stripe webhooks indicate a massive spike in immediate subscription cancellations for Enterprise tier.",
+                    relevance_explanation="Shows the financial impact of the bug.",
+                ),
+                EvidenceCitation(
+                    evidence_id="EV_TICK_001",
+                    role="supports",
+                    quoted_summary="Zendesk tickets complain about being unable to log in via Okta.",
+                    relevance_explanation="Provides the user narrative linking the two.",
+                )
+            ],
+        )
+
+        scored_h1 = ScoredHypothesis(
+            hypothesis_id="H1",
+            final_score=0.92,
+            confidence_state=ConfidenceState.HIGH,
+        )
+
+        result = InvestigationResult(
+            scenario_id="INC_008",
+            persona=Persona.ANALYST,
+            signals=[
+                AnomalySignal(
+                    kpi_id="daily_churn_rate",
+                    observed=15.0,
+                    expected=1.2,
+                    is_anomaly=True,
+                    z_score=5.5,
+                    delta_pct=1150.0,
+                    method=MethodTag.STATS,
+                ),
+                AnomalySignal(
+                    kpi_id="sso_failure_rate_1h",
+                    observed=0.95,
+                    expected=0.01,
+                    is_anomaly=True,
+                    z_score=8.2,
+                    delta_pct=9400.0,
+                    method=MethodTag.STATS,
+                )
+            ],
+            contributions=[
+                DimensionContribution(
+                    dimension="plan_tier",
+                    segment="enterprise",
+                    contribution_pct=92.0,
+                    segment_delta_pct=1200.0,
+                    method=MethodTag.STATS,
+                ),
+                DimensionContribution(
+                    dimension="auth_provider",
+                    segment="okta",
+                    contribution_pct=98.0,
+                    segment_delta_pct=9400.0,
+                    method=MethodTag.STATS,
+                )
+            ],
+            evidence=[ev_sso, ev_churn, ev_ticket],
+            hypotheses=[h1],
+            scored=[scored_h1],
+            decision=Decision(
+                abstained=False,
+                recommended_action="Rollback to v2.3.9 immediately to restore Okta SSO.",
+                verification_metric="sso_failure_rate_1h",
+                winning_hypothesis_id="H1",
+                persona_narrative="A broken SSO integration for Okta caused an immediate churn spike.",
+            ),
+            telemetry=Telemetry(),
+            method_ownership={"signal": [MethodTag.STATS]},
+        )
+        
+        # In the context of tests, we inject dummy authorization since we're using novel sources 
+        # that aren't in entitlements.yaml. This allows us to test the pure evaluation logic
+        # without needing to mock config files.
+        import evaluation.evaluator as evaluator_module
+        original_auth = evaluator_module._PERSONA_AUTHORIZED_SOURCES.get("analyst", frozenset())
+        new_auth = frozenset(list(original_auth) + ["auth0_logs", "stripe_subscriptions", "zendesk_tickets"])
+        evaluator_module._PERSONA_AUTHORIZED_SOURCES["analyst"] = new_auth
+
+        try:
+            evaluator = Evaluator()
+            eval_result = evaluator.evaluate(result)
+            assert eval_result.overall_pass is True
+            assert eval_result.hallucinated_evidence_count == 0
+            assert eval_result.authorization_violation_count == 0
+        finally:
+            evaluator_module._PERSONA_AUTHORIZED_SOURCES["analyst"] = original_auth
+
+    def test_calibration_report_generation(self, caplog):
+        """
+        Phase 4: Generate a calibration report across multiple scenarios.
+        """
+        # Run standard INC_001 to get an InvestigationResult
+        evidence_by_id, signals, hypotheses = _make_inc001_fixtures()
+        
+        scored = [
+            ScoredHypothesis(
+                hypothesis_id="H1",
+                final_score=0.95,
+                confidence_state=ConfidenceState.HIGH,
+            )
+        ]
+        
+        result1 = InvestigationResult(
+            scenario_id="INC_001",
+            persona=Persona.ANALYST,
+            signals=signals,
+            contributions=[],
+            evidence=list(evidence_by_id.values()),
+            hypotheses=hypotheses,
+            scored=scored,
+            decision=Decision(
+                abstained=False,
+                recommended_action="Rollback v4.3",
+                verification_metric="hourly_revenue",
+                winning_hypothesis_id="H1",
+                persona_narrative="",
+            ),
+            telemetry=Telemetry(),
+            method_ownership={},
+        )
+        
+        # We need another mock for an Abstain scenario
+        result2 = InvestigationResult(
+            scenario_id="INC_004",  # Assuming sparse history expects abstain
+            persona=Persona.ANALYST,
+            signals=[],
+            contributions=[],
+            evidence=[],
+            hypotheses=[],
+            scored=[],
+            decision=Decision(
+                abstained=True,
+                recommended_action=None,
+                verification_metric=None,
+                winning_hypothesis_id=None,
+                persona_narrative="",
+            ),
+            telemetry=Telemetry(),
+            method_ownership={},
+        )
+        
+        # Test the calibration reporter
+        from evaluation.evaluator import CalibrationReporter, Evaluator, _load_ground_truth
+        reporter = CalibrationReporter()
+        evaluator = Evaluator()
+        gt = _load_ground_truth()
+        
+        # Add a HIGH correct prediction
+        reporter.add_result(result1, evaluator.evaluate(result1), gt)
+        # Add an ABSTAIN correct prediction
+        reporter.add_result(result2, evaluator.evaluate(result2), gt)
+        
+        report = reporter.generate_report()
+        
+        assert "Total Scenarios Evaluated: 2" in report
+        assert "HIGH    : 1/1 correct (100.0%)" in report
+        assert "ABSTAIN : 1/1 correct (100.0%)" in report
+        assert "exploratory and NOT statistically" in report
+        
+        print("\n\n" + report)
+
 
 # ---------------------------------------------------------------------------
 # Phase 2: Adversarial Perturbation & Monotonicity Tests
@@ -574,3 +788,153 @@ class TestAdversarialPerturbation:
         assert challenge_res.abstained is False
         assert challenge_res.winning_hypothesis_id == "H1"
         assert challenge_res.overall_confidence == ConfidenceState.HIGH
+
+
+class TestEvaluatorExtensibility:
+    def test_evaluator_missing_required_dimension_fails(self):
+        from evaluation.evaluator import Evaluator
+        from models import InvestigationResult, Telemetry
+        evaluator = Evaluator()
+        
+        # Inject an incomplete scenario directly into the evaluator's ground truth
+        gt = evaluator._gt()
+        gt["scenarios"]["INC_MISSING"] = {
+            "scenario_id": "INC_MISSING",
+            "evaluation_checks": {
+                "abstain_expected": True
+                # Missing anomaly_detected
+            }
+        }
+        
+        result = InvestigationResult(
+            scenario_id="INC_MISSING",
+            persona=None,
+            signals=[],
+            contributions=[],
+            evidence=[],
+            hypotheses=[],
+            scored=[],
+            decision=None,
+            telemetry=Telemetry(),
+            method_ownership={},
+        )
+        
+        import pytest
+        with pytest.raises(ValueError, match="missing required dimension/check"):
+            evaluator.evaluate(result)
+            
+    def test_evaluator_unknown_check_field_fails(self):
+        from evaluation.evaluator import Evaluator
+        from models import InvestigationResult, Telemetry
+        evaluator = Evaluator()
+        
+        gt = evaluator._gt()
+        gt["scenarios"]["INC_UNKNOWN"] = {
+            "scenario_id": "INC_UNKNOWN",
+            "evaluation_checks": {
+                "anomaly_detected": True,
+                "abstain_expected": True,
+                "anomly_detected_typo": True
+            }
+        }
+        
+        result = InvestigationResult(
+            scenario_id="INC_UNKNOWN",
+            persona=None,
+            signals=[],
+            contributions=[],
+            evidence=[],
+            hypotheses=[],
+            scored=[],
+            decision=None,
+            telemetry=Telemetry(),
+            method_ownership={},
+        )
+        
+        import pytest
+        with pytest.raises(ValueError, match="Unknown evaluation check field"):
+            evaluator.evaluate(result)
+            
+    def test_evaluator_dynamic_scenario_loading(self):
+        from evaluation.evaluator import Evaluator, DimensionScore
+        from models import InvestigationResult, Telemetry, ConfidenceState, Decision, ScoredHypothesis, Hypothesis
+        evaluator = Evaluator()
+        
+        gt = evaluator._gt()
+        gt["scenarios"]["INC_DYNAMIC"] = {
+            "scenario_id": "INC_DYNAMIC",
+            "evaluation_checks": {
+                "anomaly_detected": False,
+                "abstain_expected": False,
+                "winning_hypothesis_id": "HDYN",
+                "confidence_state": "HIGH"
+            }
+        }
+        
+        scored = [
+            ScoredHypothesis(hypothesis_id="HDYN", final_score=0.9, confidence_state=ConfidenceState.HIGH)
+        ]
+        
+        result = InvestigationResult(
+            scenario_id="INC_DYNAMIC",
+            persona=None,
+            signals=[],
+            contributions=[],
+            evidence=[],
+            hypotheses=[],
+            scored=scored,
+            decision=Decision(
+                abstained=False,
+                recommended_action="Fix dynamically",
+                verification_metric="metrics",
+                winning_hypothesis_id="HDYN",
+                persona_narrative=""
+            ),
+            telemetry=Telemetry(),
+            method_ownership={},
+        )
+        
+        # Should pass without hardcoded dispatch
+        res = evaluator.evaluate(result)
+        assert res.overall_pass is True
+        
+    def test_evaluator_security_boundaries_enforced(self):
+        from evaluation.evaluator import Evaluator
+        from models import InvestigationResult, Telemetry, Evidence
+        evaluator = Evaluator()
+        
+        gt = evaluator._gt()
+        gt["scenarios"]["INC_SECURITY"] = {
+            "scenario_id": "INC_SECURITY",
+            "evaluation_checks": {
+                "anomaly_detected": False,
+                "abstain_expected": True
+            }
+        }
+        
+        # Inject an unauthorized evidence source to intentionally fail D15
+        unauth_evidence = Evidence(
+            evidence_id="EV_HACK",
+            source_id="unauthorized_slack",
+            summary="Bad data",
+        )
+        
+        result = InvestigationResult(
+            scenario_id="INC_SECURITY",
+            persona=None,
+            signals=[],
+            contributions=[],
+            evidence=[unauth_evidence],
+            hypotheses=[],
+            scored=[],
+            decision=None,
+            telemetry=Telemetry(),
+            method_ownership={},
+        )
+        
+        res = evaluator.evaluate(result)
+        
+        assert res.authorization_violation_count == 1
+        assert res.overall_pass is False
+        assert any(d.passed is False and d.dimension_id == 15 for d in res.dimension_scores)
+

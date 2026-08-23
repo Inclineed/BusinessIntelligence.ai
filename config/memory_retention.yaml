@@ -1,0 +1,35 @@
+# memory_retention.yaml — Per-source TTL for precedent expiry (ISSUE-002 Phase 4)
+#
+# Defines how long stored precedents remain eligible for retrieval, by source.
+# Expired precedents are filtered from retrieval results — NOT deleted from
+# ChromaDB.  This preserves auditability while preventing stale precedents
+# from influencing future investigations.
+#
+# The evaluator and pipeline code MUST NOT import or reference this file.
+# Only engines/memory.py consumes it (via config/loader.py).
+
+retention:
+  # Fallback TTL when a source has no explicit entry below.
+  default_ttl_days: 90
+
+  by_source:
+    - source_id: orders
+      ttl_days: 120
+
+    - source_id: payment_gateway
+      ttl_days: 60
+
+    - source_id: marketing
+      ttl_days: 30
+
+    - source_id: inventory
+      ttl_days: 180
+
+    - source_id: deployment_log
+      ttl_days: 365
+
+    - source_id: support_tickets
+      ttl_days: 90
+
+    - source_id: release_notes
+      ttl_days: 365

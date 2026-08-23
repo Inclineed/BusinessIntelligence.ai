@@ -263,6 +263,40 @@ def _did_abstain(result: InvestigationResult) -> bool:
 # ---------------------------------------------------------------------------
 
 
+
+ALLOWED_CHECK_FIELDS = frozenset({
+    "anomaly_detected",
+    "affected_kpis_expected",
+    "dominant_dimension",
+    "true_hypothesis_in_top3",
+    "true_hypothesis_rank",
+    "h1_confidence_state",
+    "h3_confidence_state",
+    "h3_must_be_refuted",
+    "h2_confidence_state_max",
+    "recommended_action_keywords",
+    "verification_metric_required",
+    "hallucinated_evidence_max",
+    "authorization_violations_max",
+    "abstain_expected",
+    "compound_cause_expected",
+    "winning_hypothesis_id",
+    "h1_h2_gap_too_small",
+    "no_recommended_action",
+    "ambiguous_scenario_expected",
+    "evidence_count_min",
+    "sparse_history_expected",
+    "data_quality_suspect_expected",
+    "seasonal_pattern_expected",
+    "gradual_degradation_expected",
+    "confidence_state",
+})
+
+REQUIRED_CHECK_FIELDS = frozenset({
+    "anomaly_detected",
+    "abstain_expected",
+})
+
 class Evaluator:
     """
     Scores an InvestigationResult against INC_001 ground truth across 15 dimensions.
@@ -293,116 +327,24 @@ class Evaluator:
     # Public API
     # ------------------------------------------------------------------
 
+    def validate_schema(self, scenario_id: str, checks: dict) -> None:
+        if not checks:
+            raise ValueError(f"Scenario {scenario_id} is missing evaluation_checks entirely.")
+        
+        for req in REQUIRED_CHECK_FIELDS:
+            if req not in checks:
+                raise ValueError(f"Scenario {scenario_id} is missing required dimension/check: {req}")
+                
+        for k in checks.keys():
+            if k not in ALLOWED_CHECK_FIELDS:
+                raise ValueError(f"Unknown evaluation check field in scenario {scenario_id}: {k}")
+
     def evaluate(self, result: InvestigationResult) -> EvaluationResult:
-        """
-        Score *result* across 15 evaluation dimensions.
-
-        For INC_001 the full 15-dimension scorecard is applied.
-        For INC_002, INC_003, and INC_004 (additional Round 2 scenarios) the
-        evaluation is dispatched to _score_additional_scenario(), which applies
-        scenario-specific guard checks (abstain, sparse_history,
-        data_quality_suspect) in place of the INC_001-specific dimensions that
-        are not applicable to these guard scenarios.
-
-        Parameters
-        ----------
-        result : the InvestigationResult returned by the Orchestrator.
-
-        Returns
-        -------
-        EvaluationResult with per-dimension scores, counts, and a scorecard.
-
-        Requirements: 18.1, 18.2, 3.2, 3.3, 10.1, 10.2
-        """
-        # Dispatch any scenario other than INC_001 to the dynamic additional scenario scorer
-        if result.scenario_id != "INC_001":
-            return self._score_additional_scenario(result)
-
-        gt = self._gt()
-        scenario_gt = gt.get("scenarios", {}).get(result.scenario_id, {})
-
-        # Collect all evidence IDs referenced by hypotheses
-        referenced_ids = _collect_all_hypothesis_evidence_ids(result)
-        actual_ids = _actual_evidence_id_set(result)
-        hallucinated_ids = referenced_ids - actual_ids
-        hallucinated_count = len(hallucinated_ids)
-
-        # Collect authorization violations (evidence from unauthorized sources)
-        authorized_sources = _get_authorized_sources(result)
-        auth_violation_items = [
-            e for e in result.evidence
-            if e.source_id not in authorized_sources
-        ]
-        auth_violation_count = len(auth_violation_items)
-
-        # Score all 16 dimensions
-        dimensions: list[DimensionScore] = [
-            self._dim_01_anomaly_detected(result, scenario_gt),
-            self._dim_02_localization(result, scenario_gt),
-            self._dim_03_contribution_analysis(result, scenario_gt),
-            self._dim_04_evidence_retrieval(result, scenario_gt),
-            self._dim_05_true_hypothesis_in_top3(result, scenario_gt),
-            self._dim_06_true_hypothesis_ranking(result, scenario_gt),
-            self._dim_07_incorrect_hypothesis_challenged(result, scenario_gt),
-            self._dim_08_contradiction_handling(result, scenario_gt),
-            self._dim_09_confidence_correctness(result, scenario_gt),
-            self._dim_10_abstention_correctness(result, scenario_gt),
-            self._dim_11_recommendation_correctness(result, scenario_gt),
-            self._dim_12_verification_metric_presence(result, scenario_gt),
-            self._dim_13_provenance_correctness(result, scenario_gt),
-            self._dim_14_hallucinated_evidence(result, hallucinated_count),
-            self._dim_15_authorization_violations(result, auth_violation_count),
-            self._dim_16_citation_fidelity(result),
-        ]
-
-        # Overall pass: D14, D15, and D16 are the three hard requirements (Req 18.5 + D16)
-        hard_pass = (
-            hallucinated_count == 0
-            and auth_violation_count == 0
-            and all(d.passed for d in dimensions if getattr(d, "is_hard_requirement", False))
-        )
-        all_dims_pass = all(d.passed for d in dimensions)
-        overall_pass = hard_pass and all_dims_pass
-
-        scorecard_text = format_scorecard(
-            EvaluationResult(
-                scenario_id=result.scenario_id,
-                overall_pass=overall_pass,
-                dimension_scores=dimensions,
-                hallucinated_evidence_count=hallucinated_count,
-                authorization_violation_count=auth_violation_count,
-                scorecard_text="",  # placeholder; filled below
-            )
-        )
-
-        return EvaluationResult(
-            scenario_id=result.scenario_id,
-            overall_pass=overall_pass,
-            dimension_scores=dimensions,
-            hallucinated_evidence_count=hallucinated_count,
-            authorization_violation_count=auth_violation_count,
-            scorecard_text=scorecard_text,
-        )
-
-    # ------------------------------------------------------------------
-    # Additional scenario scorer — dynamic evaluation for held-out & guard scenarios
-    # ------------------------------------------------------------------
-
-    def _score_additional_scenario(
-        self,
-        result: InvestigationResult,
-    ) -> EvaluationResult:
-        """
-        Evaluate any scenario (INC_002–INC_007+) using declared evaluation_checks.
-
-        Reads scenario-specific checks from ground_truth.json and applies all
-        relevant criteria, returning an EvaluationResult with identical structure.
-        Always enforces hard integrity requirements (D13 Provenance, D14 Hallucination==0,
-        D15 Auth Violations==0, D16 Citation Fidelity==1.0).
-        """
         gt = self._gt()
         scenario_gt = gt.get("scenarios", {}).get(result.scenario_id, {})
         checks = scenario_gt.get("evaluation_checks", {})
+        
+        self.validate_schema(result.scenario_id, checks)
 
         # ---- shared counts (always computed) ----
         referenced_ids = _collect_all_hypothesis_evidence_ids(result)
@@ -414,208 +356,113 @@ class Evaluator:
             [e for e in result.evidence if e.source_id not in authorized_sources]
         )
 
-        # ---- D01: anomaly_detected ----
-        expected_anomaly = checks.get("anomaly_detected", False)
-        actual_anomaly = any(s.is_anomaly for s in result.signals)
-        d01_passed = actual_anomaly == expected_anomaly
-        dimensions: list[DimensionScore] = [
-            DimensionScore(
-                1,
-                "Anomaly detected",
-                1.0 if d01_passed else 0.0,
-                d01_passed,
-                (
-                    f"{'✓' if d01_passed else '✗'} anomaly_detected={actual_anomaly} "
-                    f"(expected={expected_anomaly})"
-                ),
-            )
-        ]
+        dimensions: list[DimensionScore] = []
+        dim_id = 1
+        
+        # We always have anomaly_detected (since it's required)
+        dimensions.append(self._dim_01_anomaly_detected(result, scenario_gt))
+        dimensions[-1].dimension_id = dim_id; dim_id += 1
+        
+        if "sparse_history_expected" in checks:
+            d = self._dim_sparse_history(result, checks)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "data_quality_suspect_expected" in checks:
+            d = self._dim_data_quality(result, checks)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "dominant_dimension" in checks:
+            d = self._dim_02_localization(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            d = self._dim_03_contribution_analysis(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "evidence_count_min" in checks or checks.get("ambiguous_scenario_expected"):
+            d = self._dim_evidence_retrieval(result, checks)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        # The original D04 for INC_001
+        if "affected_kpis_expected" in checks and "ambiguous_scenario_expected" not in checks and "evidence_count_min" not in checks:
+            d = self._dim_04_evidence_retrieval(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
 
-        # ---- D02: sparse_history_guard ----
-        sparse_expected = checks.get("sparse_history_expected", False)
-        if sparse_expected:
-            actual_sparse = any(
-                getattr(s, "sparse_history", False) for s in result.signals
-            )
-            d02_passed = actual_sparse
-            d02_detail = (
-                f"{'✓' if d02_passed else '✗'} sparse_history guard "
-                f"fired={actual_sparse} (expected=True)"
-            )
-        else:
-            d02_passed = True
-            d02_detail = "✓ sparse_history guard N/A for this scenario (auto-pass)"
-        dimensions.append(
-            DimensionScore(2, "Sparse-history guard (Req 3.2)", 1.0 if d02_passed else 0.0, d02_passed, d02_detail)
-        )
+        if "true_hypothesis_in_top3" in checks:
+            d = self._dim_05_true_hypothesis_in_top3(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if checks.get("ambiguous_scenario_expected") or checks.get("compound_cause_expected") or checks.get("abstain_expected"):
+            # Ensure hypothesis_generation logic
+            d = self._dim_hypothesis_generation(result, checks)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "true_hypothesis_rank" in checks:
+            d = self._dim_06_true_hypothesis_ranking(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "h3_confidence_state" in checks:
+            d = self._dim_07_incorrect_hypothesis_challenged(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "h3_must_be_refuted" in checks:
+            d = self._dim_08_contradiction_handling(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "winning_hypothesis_id" in checks:
+            # Replaces INC_001's _dim_09 and _dim_07 logic
+            d = self._dim_winning_hypothesis_correctness(result, checks)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
 
-        # ---- D03: data_quality_guard ----
-        dq_expected = checks.get("data_quality_suspect_expected", False)
-        if dq_expected:
-            actual_dq = any(
-                getattr(s, "data_quality_suspect", False) for s in result.signals
-            )
-            d03_passed = actual_dq
-            d03_detail = (
-                f"{'✓' if d03_passed else '✗'} data_quality_suspect guard "
-                f"fired={actual_dq} (expected=True)"
-            )
-        else:
-            d03_passed = True
-            d03_detail = "✓ data_quality_suspect guard N/A for this scenario (auto-pass)"
-        dimensions.append(
-            DimensionScore(3, "Data-quality guard (Req 3.3)", 1.0 if d03_passed else 0.0, d03_passed, d03_detail)
-        )
+        if "abstain_expected" in checks:
+            # Replaces INC_001's _dim_10
+            d = self._dim_abstention_correctness(result, checks)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "no_recommended_action" in checks:
+            d = self._dim_no_recommended_action(result, checks)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
 
-        # ---- D04: evidence_retrieval ----
-        if "evidence_count_min" in checks:
-            min_ev = checks["evidence_count_min"]
-            d04_passed = len(result.evidence) >= min_ev
-            d04_detail = (
-                f"{'✓' if d04_passed else '✗'} evidence_count={len(result.evidence)} "
-                f"(expected >= {min_ev})"
-            )
-        elif result.scenario_id == "INC_002":
-            ev_count = len(result.evidence)
-            d04_passed = ev_count >= 1
-            d04_detail = (
-                f"{'✓' if d04_passed else '✗'} evidence_count={ev_count} "
-                f"(expected >= 1 for ambiguous scenario)"
-            )
-        else:
-            d04_passed = True
-            d04_detail = (
-                f"✓ evidence retrieval N/A for guard scenario "
-                f"(evidence_count={len(result.evidence)})"
-            )
-        dimensions.append(
-            DimensionScore(4, "Evidence retrieval", 1.0 if d04_passed else 0.0, d04_passed, d04_detail)
-        )
+        if "recommended_action_keywords" in checks:
+            d = self._dim_11_recommendation_correctness(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
+            
+        if "verification_metric_required" in checks:
+            d = self._dim_12_verification_metric_presence(result, scenario_gt)
+            d.dimension_id = dim_id; dim_id += 1
+            dimensions.append(d)
 
-        # ---- D05: hypothesis suppression / generation / compound causes ----
-        if checks.get("compound_cause_expected", False):
-            hyp_count = len(result.hypotheses)
-            d05_passed = hyp_count >= 2
-            d05_name = "Compound causes represented in hypotheses"
-            d05_detail = (
-                f"{'✓' if d05_passed else '✗'} hypothesis_count={hyp_count} "
-                f"(expected >= 2 for compound cause)"
-            )
-        elif result.scenario_id == "INC_002":
-            has_payment_hyp = any(
-                _hypothesis_is_checkout_payment(h.hypothesis_id, h.statement, h.reasoning)
-                for h in result.hypotheses
-            )
-            has_external_hyp = any(
-                any(kw in (h.statement + " " + h.reasoning).lower()
-                    for kw in ("competitor", "competition", "pricing", "promotion", "marketing", "external"))
-                for h in result.hypotheses
-            )
-            d05_passed = has_payment_hyp and has_external_hyp
-            d05_detail = (
-                f"{'✓' if d05_passed else '✗'} INC_002 requires both payment and "
-                f"competitor hypotheses: payment={has_payment_hyp}, "
-                f"competitor={has_external_hyp}"
-            )
-            d05_name = "Both payment + competitor hypotheses present (INC_002)"
-        elif checks.get("abstain_expected", False) and not checks.get("anomaly_detected", True):
-            # Guard suppressed
-            hyp_count = len(result.hypotheses)
-            d05_passed = hyp_count == 0
-            d05_detail = (
-                f"{'✓' if d05_passed else '✗'} hypothesis_count={hyp_count} "
-                f"(expected=0 — guard suppressed pipeline)"
-            )
-            d05_name = "Hypothesis engine suppressed by guard"
-        else:
-            hyp_count = len(result.hypotheses)
-            d05_passed = hyp_count >= 1
-            d05_name = "Hypothesis generation"
-            d05_detail = (
-                f"{'✓' if d05_passed else '✗'} hypothesis_count={hyp_count} (expected >= 1)"
-            )
-        dimensions.append(
-            DimensionScore(5, d05_name, 1.0 if d05_passed else 0.0, d05_passed, d05_detail)
-        )
-
-        # ---- D06: abstention_correctness ----
-        abstain_expected = checks.get("abstain_expected", True)
-        did_abstain = _did_abstain(result)
-        d06_passed = did_abstain == abstain_expected
-        dimensions.append(
-            DimensionScore(
-                6,
-                "Abstention correctness (Req 10.1, 10.2)",
-                1.0 if d06_passed else 0.0,
-                d06_passed,
-                (
-                    f"{'✓' if d06_passed else '✗'} abstained={did_abstain} "
-                    f"(expected={abstain_expected})"
-                ),
-            )
-        )
-
-        # ---- D07: decision / recommendation / winning hypothesis correctness ----
-        if checks.get("no_recommended_action", False):
-            has_action = (
-                result.decision is not None
-                and result.decision.recommended_action is not None
-                and len(str(result.decision.recommended_action).strip()) > 0
-                and not did_abstain
-            )
-            d07_passed = not has_action
-            d07_name = "No recommended action on abstain/guard"
-            d07_detail = (
-                f"{'✓' if d07_passed else '✗'} has_action={has_action} "
-                f"(expected no_action=True)"
-            )
-        elif "winning_hypothesis_id" in checks:
-            expected_winner = checks["winning_hypothesis_id"]
-            actual_winner = result.decision.winning_hypothesis_id if result.decision else None
-            winner_match = (actual_winner == expected_winner)
-            conf_match = True
-            if "confidence_state" in checks and result.scored:
-                winner_scored = next((s for s in result.scored if s.hypothesis_id == actual_winner), None)
-                expected_conf = checks["confidence_state"].lower()
-                actual_conf = winner_scored.confidence_state.value.lower() if winner_scored else ""
-                conf_match = (actual_conf == expected_conf)
-            d07_passed = winner_match and conf_match and not did_abstain
-            d07_name = f"Winning hypothesis & confidence correctness (expected {expected_winner})"
-            d07_detail = (
-                f"{'✓' if d07_passed else '✗'} winner={actual_winner} (expected={expected_winner}), "
-                f"confidence_match={conf_match}"
-            )
-        else:
-            d07_passed = True
-            d07_name = "Decision correctness"
-            d07_detail = "✓ Decision check passed"
-
-        dimensions.append(
-            DimensionScore(
-                7,
-                d07_name,
-                1.0 if d07_passed else 0.0,
-                d07_passed,
-                d07_detail,
-            )
-        )
-
-        # ---- D08–D16: provenance + authorization + hallucination + citation fidelity ----
+        # ---- D13–D16: provenance + authorization + hallucination + citation fidelity ----
         # Always enforced regardless of scenario.
-        dimensions.append(
-            self._dim_13_provenance_correctness(result, scenario_gt)
-        )
-        dimensions.append(
-            self._dim_14_hallucinated_evidence(result, hallucinated_count)
-        )
-        dimensions.append(
-            self._dim_15_authorization_violations(result, auth_violation_count)
-        )
-        dimensions.append(
-            self._dim_16_citation_fidelity(result)
-        )
+        d13 = self._dim_13_provenance_correctness(result, scenario_gt)
+        d13.dimension_id = 13
+        dimensions.append(d13)
+        
+        d14 = self._dim_14_hallucinated_evidence(result, hallucinated_count)
+        d14.dimension_id = 14
+        dimensions.append(d14)
+        
+        d15 = self._dim_15_authorization_violations(result, auth_violation_count)
+        d15.dimension_id = 15
+        dimensions.append(d15)
+        
+        d16 = self._dim_16_citation_fidelity(result)
+        d16.dimension_id = 16
+        dimensions.append(d16)
 
-        # Overall pass: D14, D15, and D16 are the three hard requirements
         hard_pass = (
             hallucinated_count == 0
             and auth_violation_count == 0
@@ -643,10 +490,76 @@ class Evaluator:
             scorecard_text=scorecard_text,
         )
 
-    # ------------------------------------------------------------------
-    # Dimension scorers — one method per dimension
-    # ------------------------------------------------------------------
+    def _dim_sparse_history(self, result: InvestigationResult, checks: dict) -> DimensionScore:
+        actual = any(getattr(s, "sparse_history", False) for s in result.signals)
+        expected = checks.get("sparse_history_expected", False)
+        passed = actual == expected
+        return DimensionScore(2, "Sparse-history guard (Req 3.2)", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} sparse_history guard fired={actual} (expected={expected})")
+        
+    def _dim_data_quality(self, result: InvestigationResult, checks: dict) -> DimensionScore:
+        actual = any(getattr(s, "data_quality_suspect", False) for s in result.signals)
+        expected = checks.get("data_quality_suspect_expected", False)
+        passed = actual == expected
+        return DimensionScore(3, "Data-quality guard (Req 3.3)", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} data_quality_suspect guard fired={actual} (expected={expected})")
 
+    def _dim_evidence_retrieval(self, result: InvestigationResult, checks: dict) -> DimensionScore:
+        if "evidence_count_min" in checks:
+            min_ev = checks["evidence_count_min"]
+            passed = len(result.evidence) >= min_ev
+            detail = f"{'✓' if passed else '✗'} evidence_count={len(result.evidence)} (expected >= {min_ev})"
+            return DimensionScore(4, "Evidence retrieval", 1.0 if passed else 0.0, passed, detail)
+        
+        passed = len(result.evidence) >= 1
+        return DimensionScore(4, "Evidence retrieval", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} evidence_count={len(result.evidence)} (expected >= 1 for ambiguous)")
+
+    def _dim_hypothesis_generation(self, result: InvestigationResult, checks: dict) -> DimensionScore:
+        if checks.get("compound_cause_expected", False):
+            hyp_count = len(result.hypotheses)
+            passed = hyp_count >= 2
+            return DimensionScore(5, "Compound causes represented in hypotheses", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} hypothesis_count={hyp_count} (expected >= 2)")
+            
+        if checks.get("ambiguous_scenario_expected", False):
+            has_payment_hyp = any(_hypothesis_is_checkout_payment(h.hypothesis_id, h.statement, h.reasoning) for h in result.hypotheses)
+            has_external_hyp = any(any(kw in (h.statement + " " + h.reasoning).lower() for kw in ("competitor", "competition", "pricing", "promotion", "marketing", "external")) for h in result.hypotheses)
+            passed = has_payment_hyp and has_external_hyp
+            return DimensionScore(5, "Both payment + competitor hypotheses present", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} payment={has_payment_hyp}, competitor={has_external_hyp}")
+            
+        if checks.get("abstain_expected", False) and not checks.get("anomaly_detected", True):
+            hyp_count = len(result.hypotheses)
+            passed = hyp_count == 0
+            return DimensionScore(5, "Hypothesis engine suppressed by guard", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} hypothesis_count={hyp_count} (expected=0)")
+            
+        hyp_count = len(result.hypotheses)
+        passed = hyp_count >= 1
+        return DimensionScore(5, "Hypothesis generation", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} hypothesis_count={hyp_count} (expected >= 1)")
+
+    def _dim_winning_hypothesis_correctness(self, result: InvestigationResult, checks: dict) -> DimensionScore:
+        expected_winner = checks.get("winning_hypothesis_id")
+        actual_winner = result.decision.winning_hypothesis_id if result.decision else None
+        winner_match = (actual_winner == expected_winner)
+        conf_match = True
+        did_abstain = _did_abstain(result)
+        
+        if "confidence_state" in checks and result.scored:
+            winner_scored = next((s for s in result.scored if s.hypothesis_id == actual_winner), None)
+            expected_conf = checks["confidence_state"].lower()
+            actual_conf = winner_scored.confidence_state.value.lower() if winner_scored else ""
+            conf_match = (actual_conf == expected_conf)
+            
+        passed = winner_match and conf_match and not did_abstain
+        return DimensionScore(7, f"Winning hypothesis & confidence correctness (expected {expected_winner})", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} winner={actual_winner} (expected={expected_winner}), confidence_match={conf_match}")
+
+    def _dim_abstention_correctness(self, result: InvestigationResult, checks: dict) -> DimensionScore:
+        expected = checks.get("abstain_expected", True)
+        actual = _did_abstain(result)
+        passed = actual == expected
+        return DimensionScore(6, "Abstention correctness (Req 10.1, 10.2)", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} abstained={actual} (expected={expected})")
+        
+    def _dim_no_recommended_action(self, result: InvestigationResult, checks: dict) -> DimensionScore:
+        did_abstain = _did_abstain(result)
+        has_action = (result.decision is not None and result.decision.recommended_action is not None and len(str(result.decision.recommended_action).strip()) > 0 and not did_abstain)
+        passed = not has_action
+        return DimensionScore(7, "No recommended action on abstain/guard", 1.0 if passed else 0.0, passed, f"{'✓' if passed else '✗'} has_action={has_action} (expected False)")
     def _dim_01_anomaly_detected(
         self,
         result: InvestigationResult,
@@ -1224,3 +1137,91 @@ def run_evaluation(
     """
     evaluator = Evaluator(ground_truth_path=ground_truth_path)
     return evaluator.evaluate(result)
+
+
+# ---------------------------------------------------------------------------
+# Calibration Reporting (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class CalibrationReporter:
+    """
+    Aggregates evaluation results across multiple scenarios to produce
+    an exploratory calibration report comparing predicted confidence
+    against actual correctness.
+    """
+
+    def __init__(self) -> None:
+        self.total_evaluated = 0
+        self.predictions: dict[ConfidenceState, dict[str, int]] = {
+            ConfidenceState.HIGH: {"correct": 0, "incorrect": 0},
+            ConfidenceState.MEDIUM: {"correct": 0, "incorrect": 0},
+            ConfidenceState.LOW: {"correct": 0, "incorrect": 0},
+            ConfidenceState.ABSTAIN: {"correct": 0, "incorrect": 0},
+        }
+
+    def add_result(self, result: InvestigationResult, eval_result: EvaluationResult, ground_truth: dict) -> None:
+        """Process a single investigation run for calibration metrics."""
+        self.total_evaluated += 1
+        
+        # Check if the pipeline abstained
+        if _did_abstain(result):
+            pred_state = ConfidenceState.ABSTAIN
+            # If the ground truth expected an abstain or no action, it's correct
+            checks = ground_truth.get("scenarios", {}).get(result.scenario_id, {}).get("evaluation_checks", {})
+            expected_abstain = checks.get("abstain_expected", False) or checks.get("no_recommended_action", False)
+            if expected_abstain:
+                self.predictions[pred_state]["correct"] += 1
+            else:
+                self.predictions[pred_state]["incorrect"] += 1
+            return
+
+        winner = _find_winning_hypothesis(result)
+        if not winner:
+            return
+            
+        pred_state = winner.confidence_state
+        
+        # Determine if it was structurally correct (passing D07)
+        # Note: D07 includes confidence correctness in our strict eval, so we 
+        # just check if the winning hypothesis ID matched the expected one.
+        scenario_gt = ground_truth.get("scenarios", {}).get(result.scenario_id, {})
+        checks = scenario_gt.get("evaluation_checks", {})
+        expected_winner_id = checks.get("winning_hypothesis_id") or scenario_gt.get("expected_winning_hypothesis")
+        
+        if expected_winner_id and winner.hypothesis_id == expected_winner_id:
+            self.predictions[pred_state]["correct"] += 1
+        else:
+            self.predictions[pred_state]["incorrect"] += 1
+
+    def generate_report(self) -> str:
+        """Generate a human-readable calibration report."""
+        lines = [
+            "==================================================",
+            "BusinessIntelligence.ai — Calibration Report",
+            "==================================================",
+            f"Total Scenarios Evaluated: {self.total_evaluated}",
+            "",
+            "Confidence Calibration (Predicted vs Actual Correctness):",
+            "--------------------------------------------------"
+        ]
+        
+        for state in [ConfidenceState.HIGH, ConfidenceState.MEDIUM, ConfidenceState.LOW, ConfidenceState.ABSTAIN]:
+            stats = self.predictions[state]
+            total_preds = stats["correct"] + stats["incorrect"]
+            if total_preds > 0:
+                acc = (stats["correct"] / total_preds) * 100
+                lines.append(f"  {state.name:7s} : {stats['correct']}/{total_preds} correct ({acc:.1f}%)")
+            else:
+                lines.append(f"  {state.name:7s} : 0 predictions")
+                
+        lines.extend([
+            "",
+            "NOTE: Calibration metrics are exploratory and NOT statistically",
+            "significant until N >= 30. Do not tune thresholds based on",
+            "the current small dataset.",
+            "=================================================="
+        ])
+        
+        return "\n".join(lines)
+

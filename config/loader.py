@@ -271,3 +271,73 @@ def load_sources(path: str | Path) -> list[dict]:
                 )
 
     return sources
+
+
+def load_memory_retention(path: str | Path) -> dict:
+    """
+    Load and validate memory_retention.yaml (ISSUE-002 Phase 4).
+
+    Top-level required key: retention (a mapping)
+    Required sub-key: default_ttl_days (positive integer)
+    Optional sub-key: by_source (list of {source_id, ttl_days} mappings)
+
+    Returns a flattened lookup dict::
+
+        {
+            "default_ttl_days": int,
+            "by_source": { source_id: ttl_days, ... }
+        }
+
+    Raises ConfigError on any violation.
+    """
+    ARTIFACT = "memory_retention.yaml"
+    data = _load_yaml(path, ARTIFACT)
+
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"[{ARTIFACT}] Top level must be a YAML mapping."
+        )
+
+    _require(data, "retention", ARTIFACT)
+    retention = data["retention"]
+
+    if not isinstance(retention, dict):
+        raise ConfigError(
+            f"[{ARTIFACT}] 'retention' must be a YAML mapping."
+        )
+
+    _require(retention, "default_ttl_days", ARTIFACT, context="retention")
+    default_ttl = retention["default_ttl_days"]
+    if not isinstance(default_ttl, (int, float)) or int(default_ttl) <= 0:
+        raise ConfigError(
+            f"[{ARTIFACT}] 'default_ttl_days' must be a positive integer "
+            f"(in retention); got {default_ttl!r}."
+        )
+
+    by_source_lookup: dict[str, int] = {}
+    by_source_list = retention.get("by_source")
+    if by_source_list is not None:
+        if not isinstance(by_source_list, list):
+            raise ConfigError(
+                f"[{ARTIFACT}] 'by_source' must be a list (in retention)."
+            )
+        for i, entry in enumerate(by_source_list):
+            if not isinstance(entry, dict):
+                raise ConfigError(
+                    f"[{ARTIFACT}] by_source[{i}] must be a YAML mapping."
+                )
+            ctx = f"by_source[{i}]"
+            _require(entry, "source_id", ARTIFACT, context=ctx)
+            _require(entry, "ttl_days", ARTIFACT, context=ctx)
+            ttl = entry["ttl_days"]
+            if not isinstance(ttl, (int, float)) or int(ttl) <= 0:
+                raise ConfigError(
+                    f"[{ARTIFACT}] 'ttl_days' must be a positive integer "
+                    f"({ctx}); got {ttl!r}."
+                )
+            by_source_lookup[entry["source_id"]] = int(ttl)
+
+    return {
+        "default_ttl_days": int(default_ttl),
+        "by_source": by_source_lookup,
+    }

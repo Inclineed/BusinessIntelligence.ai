@@ -303,6 +303,7 @@ def investigate(
         "INC_005": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0)),
         "INC_006": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0)),
         "INC_007": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 16, 12, 0, 0)),
+        "INC_008": (datetime(2024, 2, 2, 0, 0, 0), datetime(2024, 2, 10, 18, 0, 0)),
     }
     _ws_default, _we_default = _SCENARIO_WINDOWS.get(
         scenario_id, (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0))

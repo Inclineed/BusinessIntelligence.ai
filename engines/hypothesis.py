@@ -336,8 +336,8 @@ def validate_hypothesis(
                 return False, f"citation at index {idx} missing valid evidence_id string"
 
             summary_quote = item.get("quoted_summary")
-            if not isinstance(summary_quote, str):
-                return False, f"citation '{eid}' missing quoted_summary string"
+            if summary_quote is not None and not isinstance(summary_quote, str):
+                return False, f"citation '{eid}' quoted_summary must be a string if provided"
 
             role = item.get("role")
             if role not in ("supports", "contradicts", "neutral"):

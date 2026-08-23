@@ -17,7 +17,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from models import (
@@ -48,6 +48,11 @@ RETRIEVAL_WEIGHTS: dict[ConfidenceState, float] = {
     ConfidenceState.ABSTAIN: 0.2,
     ConfidenceState.LOW: 0.1,
 }
+
+# Retrieval score boost for human-validated precedents (ISSUE-002 Phase 3)
+# Applied additively after confidence weighting; ensures human-validated
+# precedents rank above unvalidated ones when otherwise comparable.
+HUMAN_VALIDATION_BOOST: float = 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +325,9 @@ class MemoryEngine:
                 "timestamp": iso_now,
                 "evidence_ids": evidence_ids_str,
                 "summary": summary[:1000],  # stored for retrieval result
+                # ISSUE-002 Phase 3 — Human validation provenance
+                "human_validated": False,
+                "validated_at": "",
             }
 
             # 4. Upsert into ChromaDB
@@ -422,6 +430,60 @@ class MemoryEngine:
         return {"succeeded": succeeded, "failed": failed}
 
     # ------------------------------------------------------------------
+    # mark_validated — ISSUE-002 Phase 3
+    # ------------------------------------------------------------------
+
+    def mark_validated(
+        self,
+        scenario_id: str,
+        validated_at: Optional[datetime] = None,
+    ) -> bool:
+        """
+        Mark an existing precedent as human-validated.
+
+        Updates the ChromaDB record's metadata to set human_validated=True
+        and validated_at to the given (or current UTC) ISO timestamp.
+
+        Does NOT alter confidence_state or original_confidence_state.
+
+        Returns True on success, False if the record is not found or update fails.
+        """
+        try:
+            collection = self._get_or_create_collection()
+            # Retrieve existing record
+            existing = collection.get(ids=[scenario_id], include=["metadatas"])
+            if not existing or not existing.get("ids") or len(existing["ids"]) == 0:
+                logger.warning(
+                    "mark_validated: no precedent found for scenario=%s.",
+                    scenario_id,
+                )
+                return False
+
+            meta = (existing.get("metadatas") or [{}])[0] or {}
+            ts = (validated_at or datetime.now(tz=timezone.utc)).isoformat()
+            meta["human_validated"] = True
+            meta["validated_at"] = ts
+
+            collection.update(
+                ids=[scenario_id],
+                metadatas=[meta],
+            )
+            logger.info(
+                "mark_validated: scenario=%s marked as human-validated at %s.",
+                scenario_id,
+                ts,
+            )
+            return True
+
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "mark_validated: failed for scenario=%s: %s",
+                scenario_id,
+                exc,
+            )
+            return False
+
+    # ------------------------------------------------------------------
     # retrieve_precedents
     # ------------------------------------------------------------------
 
@@ -430,6 +492,7 @@ class MemoryEngine:
         scenario_id: str,
         query_context: str = "",
         include_simulated: bool = False,
+        retention_config: Optional[dict] = None,
     ) -> list[dict]:
         """
         Retrieve up to MAX_RESULTS precedents with relevance ≥ RELEVANCE_THRESHOLD.
@@ -457,6 +520,8 @@ class MemoryEngine:
             timestamp         : str (ISO-8601)
             created_at        : str (ISO-8601)
             evidence_ids      : str
+            human_validated   : bool
+            validated_at      : str (ISO-8601 or empty)
             method            : MethodTag.RETRIEVAL
 
         Returns an empty list with an indication log when no relevant
@@ -536,6 +601,43 @@ class MemoryEngine:
             if relevance < self.RELEVANCE_THRESHOLD:
                 continue
 
+            # ---- Phase 4: Domain-specific expiry filtering ----
+            if retention_config is not None:
+                created_at_str = meta.get("created_at", "")
+                if created_at_str:
+                    try:
+                        created_dt = datetime.fromisoformat(created_at_str)
+                        if created_dt.tzinfo is None:
+                            created_dt = created_dt.replace(tzinfo=timezone.utc)
+                        # Look up TTL: try source_id from metadata, fall back to default
+                        source_id = meta.get("source_id", "")
+                        by_source = retention_config.get("by_source", {})
+                        ttl_days = by_source.get(source_id, retention_config.get("default_ttl_days", 90))
+                        expiry_dt = created_dt + timedelta(days=ttl_days)
+                        if datetime.now(tz=timezone.utc) > expiry_dt:
+                            logger.debug(
+                                "retrieve_precedents: filtering expired precedent %s "
+                                "(created=%s, ttl=%d days).",
+                                doc_id, created_at_str, ttl_days,
+                            )
+                            continue
+                    except (ValueError, TypeError):
+                        # Malformed created_at — treat as expired (safe default)
+                        logger.warning(
+                            "retrieve_precedents: malformed created_at for %s; "
+                            "filtering as expired.",
+                            doc_id,
+                        )
+                        continue
+                else:
+                    # No created_at at all — treat as expired (safe default)
+                    logger.warning(
+                        "retrieve_precedents: missing created_at for %s; "
+                        "filtering as expired.",
+                        doc_id,
+                    )
+                    continue
+
             conf_state_str = meta.get("confidence_state") or meta.get("original_confidence_state") or ""
             try:
                 conf_state = ConfidenceState(conf_state_str.lower()) if conf_state_str else None
@@ -545,6 +647,14 @@ class MemoryEngine:
                 conf_state = None
 
             retrieval_score = round(relevance * conf_weight, 4)
+
+            # ---- Phase 3: Human validation boost ----
+            is_human_validated = meta.get("human_validated", False)
+            # ChromaDB may store booleans as strings
+            if isinstance(is_human_validated, str):
+                is_human_validated = is_human_validated.lower() in ("true", "1")
+            if is_human_validated:
+                retrieval_score = round(retrieval_score + HUMAN_VALIDATION_BOOST, 4)
 
             precedent: dict = {
                 "scenario_id": meta.get("scenario_id", doc_id),
@@ -560,6 +670,9 @@ class MemoryEngine:
                 "timestamp": meta.get("timestamp", ""),
                 "created_at": meta.get("created_at", meta.get("timestamp", "")),
                 "evidence_ids": meta.get("evidence_ids", ""),
+                # ISSUE-002 Phase 3 — Human validation provenance
+                "human_validated": bool(is_human_validated),
+                "validated_at": meta.get("validated_at", ""),
                 # Requirement 15.5 — stamp with RETRIEVAL
                 "method": MethodTag.RETRIEVAL,
             }

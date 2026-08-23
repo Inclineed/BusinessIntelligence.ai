@@ -504,16 +504,43 @@ def _assemble_unstructured(
         return items, dropped
 
     try:
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=5,
-            where=where_filter,
-            include=["documents", "metadatas", "distances"],
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "_assemble_unstructured: ChromaDB query failed: %s", exc
-        )
+        count = collection.count()
+        if isinstance(count, int):
+            if count == 0:
+                return items, dropped
+            n_results = min(5, count)
+        else:
+            n_results = 5
+    except Exception:
+        n_results = 5
+
+    results = None
+    for k in range(n_results, 0, -1):
+        try:
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=k,
+                where=where_filter,
+                include=["documents", "metadatas", "distances"],
+            )
+            break
+        except Exception:
+            continue
+
+    if results is None:
+        try:
+            get_res = collection.get(where=where_filter, limit=n_results, include=["documents", "metadatas"])
+            if get_res and get_res.get("ids"):
+                results = {
+                    "ids": [get_res["ids"]],
+                    "documents": [get_res.get("documents", [])],
+                    "metadatas": [get_res.get("metadatas", [])],
+                    "distances": [[0.1] * len(get_res["ids"])],
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("_assemble_unstructured: ChromaDB query fallback failed: %s", exc)
+
+    if not results:
         return items, dropped
 
     documents = results.get("documents", [[]])[0]

@@ -1,8 +1,8 @@
 # ISSUE-002: Memory Contamination — Self-Reinforcing Error Loop in E9 → E4
 
 **Severity**: 🔴 Critical — Structural / Correctness  
-**Status**: Phase 1 & 2 Implemented & Verified (Commit `PR-002-phase1-phase2`)  
-**Affects**: `engines/memory.py` (E9), `engines/evidence.py` (E4), `pipeline/investigate.py`, `tests/test_memory.py`
+**Status**: Phase 1–4 Implemented & Verified  
+**Affects**: `engines/memory.py` (E9), `engines/evidence.py` (E4), `config/memory_retention.yaml`, `config/loader.py`, `pipeline/investigate.py`, `tests/test_memory.py`
 
 ---
 

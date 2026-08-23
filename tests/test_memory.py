@@ -769,3 +769,347 @@ class TestMemoryContaminationRemediation:
         collection.query.assert_called_once()
         assert collection.query.call_args.kwargs.get("where") == {"outcome_type": "observed"}
 
+
+# ---------------------------------------------------------------------------
+# ISSUE-002 Phase 3 — Human Validation Provenance Tests
+# ---------------------------------------------------------------------------
+
+class TestPhase3HumanValidation:
+    """Tests L–P for ISSUE-002 Phase 3: Human Validation Provenance."""
+
+    def setup_method(self):
+        self.provider = _make_llm_provider("Investigation summary.")
+
+    def _make_result_with_state(self, scenario_id: str, state: ConfidenceState) -> InvestigationResult:
+        abstained = (state == ConfidenceState.ABSTAIN)
+        decision = Decision(
+            abstained=abstained,
+            recommended_action=None if abstained else "Action",
+            verification_metric="metric",
+            winning_hypothesis_id=None if abstained else "H1",
+            persona_narrative="Narrative",
+        )
+        scored = [
+            ScoredHypothesis(
+                hypothesis_id="H1",
+                final_score=0.9 if state == ConfidenceState.HIGH else 0.5,
+                confidence_state=state,
+            )
+        ]
+        return InvestigationResult(
+            scenario_id=scenario_id,
+            persona=Persona.ANALYST,
+            decision=decision,
+            scored=scored,
+            telemetry=Telemetry(),
+        )
+
+    def test_l_stored_precedents_default_to_unvalidated(self):
+        """Test L: Stored precedents default to human_validated=False, validated_at=''."""
+        chroma = _make_chroma_client()
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = self._make_result_with_state("INC_VAL_L", ConfidenceState.HIGH)
+        assert engine.store_precedent(res) is True
+        col = chroma.get_or_create_collection.return_value
+        meta = col.upsert.call_args.kwargs["metadatas"][0]
+        assert meta["human_validated"] is False
+        assert meta["validated_at"] == ""
+
+    def test_m_mark_validated_updates_metadata_without_changing_confidence(self):
+        """Test M: mark_validated() updates human_validated without altering confidence."""
+        chroma = _make_chroma_client()
+        collection = chroma.get_or_create_collection.return_value
+        # Simulate existing record
+        collection.get.return_value = {
+            "ids": ["INC_VAL_M"],
+            "metadatas": [{
+                "scenario_id": "INC_VAL_M",
+                "confidence_state": "high",
+                "original_confidence_state": "high",
+                "human_validated": False,
+                "validated_at": "",
+            }],
+        }
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        from datetime import datetime, timezone
+        ts = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        assert engine.mark_validated("INC_VAL_M", validated_at=ts) is True
+
+        updated_meta = collection.update.call_args.kwargs["metadatas"][0]
+        assert updated_meta["human_validated"] is True
+        assert updated_meta["validated_at"] == ts.isoformat()
+        # Confidence NOT altered
+        assert updated_meta["confidence_state"] == "high"
+        assert updated_meta["original_confidence_state"] == "high"
+
+    def test_n_human_validated_ranks_higher_than_unvalidated(self):
+        """Test N: Human-validated precedent ranks above unvalidated with identical relevance/confidence."""
+        chroma = _make_chroma_client(
+            count=2,
+            query_ids=["VALIDATED", "UNVALIDATED"],
+            query_distances=[0.2, 0.2],  # identical relevance = 0.9
+            query_metadatas=[
+                {
+                    "scenario_id": "VALIDATED",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "human_validated": True,
+                    "validated_at": "2026-06-01T00:00:00+00:00",
+                },
+                {
+                    "scenario_id": "UNVALIDATED",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "human_validated": False,
+                    "validated_at": "",
+                },
+            ],
+            query_documents=["Validated summary.", "Unvalidated summary."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("QUERY")
+        assert len(results) == 2
+        assert results[0]["scenario_id"] == "VALIDATED"
+        assert results[0]["human_validated"] is True
+        assert results[1]["scenario_id"] == "UNVALIDATED"
+        assert results[1]["human_validated"] is False
+        assert results[0]["retrieval_score"] > results[1]["retrieval_score"]
+
+    def test_o_unvalidated_high_distinguishable_from_validated_high(self):
+        """Test O: Unvalidated HIGH precedents remain distinguishable from human-confirmed HIGH."""
+        chroma = _make_chroma_client(
+            count=2,
+            query_ids=["HV_HIGH", "UV_HIGH"],
+            query_distances=[0.2, 0.2],
+            query_metadatas=[
+                {
+                    "scenario_id": "HV_HIGH",
+                    "confidence_state": "high",
+                    "original_confidence_state": "high",
+                    "outcome_type": "observed",
+                    "human_validated": True,
+                    "validated_at": "2026-06-01T00:00:00+00:00",
+                },
+                {
+                    "scenario_id": "UV_HIGH",
+                    "confidence_state": "high",
+                    "original_confidence_state": "high",
+                    "outcome_type": "observed",
+                    "human_validated": False,
+                    "validated_at": "",
+                },
+            ],
+            query_documents=["HV.", "UV."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("QUERY")
+        hv = next(r for r in results if r["scenario_id"] == "HV_HIGH")
+        uv = next(r for r in results if r["scenario_id"] == "UV_HIGH")
+        # Both are HIGH confidence, but distinguishable by human_validated
+        assert hv["confidence_state"] == uv["confidence_state"] == "high"
+        assert hv["human_validated"] is True
+        assert uv["human_validated"] is False
+        # Scores differ due to validation boost
+        assert hv["retrieval_score"] != uv["retrieval_score"]
+
+    def test_p_legacy_records_missing_human_validated_default_to_false(self):
+        """Test P: Legacy records without human_validated field default to False on retrieval."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["LEGACY_P"],
+            query_distances=[0.2],
+            query_metadatas=[{
+                "scenario_id": "LEGACY_P",
+                "confidence_state": "high",
+                "outcome_type": "observed",
+                # No human_validated or validated_at keys
+            }],
+            query_documents=["Legacy record."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("QUERY")
+        assert len(results) == 1
+        assert results[0]["human_validated"] is False
+        assert results[0]["validated_at"] == ""
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-002 Phase 4 — Domain-Specific Expiry Tests
+# ---------------------------------------------------------------------------
+
+class TestPhase4DomainExpiry:
+    """Tests Q–U for ISSUE-002 Phase 4: Domain-Specific Expiry."""
+
+    def setup_method(self):
+        self.provider = _make_llm_provider("Investigation summary.")
+        self.retention_config = {
+            "default_ttl_days": 90,
+            "by_source": {
+                "payment_gateway": 60,
+                "marketing": 30,
+                "deployment_log": 365,
+            },
+        }
+
+    def test_q_unexpired_precedent_with_source_ttl_is_returned(self):
+        """Test Q: Precedent within its source-specific TTL is returned normally."""
+        from datetime import datetime, timezone, timedelta
+        recent = (datetime.now(tz=timezone.utc) - timedelta(days=10)).isoformat()
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["RECENT_Q"],
+            query_distances=[0.2],
+            query_metadatas=[{
+                "scenario_id": "RECENT_Q",
+                "confidence_state": "high",
+                "outcome_type": "observed",
+                "created_at": recent,
+                "source_id": "payment_gateway",
+            }],
+            query_documents=["Recent payment gateway precedent."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents(
+            "QUERY", retention_config=self.retention_config
+        )
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "RECENT_Q"
+
+    def test_r_expired_precedent_with_source_ttl_is_filtered(self):
+        """Test R: Precedent beyond its source-specific TTL is filtered out."""
+        from datetime import datetime, timezone, timedelta
+        old = (datetime.now(tz=timezone.utc) - timedelta(days=100)).isoformat()
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["OLD_R"],
+            query_distances=[0.2],
+            query_metadatas=[{
+                "scenario_id": "OLD_R",
+                "confidence_state": "high",
+                "outcome_type": "observed",
+                "created_at": old,
+                "source_id": "payment_gateway",  # TTL = 60 days
+            }],
+            query_documents=["Old payment gateway precedent."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents(
+            "QUERY", retention_config=self.retention_config
+        )
+        assert len(results) == 0
+
+    def test_s_different_sources_different_ttls(self):
+        """Test S: Only the source whose TTL has elapsed is filtered; the other remains."""
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(tz=timezone.utc)
+        # marketing TTL=30 days, created 40 days ago → expired
+        marketing_ts = (now - timedelta(days=40)).isoformat()
+        # deployment_log TTL=365 days, created 40 days ago → valid
+        deploy_ts = (now - timedelta(days=40)).isoformat()
+
+        chroma = _make_chroma_client(
+            count=2,
+            query_ids=["MKTG_S", "DEPLOY_S"],
+            query_distances=[0.2, 0.2],
+            query_metadatas=[
+                {
+                    "scenario_id": "MKTG_S",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "created_at": marketing_ts,
+                    "source_id": "marketing",
+                },
+                {
+                    "scenario_id": "DEPLOY_S",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "created_at": deploy_ts,
+                    "source_id": "deployment_log",
+                },
+            ],
+            query_documents=["Marketing.", "Deploy."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents(
+            "QUERY", retention_config=self.retention_config
+        )
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "DEPLOY_S"
+
+    def test_t_precedent_without_created_at_treated_as_expired(self):
+        """Test T: Precedent with missing created_at is safely filtered when retention is active."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["NO_TS_T"],
+            query_distances=[0.2],
+            query_metadatas=[{
+                "scenario_id": "NO_TS_T",
+                "confidence_state": "high",
+                "outcome_type": "observed",
+                # No created_at key
+            }],
+            query_documents=["No timestamp."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents(
+            "QUERY", retention_config=self.retention_config
+        )
+        assert len(results) == 0
+
+    def test_u_load_memory_retention_validates_schema(self):
+        """Test U: load_memory_retention raises ConfigError on invalid schema."""
+        import tempfile, os, yaml
+        from config.loader import load_memory_retention, ConfigError
+
+        # Missing default_ttl_days
+        bad_config = {"retention": {"by_source": []}}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+            yaml.dump(bad_config, f)
+            bad_path = f.name
+        try:
+            with pytest.raises(ConfigError, match="default_ttl_days"):
+                load_memory_retention(bad_path)
+        finally:
+            os.unlink(bad_path)
+
+        # Valid config
+        good_config = {
+            "retention": {
+                "default_ttl_days": 90,
+                "by_source": [
+                    {"source_id": "orders", "ttl_days": 120},
+                ],
+            }
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+            yaml.dump(good_config, f)
+            good_path = f.name
+        try:
+            result = load_memory_retention(good_path)
+            assert result["default_ttl_days"] == 90
+            assert result["by_source"]["orders"] == 120
+        finally:
+            os.unlink(good_path)
+
+    def test_v_no_expiry_filtering_when_retention_config_is_none(self):
+        """Test V: Without retention_config, no expiry filtering occurs (backwards compatible)."""
+        from datetime import datetime, timezone, timedelta
+        very_old = (datetime.now(tz=timezone.utc) - timedelta(days=9999)).isoformat()
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["ANCIENT_V"],
+            query_distances=[0.2],
+            query_metadatas=[{
+                "scenario_id": "ANCIENT_V",
+                "confidence_state": "high",
+                "outcome_type": "observed",
+                "created_at": very_old,
+            }],
+            query_documents=["Ancient record."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        # No retention_config → no filtering
+        results = engine.retrieve_precedents("QUERY", retention_config=None)
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "ANCIENT_V"
+

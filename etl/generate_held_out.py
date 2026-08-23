@@ -274,7 +274,80 @@ def generate_inc007_data(rng: np.random.Generator):
 
 
 # ===========================================================================
-# 4. ChromaDB Evidence Seeding
+# 4. INC_008 — B2B SaaS Churn / SSO Integration Failure
+# ===========================================================================
+INC_008_START = datetime(2024, 2, 2, 0, 0, 0, tzinfo=timezone.utc)
+INC_008_END   = datetime(2024, 2, 10, 23, 59, 59, tzinfo=timezone.utc)
+INC_008_ANOMALY_START = datetime(2024, 2, 10, 14, 0, 0, tzinfo=timezone.utc)
+INC_008_ANOMALY_END   = datetime(2024, 2, 10, 18, 0, 0, tzinfo=timezone.utc)
+
+def generate_inc008_data(rng: np.random.Generator):
+    orders = []
+    payments = []
+    current = INC_008_START
+    txn_id = 1
+    event_id = 1
+
+    devices = ["android", "ios", "desktop"]
+    dev_weights = [0.40, 0.35, 0.25]
+
+    while current <= INC_008_END:
+        in_anomaly = (INC_008_ANOMALY_START <= current <= INC_008_ANOMALY_END)
+
+        for _ in range(100):
+            dev = rng.choice(devices, p=dev_weights)
+            chan = "app" if dev in ("android", "ios") and rng.random() < 0.85 else "web"
+
+            conv_prob = 0.55 if in_anomaly else 0.70
+            is_conv = bool(rng.random() < conv_prob)
+            rev = round(float(rng.normal(85.0, 20.0)), 2) if is_conv else 0.0
+
+            orders.append({
+                "transaction_id": f"INC_008_TXN_{txn_id:07d}",
+                "scenario_id": "INC_008",
+                "ts": _utc_iso(current + timedelta(minutes=int(rng.integers(0, 60)))),
+                "store_id": "STORE_001",
+                "device": dev,
+                "channel": chan,
+                "revenue": rev,
+                "conversion": is_conv,
+                "aov": rev if is_conv else 85.0,
+            })
+            txn_id += 1
+
+        for _ in range(40):
+            fail_prob = 0.35 if in_anomaly else 0.01
+            is_succ = bool(rng.random() > fail_prob)
+            lat = int(rng.normal(480, 50)) if in_anomaly else int(rng.normal(120, 15))
+            err = "SSO_OKTA_AUTH_FAILURE" if (in_anomaly and not is_succ) else (None if is_succ else "PAYMENT_FAILED")
+
+            payments.append({
+                "event_id": f"INC_008_PAY_{event_id:07d}",
+                "scenario_id": "INC_008",
+                "ts": _utc_iso(current + timedelta(minutes=int(rng.integers(0, 60)))),
+                "gateway": "okta_sso",
+                "success": is_succ,
+                "latency_ms": max(50, lat),
+                "error_code": err,
+            })
+            event_id += 1
+
+        current += timedelta(hours=1)
+
+    deployment = pd.DataFrame([{
+        "deploy_id": "INC_008_DEP_001",
+        "scenario_id": "INC_008",
+        "ts": "2024-02-10T13:30:00+00:00",
+        "version": "v2.4.0",
+        "component": "sso-auth-service",
+        "notes": "Deployed v2.4.0 auth update introducing SAML SSO integration changes for Okta.",
+    }])
+
+    return pd.DataFrame(orders), pd.DataFrame(payments), deployment
+
+
+# ===========================================================================
+# 5. ChromaDB Evidence Seeding
 # ===========================================================================
 HELD_OUT_EVIDENCE = {
     "INC_005": [
@@ -291,6 +364,11 @@ HELD_OUT_EVIDENCE = {
         ("deployment_log", "DEP_mem_1", "Worker process memory leak: heap allocation increased monotonically from 450MB to 3.8GB over 48 hours following the Jan 14 11:30 deployment."),
         ("payment_gateway", "PAY_lat_1", "Gateway latency exhibited steady gradual drift over 48 hours with average response time rising from 180ms to over 500ms and GC pause frequency spiking."),
         ("orders", "ORD_drift_1", "Conversion rate showed progressive multi-day downward drift across all checkout channels as transaction timeout rates crept upward."),
+    ],
+    "INC_008": [
+        ("deployment_log", "DEP_sso_1", "SSO auth service v2.4.0 deployed at 13:30 UTC introduced an authentication token parsing bug breaking Okta SAML SSO login for Enterprise tier users."),
+        ("payment_gateway", "PAY_sso_1", "SSO failure rate spiked to 94% on Okta auth provider links following v2.4.0 deployment, causing Enterprise subscription cancellations."),
+        ("support_tickets", "SUP_sso_1", "Zendesk support tickets surged with Enterprise admins complaining about being unable to log in via Okta SSO."),
     ],
 }
 
@@ -362,6 +440,11 @@ def main():
     print("\n--- Generating INC_007 (Gradual Degradation) ---")
     df_ord7, df_pay7, df_dep7 = generate_inc007_data(rng)
     load_postgres(conn, df_ord7, df_pay7, df_dep7)
+
+    # 4. INC_008
+    print("\n--- Generating INC_008 (B2B SaaS Churn / SSO Failure) ---")
+    df_ord8, df_pay8, df_dep8 = generate_inc008_data(rng)
+    load_postgres(conn, df_ord8, df_pay8, df_dep8)
 
     # 4. ChromaDB Seeding
     print("\n--- Seeding ChromaDB Evidence Collections ---")

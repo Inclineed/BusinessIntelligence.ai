@@ -107,6 +107,9 @@
       },
       "evaluation_checks": {
         "anomaly_detected": true,
+        "abstain_expected": false,
+        "compound_cause_expected": false,
+        "winning_hypothesis_id": "H1",
         "affected_kpis_expected": [
           "hourly_revenue",
           "hourly_conversion",
@@ -164,7 +167,9 @@
         "abstain_expected": true,
         "anomaly_detected": true,
         "h1_h2_gap_too_small": true,
-        "no_recommended_action": true
+        "no_recommended_action": true,
+        "ambiguous_scenario_expected": true,
+        "evidence_count_min": 1
       }
     },
     "INC_003": {
@@ -294,6 +299,38 @@
         "winning_hypothesis_id": "H1",
         "confidence_state": "HIGH",
         "gradual_degradation_expected": true
+      }
+    },
+    "INC_008": {
+      "scenario_id": "INC_008",
+      "name": "B2B SaaS Subscription Churn Spike",
+      "true_cause": "A broken SSO integration in the v2.4.0 release prevented Enterprise users from logging in, leading them to cancel their subscriptions.",
+      "affected_kpi": [
+        "daily_churn_rate",
+        "sso_failure_rate_1h"
+      ],
+      "affected_dimensions": {
+        "plan_tier": "enterprise",
+        "auth_provider": "okta"
+      },
+      "anomaly_window": {
+        "start": "2024-02-10T14:00:00+00:00",
+        "end": "2024-02-10T18:00:00+00:00"
+      },
+      "expected_confidence_state": "HIGH",
+      "expected_winning_hypothesis": "H1",
+      "expected_hypotheses": {
+        "H1": {
+          "label": "Broken SSO integration causing login failures and churn",
+          "expected_confidence_state": "HIGH",
+          "must_be_winner": true
+        }
+      },
+      "evaluation_checks": {
+        "anomaly_detected": true,
+        "abstain_expected": false,
+        "winning_hypothesis_id": "H1",
+        "confidence_state": "HIGH"
       }
     }
   },

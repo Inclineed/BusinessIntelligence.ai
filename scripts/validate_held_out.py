@@ -47,7 +47,7 @@ def main():
     llm_provider = OllamaProvider()
     evaluator = Evaluator()
 
-    scenarios = ["INC_005", "INC_006", "INC_007"]
+    scenarios = ["INC_005", "INC_006", "INC_007", "INC_008"]
 
     for sc_id in scenarios:
         print(f"\n" + "=" * 50)
