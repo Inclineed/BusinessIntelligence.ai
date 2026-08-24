@@ -777,3 +777,35 @@ async def get_feedback_for_scenario(scenario_id: str, request: Request) -> JSONR
         except Exception:  # noqa: BLE001
             pass
         raise HTTPException(status_code=500, detail="Failed to retrieve feedback")
+
+
+# ---------------------------------------------------------------------------
+# GET /evaluation/health — Continuous Evaluation & Drift Monitoring (Round 2)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/evaluation/health")
+async def get_system_health(request: Request) -> JSONResponse:
+    """
+    On-demand Continuous Evaluation & Drift Monitoring health check.
+
+    Computes the 6 core operational health metrics across recent vs baseline
+    investigation windows from PostgreSQL and reports system health status:
+    HEALTHY, WATCH, DEGRADED, or INSUFFICIENT_DATA.
+    """
+    state = request.app.state
+    if state.db_conn is None:
+        raise HTTPException(status_code=503, detail="Database connection unavailable")
+
+    try:
+        from evaluation.health import HealthMonitorService
+        report = HealthMonitorService.evaluate_health(state.db_conn)
+        return JSONResponse(content=report.to_dict())
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/evaluation/health: evaluation failed: %s", exc)
+        try:
+            state.db_conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        raise HTTPException(status_code=500, detail=f"Health evaluation failed: {exc}")
+

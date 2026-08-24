@@ -4,6 +4,7 @@ import { submitStructuredFeedback, getFeedbackForScenario } from "../../lib/api"
 import { SCENARIO_CATALOG } from "../../lib/defaultData"
 import { formatMetricValue, formatDelta, formatZScore } from "../../lib/utils"
 import { ScenarioSelector, PersonaSelector, RegionSelector } from "./ScenarioSelector"
+import { SystemHealthModal } from "./SystemHealthModal"
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -94,6 +95,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   const [activeEvidenceModal, setActiveEvidenceModal] = useState<EvidenceItem | null>(null)
   const [activePrecedentModal, setActivePrecedentModal] = useState<PrecedentItem | null>(null)
   const [showTelemetryDrawer, setShowTelemetryDrawer] = useState(false)
+  const [showHealthModal, setShowHealthModal] = useState(false)
 
   // ── Round 2 Feedback State ──────────────────────────────────────────
   const [feedbackVerdict, setFeedbackVerdict] = useState<FeedbackVerdict | null>(null)
@@ -416,6 +418,13 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
           <div className="hidden md:flex items-center gap-5 text-xs text-neutral-400 font-medium">
             <span className="text-white font-semibold border-b-2 border-emerald-500 pb-4 pt-4">Investigation Story</span>
+            <button 
+              onClick={() => setShowHealthModal(true)} 
+              className="hover:text-white cursor-pointer transition-colors pb-4 pt-4 flex items-center gap-1.5 text-xs text-neutral-400 font-medium"
+            >
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              <span>System Health & Drift</span>
+            </button>
             <span onClick={() => setShowTelemetryDrawer(true)} className="hover:text-white cursor-pointer transition-colors pb-4 pt-4 flex items-center gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-neutral-400" />
               <span>Audit & Telemetry</span>
@@ -1962,6 +1971,9 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           </div>
         </div>
       )}
+
+      {/* ── System Health & Drift Monitoring Modal ─────────────────── */}
+      <SystemHealthModal isOpen={showHealthModal} onClose={() => setShowHealthModal(false)} />
     </div>
   )
 }

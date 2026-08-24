@@ -159,3 +159,32 @@ the current small dataset.
 **What the Evaluator Does Not Prove (Current Limitations)**:
 - **Statistical Calibration**: An evaluation set of $N=8$ is exploratory. True statistical confidence calibration requires $N \ge 30$ and formal calibration metrics; the current report only shows confidence label agreement.
 - **Deep Domain Semantic Validity**: Passing all dimensions proves that citations match and scores are mathematically correct; verifying whether the LLM's natural language prose makes sound business sense in novel domains still requires human domain expert review.
+
+---
+
+## 8. Continuous Evaluation & Operational Drift Monitoring (v1)
+
+The Continuous Evaluation layer (`evaluation/health.py` and `GET /evaluation/health`) provides on-demand operational health and drift observability across production investigation runs.
+
+### 8.1 The Six Core Health Metrics
+
+| Metric | Source Field / Table | Formula | Watch Threshold | Degraded Threshold |
+| :--- | :--- | :--- | :--- | :--- |
+| **E2E Latency ($p_{95}$)** | `investigations.result_json->'telemetry'` | $p_{95}(\sum \text{latencies})$ | $+2,000\text{ms}$ ($+2.0\text{s}$) or $+50\%$ | $+5,000\text{ms}$ ($+5.0\text{s}$) or $+100\%$ |
+| **Abstention Rate** | `investigations.result_json->'decision'` | $\text{Count}(\text{abstained}=\text{True}) / N$ | $|\Delta| \ge 0.15$ ($15\text{ pts}$) | $|\Delta| \ge 0.30$ ($30\text{ pts}$) |
+| **HIGH-Confidence Rate** | `investigations.result_json->'scored'` | $\text{Count}(\text{winning}=\text{HIGH}) / N$ | $\Delta \le -0.15$ ($15\text{ pt}$ drop) | $\Delta \le -0.30$ ($30\text{ pt}$ drop) |
+| **Human Agreement Rate** | `feedback.verdict` | $\frac{\text{CORRECT}}{\text{CORRECT} + \text{INCORRECT}}$ | $\Delta \le -0.15$ ($15\text{ pt}$ drop) | $\Delta \le -0.30$ ($30\text{ pt}$ drop) |
+| **Citation Violation Rate** | `investigations.result_json->'scored'` | $\text{Count}(\ge 1 \text{ violation}) / N$ | $|\Delta| \ge 0.05$ ($5\%$) | $|\Delta| \ge 0.10$ ($10\%$) |
+| **E9 Precedent Relevance** | `investigations.result_json->'precedents'` | $\text{Avg}(\text{relevance})$ over runs with $\ge 1$ prec | $\Delta \le -0.05$ | $\Delta \le -0.10$ |
+
+### 8.2 Count-Based Windowing & Cold-Start Lifecycle
+* **Window Size**: 50 recent runs vs 50 baseline runs immediately preceding.
+* **$0 \le N \le 19$ (`INSUFFICIENT_DATA`)**: No drift evaluated; returns insufficient data status.
+* **$20 \le N \le 49$ (`RECENT_ONLY`)**: Computes recent metric summary; baseline comparison is omitted.
+* **$50 \le N \le 99$ (`PARTIAL_BASELINE`)**: Recent 50 runs compared against earlier $N-50$ runs with limited confidence.
+* **$N \ge 100$ (`FULL_COMPARISON`)**: Full 50-vs-50 comparison.
+
+### 8.3 Operational Monitoring vs. Statistical Significance
+> [!IMPORTANT]
+> **Operational Monitoring Invariant**: Thresholds are **operational monitoring rules**, NOT statistical hypothesis tests. No p-values or parametric assumptions are claimed. Furthermore, the monitoring system is **purely observational**: it **never** automatically modifies scoring thresholds, prompts, ground truth, scoring weights, or entitlements.
+

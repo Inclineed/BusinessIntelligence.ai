@@ -234,3 +234,12 @@ export async function getFeedbackForScenario(
 
   return await res.json()
 }
+
+export async function getSystemHealth(): Promise<import("../types/investigation").SystemHealthData> {
+  const res = await fetch(`${API_BASE}/evaluation/health`)
+  if (!res.ok) {
+    throw new Error(`Health check failed (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+

@@ -119,11 +119,13 @@ Every engine invocation emits structured metrics into `TelemetryService`:
 Built on FastAPI, exposing:
 - `POST /investigate`: Runs full end-to-end investigation for a requested `scenario_id` and `persona`. Enforces HTTP 403 when persona lacks foundational entitlements.
 - `POST /feedback`: Captures human analyst evaluations and validation stamps.
+- `GET /evaluation/health`: On-demand continuous evaluation and operational drift monitoring across 6 core health metrics (50 recent vs 50 baseline).
 - `GET /health`: Reports database connectivity, ChromaDB status, and active LLM backend (`ollama` or `groq`).
 
 ### Interactive Console (`frontend/app.py` & React UI)
 A rich user interface providing:
 - **Real-Time Scenario Investigation**: Select any scenario (`INC_001`–`INC_008`) and persona (`analyst`, `manager`, `cfo`).
+- **System Health & Drift Modal**: Inspect live operational health metrics (latency, abstention, confidence, agreement, violations, E9 relevance).
 - **Evidence Explorer**: Inspect raw SQL evidence, ChromaDB snippets, and reliability weights.
 - **Rule Verification Table**: Visual breakdown of the 5 operational rule checks.
 - **Precedent Memory Viewer**: Inspect semantic matches retrieved from ChromaDB with confidence weighting.

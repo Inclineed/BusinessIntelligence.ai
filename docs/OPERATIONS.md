@@ -150,3 +150,23 @@ python scripts/rebuild_memory.py
 | `GroqAPIError: Groq rate limit (HTTP 429) exceeded` | Groq tier rate limit exhausted. | `GroqProvider` automatically retries with backoff. Check dashboard quotas or upgrade tier. |
 | `psycopg2.OperationalError: could not connect to server` | PostgreSQL container is stopped or starting. | Run `docker compose ps` and verify `postgres` container is healthy on port 5432. |
 | `Evaluation Failure: D16 Citation Mismatch` | Quoted summary in hypothesis was altered by LLM text generation. | Ensure E5 canonicalizes `quoted_summary` directly from `evidence_by_id[eid].summary`. |
+
+---
+
+## 8. Continuous Evaluation & Operational Drift Monitoring
+
+The platform provides on-demand health and drift monitoring via the REST API and the React console.
+
+### Checking System Health via CLI / Curl
+```bash
+curl http://localhost:8080/evaluation/health
+```
+
+### Operational State Interpretations & Actions:
+* **`HEALTHY`**: All evaluated operational metrics (latency, abstention, high confidence, feedback agreement, citation fidelity, and E9 retrieval relevance) remain within baseline boundaries.
+* **`WATCH`**: At least one metric has crossed its operational watch threshold (e.g. p95 latency $+2.0\text{s}$ or abstention rate shift $\ge 15\text{ pts}$).
+  * *Action*: Inspect recent investigations in the UI or check downstream provider quotas (e.g. Groq rate-limiting or local Ollama queue congestion).
+* **`DEGRADED`**: At least one metric has crossed its degraded threshold (e.g. p95 latency $+5.0\text{s}$, abstention shift $\ge 30\text{ pts}$, or citation violation rate $\ge 10\%$).
+  * *Action*: Trigger immediate human review. Check database connectivity, verify LLM provider status, and inspect recent prompt/evidence grounding.
+* **`INSUFFICIENT_DATA`**: Fewer than 20 completed investigations exist. No drift is evaluated until the minimum sample is reached.
+

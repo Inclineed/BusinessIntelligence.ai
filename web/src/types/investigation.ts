@@ -175,3 +175,34 @@ export interface FeedbackRecord {
   validation_precedent_id?: string
   received_at: string
 }
+
+// ---------------------------------------------------------------------------
+// Round 2 — Continuous Evaluation & Drift Monitoring Types
+// ---------------------------------------------------------------------------
+
+export type HealthStatusType = "HEALTHY" | "WATCH" | "DEGRADED" | "INSUFFICIENT_DATA"
+export type SampleStateType = "INSUFFICIENT_DATA" | "RECENT_ONLY" | "PARTIAL_BASELINE" | "FULL_COMPARISON"
+
+export interface MetricEvaluationItem {
+  name: string
+  recent_value: number | null
+  baseline_value: number | null
+  delta: number | null
+  relative_change: number | null
+  status: "HEALTHY" | "WATCH" | "DEGRADED" | "NOT_ENOUGH_FEEDBACK" | "INSUFFICIENT_E9_SAMPLE" | "NOT_EVALUABLE"
+  watch_threshold: number
+  degraded_threshold: number
+  reason: string
+}
+
+export interface SystemHealthData {
+  status: HealthStatusType
+  sample_state: SampleStateType
+  total_investigations: number
+  recent_window_size: number
+  baseline_window_size: number
+  generated_at: string
+  summary_reason: string
+  metrics: Record<string, MetricEvaluationItem>
+}
+

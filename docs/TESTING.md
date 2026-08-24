@@ -21,7 +21,8 @@ tests/
 ├── test_overfitting.py           # Held-out evaluation & adversarial perturbations
 ├── test_fidelity.py              # Text normalization & citation fidelity
 ├── test_feedback.py              # Human analyst validation feedback loop & API
-└── test_llm_provider.py          # Pluggable Ollama/Groq providers, multi-key rotation, sanitization
+├── test_llm_provider.py          # Pluggable Ollama/Groq providers, multi-key rotation, sanitization
+└── test_evaluation_health.py     # On-demand Continuous Evaluation & Drift Monitoring
 ```
 
 ---
