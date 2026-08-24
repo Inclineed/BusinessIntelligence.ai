@@ -30,7 +30,7 @@ from pydantic import BaseModel
 
 from config.loader import load_kpi_contract, load_entitlements, load_sources, ConfigError
 from config.registry import SourceRegistry
-from llm.provider import OllamaProvider
+from llm.provider import OllamaProvider, get_llm_provider
 from models import Persona
 from pipeline.investigate import Dependencies, investigate
 from security.entitlements import SecurityEngine
@@ -162,10 +162,10 @@ async def lifespan(app: FastAPI):
         logger.error("ChromaDB connection failed: %s — investigate will degrade gracefully.", exc)
 
     # ------------------------------------------------------------------
-    # LLM provider (Ollama)
+    # LLM provider (Ollama / Groq)
     # ------------------------------------------------------------------
-    state.llm_provider = OllamaProvider(base_url=OLLAMA_HOST)
-    logger.info("OllamaProvider configured at %s", OLLAMA_HOST)
+    state.llm_provider = get_llm_provider()
+    logger.info("LLMProvider configured: %s", getattr(state.llm_provider, "provider_name", "unknown"))
 
     yield
 

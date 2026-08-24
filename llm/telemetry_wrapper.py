@@ -36,6 +36,7 @@ def record_llm_call(
     - telemetry.llm_tokens_in    += response.prompt_tokens
     - telemetry.llm_tokens_out   += response.completion_tokens
     - telemetry.latency_ms_by_engine[engine_name] += response.latency_ms
+    - telemetry.external_cost_usd += estimated external API cost
     """
     telemetry.llm_calls += 1
     telemetry.llm_tokens_in += response.prompt_tokens
@@ -43,3 +44,15 @@ def record_llm_call(
 
     prior = telemetry.latency_ms_by_engine.get(engine_name, 0.0)
     telemetry.latency_ms_by_engine[engine_name] = prior + response.latency_ms
+
+    from llm.cost_estimator import estimate_model_cost
+
+    provider = getattr(response, "provider", "ollama")
+    call_cost = estimate_model_cost(
+        model=response.model,
+        prompt_tokens=response.prompt_tokens,
+        completion_tokens=response.completion_tokens,
+        provider=provider,
+    )
+    if call_cost is not None:
+        telemetry.external_cost_usd = round(telemetry.external_cost_usd + call_cost, 6)

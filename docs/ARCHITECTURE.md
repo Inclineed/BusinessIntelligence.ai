@@ -1,6 +1,6 @@
 # System Architecture & Data Flow
 
-This document details the architectural design, control flow, inter-engine communication, and telemetry infrastructure of **BusinessIntelligence.ai**.
+This document details the architectural design, control flow, inter-engine communication, pluggable LLM provider layer, and telemetry infrastructure of **BusinessIntelligence.ai**.
 
 ---
 
@@ -87,7 +87,7 @@ External state is encapsulated within the `Dependencies` dataclass:
 class Dependencies:
     db_conn: Optional[Any] = None               # PostgreSQL connection
     chroma_client: Optional[Any] = None         # ChromaDB client
-    llm_provider: Optional[LLMProvider] = None  # Ollama / Cloud LLM provider
+    llm_provider: Optional[LLMProvider] = None  # Ollama / Groq LLM provider
     security_engine: Optional[SecurityEngine] = None
     source_registry: Optional[SourceRegistry] = None
     telemetry_service: Optional[TelemetryService] = None
@@ -95,23 +95,11 @@ class Dependencies:
     window_end: Optional[datetime] = None       # Optional analysis end
 ```
 
-### Time Window Resolution
-When timestamps are not explicitly supplied by the caller, `investigate()` resolves default anomaly windows from the scenario registry:
-```python
-_SCENARIO_WINDOWS: dict[str, tuple[datetime, datetime]] = {
-    "INC_001": (datetime(2024, 1, 15, 0, 0, 0), datetime(2024, 1, 15, 12, 0, 0)),
-    "INC_002": (datetime(2024, 1, 16, 0, 0, 0), datetime(2024, 1, 16, 12, 0, 0)),
-    "INC_003": (datetime(2024, 1, 17, 0, 0, 0), datetime(2024, 1, 17, 12, 0, 0)),
-    "INC_004": (datetime(2024, 1, 18, 0, 0, 0), datetime(2024, 1, 18, 12, 0, 0)),
-    "INC_005": (datetime(2024, 1, 19, 0, 0, 0), datetime(2024, 1, 19, 12, 0, 0)),
-    "INC_006": (datetime(2024, 1, 20, 0, 0, 0), datetime(2024, 1, 20, 12, 0, 0)),
-    "INC_007": (datetime(2024, 1, 21, 0, 0, 0), datetime(2024, 1, 21, 12, 0, 0)),
-    "INC_008": (datetime(2024, 2, 2, 0, 0, 0), datetime(2024, 2, 10, 18, 0, 0)),
-}
-```
-
-> [!NOTE]
-> Evaluator vs Runtime: The evaluation framework dynamically discovers and validates scenarios from `ground_truth.json`. However, the runtime `investigate()` pipeline still uses this explicit scenario registry for default analysis windows. Adding a scenario to `ground_truth.json` does not automatically make the entire runtime pipeline discover its time boundaries without configuration.
+### Pluggable LLM Provider Layer
+Engines interact with language models exclusively via the `LLMProvider` abstraction (`llm/provider.py`):
+- `OllamaProvider`: Default local inference provider (`qwen3:8b`, `gemma3:12b`, `bge-m3`).
+- `GroqProvider`: Hosted low-latency cloud inference provider (`llama-3.3-70b-versatile`) with bounded exponential backoff for HTTP 429 rate limits and 5xx errors.
+- Embedding requests (`embed()`) are delegated to the local `bge-m3` embedder under both providers to maintain 100% ChromaDB compatibility.
 
 ---
 
@@ -120,6 +108,7 @@ _SCENARIO_WINDOWS: dict[str, tuple[datetime, datetime]] = {
 Every engine invocation emits structured metrics into `TelemetryService`:
 - **Wall-clock latency** per engine (`duration_ms`).
 - **Token consumption** (`prompt_tokens`, `completion_tokens`) for LLM-backed engines (E4 summarization, E5, E7, E9).
+- **External Cost Calculation**: Computes real API costs for cloud providers (Groq) and reports $0.00 for local Ollama runs.
 - **Execution tracing** attached directly to the `InvestigationResult.telemetry` payload.
 
 ---
@@ -130,10 +119,10 @@ Every engine invocation emits structured metrics into `TelemetryService`:
 Built on FastAPI, exposing:
 - `POST /investigate`: Runs full end-to-end investigation for a requested `scenario_id` and `persona`. Enforces HTTP 403 when persona lacks foundational entitlements.
 - `POST /feedback`: Captures human analyst evaluations and validation stamps.
-- `GET /health`: Reports database connectivity, ChromaDB status, and active LLM backend (`ollama`).
+- `GET /health`: Reports database connectivity, ChromaDB status, and active LLM backend (`ollama` or `groq`).
 
-### Interactive Console (`frontend/app.py` & `frontend/theme.py`)
-A Streamlit dashboard providing:
+### Interactive Console (`frontend/app.py` & React UI)
+A rich user interface providing:
 - **Real-Time Scenario Investigation**: Select any scenario (`INC_001`–`INC_008`) and persona (`analyst`, `manager`, `cfo`).
 - **Evidence Explorer**: Inspect raw SQL evidence, ChromaDB snippets, and reliability weights.
 - **Rule Verification Table**: Visual breakdown of the 5 operational rule checks.
@@ -164,6 +153,7 @@ A Streamlit dashboard providing:
 | **PostgreSQL Unavailable** | E1, E3, E4 | E1 fails gracefully; E4 continues with available vector evidence or returns empty set; pipeline abstains due to insufficient data. |
 | **ChromaDB Unavailable** | E4, E9 | E4 falls back to SQL-only evidence; E9 queues precedents in an in-memory retry queue (`_pending`) for up to 3 attempts. |
 | **Ollama Primary Model Timeout** | E5, E7, E9 | `OllamaProvider` automatically falls back to secondary model (`gemma3:12b`); if fallback also times out, raises `LLMUnavailableError`. |
+| **Groq Rate Limit (HTTP 429)** | E5, E7, E9 | `GroqProvider` reads `Retry-After` / reset headers and applies bounded exponential backoff up to `GROQ_MAX_RETRIES`. |
 | **LLM Outage (Complete)** | E5, E7, E9 | E5 generates zero hypotheses; E6/E7 abstain; E9 uses deterministic template fallback (`_build_fallback_summary`). |
 | **Unauthorized / Unknown Persona** | Security Engine | Scope produces `is_empty=True`; E4 retrieves zero evidence; E7 returns HTTP 403 / Abstain with empty action. |
 | **Missing SLA Metadata in Source Registry** | E4 | `reliability_weight` decays to `0.0`; evidence is included with zero weight and logged in `reliability_notes`. |

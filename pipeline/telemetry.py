@@ -109,17 +109,18 @@ class TelemetryService:
         self,
         prompt_tokens: int,
         completion_tokens: int,
-        model: str,  # the local Ollama model name, used for model identity only
+        model: str,  # the LLM model name
         latency_ms: float,  # noqa: ARG002  (kept for API completeness; not summed here)
+        provider: str = "ollama",
     ) -> None:
         """
         Record one LLM call's token usage and update the equivalent cloud cost
-        estimate (Requirements 16.2, 16.3, 16.4, 16.5).
+        and external cost estimates (Requirements 16.2, 16.3, 16.4, 16.5).
 
         - Increments llm_calls.
         - Adds prompt_tokens to llm_tokens_in and completion_tokens to
           llm_tokens_out.
-        - external_cost_usd remains 0.00 (local Ollama execution).
+        - Computes external_cost_usd based on provider and model.
         - Recomputes equivalent_cloud_cost_usd from the running totals using
           the EQUIVALENT_MODEL rate; sets it to None when the rate is absent.
         - On any recording error: appends to _metric_errors, does not raise.
@@ -128,8 +129,19 @@ class TelemetryService:
             self._telemetry.llm_calls += 1
             self._telemetry.llm_tokens_in += prompt_tokens
             self._telemetry.llm_tokens_out += completion_tokens
-            # external cost is always $0.00 for local execution (Req 16.3)
-            self._telemetry.external_cost_usd = 0.0
+
+            # Compute external cost for cloud providers or 0.0 for local Ollama
+            from llm.cost_estimator import estimate_model_cost
+            call_cost = estimate_model_cost(
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                provider=provider,
+            )
+            if call_cost is not None:
+                self._telemetry.external_cost_usd = round(
+                    self._telemetry.external_cost_usd + call_cost, 6
+                )
 
             total_tokens = (
                 self._telemetry.llm_tokens_in + self._telemetry.llm_tokens_out

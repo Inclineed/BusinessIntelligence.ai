@@ -148,3 +148,27 @@ When Engine E1 or E4 queries a source:
    - `STALE`: $\text{SLA} < \Delta t \le 2 \times \text{SLA}$
    - `CRITICAL_STALE`: $\Delta t > 2 \times \text{SLA}$
    - `UNKNOWN`: Missing timestamp or `sla_minutes == 0`.
+
+---
+
+## 4. Environment & LLM Provider Configuration (`.env`)
+
+The runtime environment supports dynamic switching between local inference and hosted cloud models:
+
+```ini
+# LLM Provider Selection
+LLM_PROVIDER=ollama                     # Options: "ollama" (default local) or "groq" (cloud)
+
+# Local Ollama Settings
+OLLAMA_HOST=http://localhost:11434       # Ollama server base URL
+LLM_MODEL=qwen3:8b                      # Primary local reasoning model
+LLM_FALLBACK_MODEL=gemma3:12b           # Fallback local reasoning model
+EMBED_MODEL=bge-m3                      # ChromaDB embedding model
+
+# Groq Cloud Settings (required when LLM_PROVIDER=groq)
+GROQ_API_KEY=gsk_...                    # Official Groq API token
+GROQ_MODEL=llama-3.3-70b-versatile      # Default Groq reasoning model
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+GROQ_TIMEOUT=30.0                       # Request timeout in seconds
+GROQ_MAX_RETRIES=3                      # Max retries for 429/5xx errors
+```
