@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 217 33% 10%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 217 33% 10%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 217 30% 16%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 28% 18%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217 30% 18%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 28% 18%;
+    --input: 217 28% 18%;
+    --ring: 224 76.3% 48%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-canvas text-foreground font-sans antialiased selection:bg-primary/25 selection:text-white;
+    background-color: #090D14;
+    color: #F0F4F8;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #090D14;
+}
+::-webkit-scrollbar-thumb {
+  background: #1E2B3E;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2A3D58;
+}
+
+/* Glass & Card effects */
+.glass-panel {
+  background: rgba(15, 22, 34, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 43, 62, 0.7);
+}
+
+.subtle-gradient {
+  background: linear-gradient(180deg, rgba(22, 31, 46, 0.7) 0%, rgba(15, 22, 34, 0.95) 100%);
+}
+
+.hero-glow {
+  position: relative;
+}
+.hero-glow::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(63, 131, 248, 0.6), transparent);
+}

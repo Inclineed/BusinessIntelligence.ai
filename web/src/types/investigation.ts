@@ -1,0 +1,131 @@
+export type PersonaType = "analyst" | "cfo" | "manager"
+export type ConfidenceState = "HIGH" | "MEDIUM" | "LOW" | "ABSTAIN"
+export type RuleVerdict = "pass" | "partial" | "fail" | "n/a"
+
+export interface AnomalySignal {
+  kpi_id: string
+  observed: number
+  expected: number
+  delta_pct: number
+  z_score: number
+  is_anomaly: boolean
+  method?: string
+  corroborated_by?: string[]
+  sparse_history?: boolean
+  data_quality_suspect?: boolean
+}
+
+export interface DimensionContribution {
+  dimension: string
+  segment: string
+  contribution_pct: number
+  segment_delta_pct?: number
+  method?: string
+}
+
+export interface EvidenceItem {
+  evidence_id: string
+  source_id: string
+  kind?: string
+  method: string
+  relevance: number
+  reliability_weight: number
+  summary: string
+  raw_ref?: string
+  timestamp?: string
+}
+
+export interface HypothesisItem {
+  hypothesis_id: string
+  statement: string
+  reasoning?: string
+  supporting_evidence_ids: string[]
+  contradictory_evidence_ids: string[]
+}
+
+export interface RuleResult {
+  rule_name: string
+  verdict: RuleVerdict
+  rationale: string
+}
+
+export interface ScoredHypothesisItem {
+  hypothesis_id: string
+  support_score: number
+  contradiction_penalty: number
+  final_score: number
+  confidence_state: ConfidenceState
+  rule_results: RuleResult[]
+  narrative?: string
+}
+
+export interface DecisionPayload {
+  winning_hypothesis_id?: string
+  recommended_action?: string
+  abstained?: boolean
+  abstention_reason?: string
+  verification_metric?: string
+  persona_narrative?: string
+}
+
+export interface OutcomeProjection {
+  method?: string
+  outcome_type?: string
+  projected_recovery_pct?: number
+  projected_metric?: string
+  disclaimer?: string
+}
+
+export interface PrecedentItem {
+  scenario_id: string
+  similarity?: number
+  relevance?: number
+  original_confidence_state?: string
+  confidence_state?: string
+  outcome_type?: string
+  human_validated?: boolean
+  validated_at?: string
+  created_at?: string
+  timestamp?: string
+  summary?: string
+  recommendation?: string
+  evidence_ids?: string
+}
+
+export interface TelemetryData {
+  latency_ms_by_engine: Record<string, number>
+  llm_calls: number
+  llm_tokens_in: number
+  llm_tokens_out: number
+  external_cost_usd?: number
+  equivalent_cloud_cost_usd?: number
+}
+
+export interface InvestigationResult {
+  scenario_id: string
+  persona: PersonaType
+  signals: AnomalySignal[]
+  contributions: DimensionContribution[]
+  evidence: EvidenceItem[]
+  hypotheses: HypothesisItem[]
+  scored: ScoredHypothesisItem[]
+  decision: DecisionPayload
+  outcome?: OutcomeProjection
+  precedents?: (PrecedentItem | string)[]
+  telemetry?: TelemetryData
+  method_ownership?: Record<string, string | string[]>
+  investigation_id?: string
+  access_denied?: boolean
+  excluded_sources?: string[]
+  denied_sources?: string[]
+  reason?: string
+}
+
+export interface ScenarioMeta {
+  id: string
+  status: "live" | "evaluation_only"
+  title: string
+  domain: string
+  type: string
+  description: string
+}
