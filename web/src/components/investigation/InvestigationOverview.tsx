@@ -127,6 +127,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     if (!feedbackVerdict || !investigationId || !result?.scenario_id) return
     setIsFeedbackSubmitting(true)
     setFeedbackResult(null)
+    const personaLabel = evaluatedConfig.persona === "analyst" ? "Analyst" : evaluatedConfig.persona.toUpperCase()
     try {
       const res = await submitStructuredFeedback({
         investigation_id: investigationId,
@@ -139,9 +140,20 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
         analyst_notes: feedbackNotes || undefined,
       })
       if (res.success) {
-        const msg = res.validated_precedent
-          ? `Institutional Precedent Verified (Feedback #${res.feedback_id})`
-          : `Feedback Recorded (Feedback #${res.feedback_id})`
+        let msg = ""
+        if (res.validated_precedent) {
+          msg = `✓ Institutional Precedent Verified by Analyst (Boost Active) — Feedback #${res.feedback_id}`
+        } else if (feedbackVerdict === "CORRECT" && evaluatedConfig.persona !== "analyst") {
+          msg = `${personaLabel} observation recorded (Feedback #${res.feedback_id}) · Authoritative institutional validation requires full Analyst cross-domain scope`
+        } else if (feedbackVerdict === "CORRECT") {
+          msg = `Feedback recorded (Feedback #${res.feedback_id}) · Precedent was already verified (first-wins policy)`
+        } else if (feedbackVerdict === "INCORRECT") {
+          msg = `Human Correction Logged for Institutional Review (Feedback #${res.feedback_id})`
+        } else if (feedbackVerdict === "PARTIALLY_CORRECT") {
+          msg = `Partial Adjustment Logged for Institutional Review (Feedback #${res.feedback_id})`
+        } else {
+          msg = `Escalation & Domain Caveats Recorded (Feedback #${res.feedback_id})`
+        }
         setFeedbackResult({ success: true, message: msg, validated: res.validated_precedent })
         // Refresh feedback list
         getFeedbackForScenario(result.scenario_id).then(data => {
@@ -1400,20 +1412,43 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               <div>
                 <div className="text-xs font-medium text-neutral-400">Human Validation · Institutional Learning Loop</div>
                 <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
-                  Analyst Review & Verification
+                  {evaluatedConfig.persona === "analyst" ? "Analyst Review & Verification" : `${evaluatedConfig.persona.toUpperCase()} Review & Observation`}
                 </h2>
               </div>
 
               <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-4">
+                {/* Persona scope notice for restricted roles */}
+                {evaluatedConfig.persona !== "analyst" && (
+                  <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-500/[0.05] border border-amber-500/20 text-xs text-amber-200/90 leading-relaxed">
+                    <Lock className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <span>
+                      Reviewing under <b>{evaluatedConfig.persona.toUpperCase()} scope</b>. Your observations are saved to the PostgreSQL audit log, but only <b>Analyst</b> reviews (with full cross-domain source scope) validate shared institutional precedents in E9 memory.
+                    </span>
+                  </div>
+                )}
+
                 {/* Previous feedback indicator */}
                 {existingFeedback.length > 0 && !feedbackResult && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/[0.08] border border-emerald-500/20 text-xs">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                    <span className="text-emerald-300">
-                      {existingFeedback[0].validated_precedent
-                        ? `Precedent verified by ${existingFeedback[0].persona} · ${existingFeedback[0].verdict}`
-                        : `${existingFeedback.length} feedback record(s) · Latest: ${existingFeedback[0].verdict}`
-                      }
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.08] text-xs">
+                    <div className="flex items-center gap-2">
+                      {existingFeedback.some(f => f.validated_precedent) ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                          <span className="text-emerald-300 font-medium">
+                            Institutional precedent verified by Analyst
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquare className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                          <span className="text-neutral-300">
+                            {existingFeedback[0].persona.toUpperCase()} observation recorded · {existingFeedback[0].verdict}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-mono text-neutral-500">
+                      {existingFeedback.length} total feedback record{existingFeedback.length > 1 ? "s" : ""}
                     </span>
                   </div>
                 )}
