@@ -24,37 +24,45 @@ tests/
 
 ---
 
-## 2. Test Module Breakdown
+## 2. Testing Strategy & Layers
 
-### Core Engine Tests
-- **`test_kpi_store.py`**: Verifies PostgreSQL time-series queries, freshness stamping, and SLA calculation under normal and degraded conditions.
-- **`test_signal.py`**: Tests statistical anomaly thresholds ($|z| \ge 2.0$), directionality assertions, and the trailing partial bucket anomaly guard (`INC_005`).
-- **`test_diagnostic.py`**: Validates dimensional delta calculations across `device`, `region`, and `channel`, confirming Android dominance detection in `INC_001`.
-- **`test_evidence.py`**: Validates linear freshness decay, zero-weight SLA handling, deterministic SHA-256 evidence hashing, and pre-query source filtering.
+The testing strategy is organized into nine specific layers, each designed to catch a different class of failure:
 
-### Challenge, Scoring & Citation Tests
-- **`test_challenge_smoke.py`**: Tests the five operational rules (`timeline`, `segment_alignment`, `kpi_corroboration`, `mechanism_consistency`, `contradiction`), support score capping, contradiction penalties, and deterministic confidence banding.
-- **`test_citation_validation.py` & `test_fidelity.py`**: Asserts that hypotheses citing phantom evidence IDs or altering quoted evidence text are disqualified (`final_score=0.0`, `ABSTAIN`).
+### 1. Deterministic Unit Tests
+- **Target**: E1, E2, E3, E4, E6 deterministic functions.
+- **Catches**: Mathematical errors in z-score calculation, dimensional contribution scaling, SLA decay weights, and pure-function rule evaluation. 
 
-### Security & Authorization Tests
-- **`test_security.py`**:
-  - Validates fail-closed behavior on missing or invalid `config/entitlements.yaml`.
-  - Asserts that restricted personas (`manager`, `cfo`) cannot access technical telemetry (`payment_gateway`, `deployment_log`).
-  - Verifies that pre-query filters prevent unauthorized queries at the database layer.
+### 2. Engine Integration Tests
+- **Target**: End-to-end deterministic flow from E1 through E6 (mocking LLM calls).
+- **Catches**: Contract mismatches between engines (e.g., E2 producing signals that E3 cannot decompose, or E6 rejecting E5's hypothesis schema).
 
-### Precedent Memory & Provenance Tests
-- **`test_memory.py`**:
-  - Validates ChromaDB upsert operations within the 5.0s SLA.
-  - Tests confidence retrieval weighting (`HIGH=1.0`, `MEDIUM=0.6`, `ABSTAIN=0.2`, `LOW=0.1`).
-  - Tests human-validation tagging (`mark_validated()`) and the `+0.1` relevance boost.
-  - Tests domain-specific TTL expiry filtering against `config/memory_retention.yaml`.
-  - Asserts that simulated and legacy unknown-provenance records are excluded from normal retrieval.
+### 3. Security Boundary Tests
+- **Target**: `SecurityEngine` and E4 pre-query filters.
+- **Catches**: Fail-closed authorization bypasses, entitlement leakage where restricted personas might retrieve technical evidence, and invalid regional configurations.
 
-### Generalization & Adversarial Tests
-- **`test_overfitting.py`**:
-  - Validates dynamic scenario discovery and ground-truth schema validation in `evaluation/evaluator.py`.
-  - Executes adversarial perturbations (evidence deletion, contradiction injection, citation tampering) to prove scoring monotonicity.
-  - Validates cross-domain B2B SaaS scenario `INC_008`.
+### 4. Provenance & Citation Integrity Tests
+- **Target**: E6 citation validation logic.
+- **Catches**: Hypotheses attempting to pass off hallucinated evidence IDs, duplicate citations to inflate scores, and LLM-altered quotes (material summary mismatches). Note: formatting and whitespace drift are tested to ensure they do not cause false-positive disqualifications.
+
+### 5. Memory Contamination Tests
+- **Target**: E9 ChromaDB storage and retrieval.
+- **Catches**: Simulated or unverified legacy records polluting observed operational precedents. Also catches TTL expiration failures and confidence weighting bugs.
+
+### 6. Adversarial Perturbation & Monotonicity Tests
+- **Target**: E6 Scoring constraints.
+- **Catches**: Non-monotonic scoring behavior. Ensures that deleting supporting evidence always decreases a score, and injecting high-reliability contradictory evidence always suppresses a score below the abstention threshold.
+
+### 7. Held-Out Evaluation
+- **Target**: E1-E9 pipeline via `validate_held_out.py`.
+- **Catches**: Pipeline overfitting to the primary demo scenario (`INC_001`). Tests edge cases like partial-bucket starvation (`INC_005`), compound failures (`INC_006`), and gradual degradation (`INC_007`).
+
+### 8. Cross-Domain Evaluation
+- **Target**: `INC_008` (B2B SaaS SAML SSO outage).
+- **Catches**: E-commerce domain overfitting. Ensures the pipeline structure, evaluator, and prompts generalize to entirely different dimensional schemas and evidence sources without hardcoded assumptions.
+
+### 9. Live Integration Validation
+- **Target**: `run_demo.py` and `validate_held_out.py` with live containers.
+- **Catches**: Infrastructure configuration drift, broken DB connections, missing Ollama models, and timeout issues when interacting with the real database and vector store.
 
 ---
 

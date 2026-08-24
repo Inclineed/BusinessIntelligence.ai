@@ -47,6 +47,8 @@ To guarantee that the pipeline never overfits by reading ground truth during exe
 
 ## 2. The 16 Evaluation Dimensions
 
+The evaluator defines a vocabulary of 16 potential evaluation dimensions. A scenario's `ground_truth` schema activates the relevant checks for its specific context. Therefore, individual scenarios may report fewer than 16 dimensions in their final scorecard. D13–D16 remain mandatory hard security/integrity checks for all scenarios.
+
 | Dimension | Name | Core Verification Rule |
 |---|---|---|
 | **D01** | Anomaly Detected | `result.anomaly_detected == expected.anomaly_detected` |
@@ -122,25 +124,26 @@ Validated in `tests/test_overfitting.py`:
 
 ---
 
-## 7. Calibration Reporting (`CalibrationReporter`)
+## 7. Confidence Label Agreement Reporting (`CalibrationReporter`)
 
-The `CalibrationReporter` class in `evaluation/evaluator.py` tallies predicted confidence states against ground truth outcomes across evaluation runs:
+The `CalibrationReporter` class in `evaluation/evaluator.py` tallies predicted confidence states against ground truth outcomes across evaluation runs to measure **confidence label agreement**:
 
 ```
 ==================================================
-BusinessIntelligence.ai — Calibration Report
+BusinessIntelligence.ai — Confidence Label Agreement Report
 ==================================================
 Total Scenarios Evaluated: 8
 
-Confidence Calibration (Predicted vs Actual Correctness):
+Confidence Label Agreement (Predicted vs Expected Correctness):
 --------------------------------------------------
-  HIGH    : 5/5 correct (100.0%)
+  HIGH    : 5/5 agreement (100.0%)
   MEDIUM  : 0 predictions
   LOW     : 0 predictions
-  ABSTAIN : 3/3 correct (100.0%)
+  ABSTAIN : 3/3 agreement (100.0%)
 
-NOTE: Calibration metrics are exploratory and NOT statistically
-significant until N >= 30. Do not tune thresholds based on
+NOTE: These metrics represent label agreement, not true statistical
+calibration. Statistical calibration requires a larger dataset (N >= 30)
+and appropriate calibration metrics. Do not tune thresholds based on
 the current small dataset.
 ==================================================
 ```
@@ -154,5 +157,5 @@ the current small dataset.
 - Generalization across held-out topologies and cross-domain schemas.
 
 **What the Evaluator Does Not Prove (Current Limitations)**:
-- **Statistical Calibration**: An evaluation set of $N=8$ is exploratory. Statistical confidence calibration requires $N \ge 30$.
-- **Deep Domain Semantic Validity**: Passing 16/16 proves that citations match and scores are mathematically correct; verifying whether the LLM's natural language prose makes sound business sense in novel domains still requires human domain expert review.
+- **Statistical Calibration**: An evaluation set of $N=8$ is exploratory. True statistical confidence calibration requires $N \ge 30$ and formal calibration metrics; the current report only shows confidence label agreement.
+- **Deep Domain Semantic Validity**: Passing all dimensions proves that citations match and scores are mathematically correct; verifying whether the LLM's natural language prose makes sound business sense in novel domains still requires human domain expert review.

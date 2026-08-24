@@ -89,7 +89,7 @@ All LLM calls across the pipeline specify:
 ```python
 temperature = 0.0
 ```
-While temperature 0 does not guarantee bit-exact token determinism across different hardware architectures or GPU execution batches, it minimizes generation variance. More importantly, **even if LLM text varies slightly, downstream scores and decisions remain 100% deterministic** because E6 evaluates evidence IDs and rule criteria via deterministic code, not LLM token probabilities.
+While temperature 0 does not guarantee bit-exact token determinism across different hardware architectures or GPU execution batches, it minimizes generation variance. More importantly, **even if LLM text varies slightly, downstream scores and decisions remain 100% deterministic conditional on the structured outputs provided to the deterministic engines**. E6 evaluates evidence IDs and rule criteria via deterministic code, not LLM token probabilities. LLM generation itself is not claimed to be bit-for-bit deterministic.
 
 ---
 

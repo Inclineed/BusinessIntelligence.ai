@@ -18,7 +18,7 @@ Narrative Synthesis (Summaries, Explanations, Hypotheses)
    ↳ Constrained by strict JSON schemas, prompt isolation, and citation validators
 ```
 
-Large Language Models (LLMs) in BusinessIntelligence.ai are never permitted to compute KPI movements, calculate z-scores, evaluate rule verifications, score hypotheses, or establish final confidence levels.
+Large Language Models (LLMs) in BusinessIntelligence.ai are never permitted to compute KPI movements, calculate z-scores, evaluate rule verifications, score hypotheses, or establish final confidence levels. Quantitative scoring and decision logic are deterministic conditional on the structured outputs provided to the deterministic engines. LLM generation itself (e.g., hypothesis formulation, narrative synthesis) is not claimed to be bit-for-bit deterministic, even with temperature=0.
 
 ---
 
@@ -72,7 +72,7 @@ flowchart TD
 | **E6 Challenge** | `RULES` | Evaluates 5 operational rules and deterministically scores hypotheses. | **100% Deterministic Rule Math** (Zero LLM score influence) |
 | **E7 Decision** | `LLM` | Produces actionable recommendations; enforces strict abstention if confidence is low. | **LLM Narrative** (Bound by deterministic confidence) |
 | **E8 Outcome** | `SIMULATED` | Simulates post-action metric recovery under strict simulation labels. | **Deterministic Simulation Model** |
-| **E9 Memory** | `RETRIEVAL+LLM` | Stores precedent cases in ChromaDB with full provenance and retrieves with confidence weighting. | **Hybrid Vector Retrieval + LLM Summary** |
+| **E9 Memory** | `RETRIEVAL+LLM` | Stores precedent cases in ChromaDB with full provenance. (Precedent retrieval is implemented and occurs pre-run, but is not currently injected into the active investigation loop). | **Hybrid Vector Retrieval + LLM Summary** |
 
 ---
 
@@ -90,7 +90,7 @@ Past investigation outcomes stored in Engine E9 maintain an immutable provenance
 - Simulated and unverified legacy records are strictly segregated from observed operational precedents.
 
 ### Pillar 3: Held-Out & Dynamic Evaluation
-System correctness is evaluated against a 16-dimension evaluation framework (`evaluation/evaluator.py`). Ground truth scenarios are dynamically discovered from `data/ground_truth.json` with strict schema validation. The suite validates:
+System correctness is evaluated against a framework of 16 potential evaluation dimensions (`evaluation/evaluator.py`). Ground truth scenarios are dynamically discovered from `data/ground_truth.json` with strict schema validation. (Note: While the evaluator dynamically discovers scenarios, the runtime `investigate()` orchestrator may still use explicit registries for default analysis windows). The suite validates:
 - **Held-out scenarios** (`INC_005` partial bucket guard, `INC_006` compound cause, `INC_007` gradual degradation).
 - **Cross-domain generalization** (`INC_008` B2B SaaS SAML SSO outage).
 - **Adversarial perturbation testing** to ensure scoring monotonicity and hallucination rejection.
@@ -121,7 +121,7 @@ For in-depth explanations of individual components, refer to the dedicated techn
 2. [Engines E1–E9 Detailed Reference](ENGINES.md) — Comprehensive technical reference for each of the nine engines.
 3. [Security & Entitlements Boundary](SECURITY.md) — Pre-retrieval filtering, fail-closed scopes, and isolation mechanics.
 4. [Provenance-Aware Precedent Memory](MEMORY.md) — E9 memory lifecycle, retrieval weighting, human validation, and retention.
-5. [Evaluation Framework & Scorecards](EVALUATION.md) — 16 scorecard dimensions, held-out validation, and calibration.
+5. [Evaluation Framework & Scorecards](EVALUATION.md) — 16 scorecard dimension vocabulary, held-out validation, and confidence label agreement.
 6. [Data Lifecycle & Provenance Model](DATA_AND_PROVENANCE.md) — PostgreSQL, ChromaDB, MethodTag taxonomy, and citations.
 7. [Deterministic vs. LLM Boundaries](LLM_BOUNDARIES.md) — Permitted vs forbidden LLM operations, prompt isolation, and JSON schemas.
 8. [Configuration Architecture](CONFIGURATION.md) — Configuration schemas, loaders, and operational impact.

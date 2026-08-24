@@ -56,7 +56,7 @@ The orchestrator (`pipeline/investigate.py`) runs all engines in sequence. The s
 
 ### 1. Authorization Before Retrieval
 
-The entitlement boundary is enforced *before* evidence reaches any LLM prompt. Persona scopes defined in `config/entitlements.yaml` control which data sources, KPIs, and dimensions are accessible. If the entitlements configuration is missing or malformed, the system fails closed to an empty scope — no data leaks by default.
+The entitlement boundary is enforced *before* evidence reaches any LLM prompt. Persona scopes defined in `config/entitlements.yaml` control which data sources, KPIs, and dimensions are accessible. If the entitlements configuration is missing or malformed, the system fails closed to an empty scope — no data leaks by default. Data that a persona is not entitled to see is explicitly excluded from the evidence assembly layer.
 
 - Evidence assembly (E4) only queries sources the persona is authorized to see.
 - Hypothesis generation (E5) and decision (E7) never receive unauthorized evidence.
@@ -119,7 +119,7 @@ These numbers are from automated test runs against the live pipeline (PostgreSQL
 - Cross-domain generalization works for at least one non-trivial domain shift.
 
 **Architecture claims** (not yet statistically validated):
-- Confidence calibration reporting exists (`evaluation/evaluator.py`, `CalibrationReporter`) but the current dataset (N=8) is too small for meaningful calibration metrics. The target for statistical significance is N ≥ 30.
+- Confidence label agreement reporting exists (`evaluation/evaluator.py`, `CalibrationReporter`) but the current dataset (N=8) is too small to serve as a meaningful statistical calibration metric. The target for statistical significance is N ≥ 30.
 - Memory decay and human-validation boost are implemented and unit-tested but have not been evaluated at scale.
 
 ---

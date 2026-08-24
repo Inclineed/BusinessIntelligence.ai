@@ -28,6 +28,9 @@ flowchart TD
     end
 ```
 
+> [!NOTE]
+> Precedent retrieval is fully implemented in Engine E9 and executed during investigation, but the retrieved precedents are not currently injected into the active investigation loop (they do not inform E5 or E7 context). They are attached to the `InvestigationResult` for visibility.
+
 ---
 
 ## 2. Precedent Metadata Schema
@@ -70,7 +73,7 @@ A precedent's confidence state is stamped at creation time (`original_confidence
 
 ---
 
-## 4. Retrieval Scoring & Confidence Weighting (ISSUE-002 Phase 1 & 2)
+## 4. Retrieval Scoring & Confidence Weighting
 
 ChromaDB uses cosine distance space ($d \in [0, 2]$). E9 converts distance to semantic relevance:
 $$\text{relevance} = \max\left(0.0, \min\left(1.0, 1.0 - \frac{\text{distance}}{2}\right)\right)$$
@@ -91,7 +94,7 @@ $$\text{base\_retrieval\_score} = \text{round}(\text{relevance} \times \text{con
 
 ---
 
-## 5. Human Validation Provenance (ISSUE-002 Phase 3)
+## 5. Human Validation Provenance
 
 Precedents created autonomously default to `human_validated: False` and `validated_at: ""`.
 
@@ -112,7 +115,7 @@ Where `HUMAN_VALIDATION_BOOST = 0.1`. This ensures that when two precedents have
 
 ---
 
-## 6. Domain Retention & Decay (ISSUE-002 Phase 4)
+## 6. Domain Retention & Decay
 
 Precedents are subject to time-to-live (TTL) expiration managed in `config/memory_retention.yaml`:
 
@@ -136,7 +139,7 @@ During `retrieve_precedents()`, if `retention_config` is provided:
 
 ---
 
-## 7. Contamination Prevention (ISSUE-002 & ISSUE-008)
+## 7. Contamination Prevention
 
 To prevent memory contamination and feedback loops:
 
@@ -152,4 +155,4 @@ To reset memory to a clean, verified state, use `scripts/rebuild_memory.py`:
 ```bash
 python scripts/rebuild_memory.py
 ```
-This drops the `investigation_precedents` collection, recreates it with cosine space metadata, and re-indexes verified baseline scenarios (`INC_001` through `INC_008`) with complete provenance metadata.
+This drops the `investigation_precedents` collection, recreates it with cosine space metadata, and re-indexes clean provenance-complete precedents for baseline scenarios (`INC_001` through `INC_008`) with their `human_validated` field initialized to `False`.

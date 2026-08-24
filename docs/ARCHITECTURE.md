@@ -43,6 +43,7 @@ sequenceDiagram
 
     rect rgb(255, 245, 238)
         Note over Orchestrator, Sec: Phase 2: Security & Entitlement Boundary
+        Note over Sec: E3 only operates on KPI-level aggregate data.<br/>Safe to run before authorization.
         Orchestrator->>Sec: authorize(persona, region)
         Sec-->>Orchestrator: AuthorizationScope (authorized_sources, fields, is_empty)
     end
@@ -67,8 +68,11 @@ sequenceDiagram
         E9-->>Orchestrator: Success status (upserted to ChromaDB)
     end
 
-    Orchestrator-->>Client: Complete InvestigationResult
+    Orchestrator-->>Client: Complete InvestigationResult (with retrieved precedents attached)
 ```
+
+> [!NOTE]
+> Precedent storage is part of the active investigation path (Phase 4). Precedent retrieval is implemented by E9 and executed by the orchestrator at the start of the run, but the retrieved precedents are not currently injected into the active investigation loop (they do not inform E5 or E7 context).
 
 ---
 
@@ -106,6 +110,9 @@ _SCENARIO_WINDOWS: dict[str, tuple[datetime, datetime]] = {
 }
 ```
 
+> [!NOTE]
+> Evaluator vs Runtime: The evaluation framework dynamically discovers and validates scenarios from `ground_truth.json`. However, the runtime `investigate()` pipeline still uses this explicit scenario registry for default analysis windows. Adding a scenario to `ground_truth.json` does not automatically make the entire runtime pipeline discover its time boundaries without configuration.
+
 ---
 
 ## 3. Telemetry & Observability (`pipeline/telemetry.py`)
@@ -136,8 +143,8 @@ A Streamlit dashboard providing:
 
 ## 5. Ten Strict Architecture Invariants
 
-1. **Deterministic Numbers**: LLMs never compute z-scores, KPI numbers, rule verdicts, or confidence scores.
-2. **Pre-Retrieval Authorization**: Authorization scopes are resolved *before* querying SQL or vector databases.
+1. **Deterministic Numbers**: LLMs never compute z-scores, KPI numbers, rule verdicts, or confidence scores. Quantitative calculations are deterministic conditional on the structured outputs provided to the deterministic engines.
+2. **Pre-Retrieval Authorization**: Authorization scopes are resolved *before* querying SQL or vector databases. (Provides filter-based isolation, not physical vector-index isolation).
 3. **Fail-Closed Security**: Missing/corrupt entitlement configuration or unknown personas resolve to an empty scope.
 4. **Memory Boundary**: Precedent memory (`investigation_precedents`) is never accessible as raw evidence for E4.
 5. **Observed vs. Simulated Segregation**: Simulated outcome projections (`outcome_type="simulated"`) and unverified legacy records are excluded from normal observed precedent retrieval.

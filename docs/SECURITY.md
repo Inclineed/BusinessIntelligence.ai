@@ -14,6 +14,9 @@ User / Persona Request
        ↓
 [SecurityEngine.authorize()] ──> Resolves AuthorizationScope
        ↓
+       ↓
+E3 Diagnostic Decomposition (Safe: Aggregates only)
+       ↓
 Pre-Query Source & Metadata Filters Applied
        ↓
 PostgreSQL Queries          ChromaDB Vector Queries
@@ -28,7 +31,7 @@ PostgreSQL Queries          ChromaDB Vector Queries
          LLM Context & Prompts
 ```
 
-**Security Invariant**: Unauthorized tables, documents, or collections are **never queried or retrieved**. Data that a persona is not entitled to see never exists in application memory during evidence processing and never enters an LLM prompt.
+**Security Invariant**: Unauthorized tables, documents, or collections are filtered out before querying. Data that a persona is not entitled to see is explicitly excluded from the evidence assembly layer and never enters an LLM prompt. (See Section 4 for the distinction between filter isolation and physical index isolation).
 
 ---
 
@@ -66,6 +69,7 @@ The `SecurityEngine` operates on a strict **fail-closed** policy:
 2. **Unknown Persona**: Any persona string not explicitly defined in the configuration resolves to an empty scope (`is_empty=True`).
 3. **Missing Regional Parameter**: If a persona is configured with `authorized_regions: "own_only"` and the request does not provide a specific region parameter, `SecurityEngine.authorize()` raises a `ValueError` immediately.
 4. **Empty Scope Execution**: When `is_empty=True`, Engine E4 retrieves zero evidence, Engine E5 generates zero hypotheses, and the pipeline halts with deterministic abstention and zero recommended actions.
+5. **E3 Exception**: Engine E3 (Diagnostic Decomposition) executes *before* the authorization boundary. This is structurally safe because E3 exclusively queries KPI-level aggregate metrics and dimensional segments defined in the semantic contract, not raw unaggregated evidence payloads. Raw data retrieval begins strictly at E4.
 
 ---
 

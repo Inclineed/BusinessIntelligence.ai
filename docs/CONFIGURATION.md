@@ -20,7 +20,11 @@ There is no implicit fallback domain or default entitlement set. If any configur
 ## 2. Configuration Files & Schemas
 
 ### `config/kpi_contract.yaml` (KPI Semantic Contract)
-Defines business metrics, driver relationships, SLA thresholds, and allowed breakdown dimensions.
+- **Purpose**: Defines business metrics, driver relationships, SLA thresholds, and allowed breakdown dimensions.
+- **Loader**: `load_kpi_contract(path)`
+- **Primary Consumer**: Engines E1 (KPI Store), E2 (Signal Detection), and E3 (Diagnostic Decomposition).
+- **Failure Behavior**: Missing file or invalid schema raises `ConfigError` and halts the investigation pipeline.
+- **Important Keys**: `direction_is_good`, `sla_minutes`, `dimensions`, `driver_kpis`.
 
 ```yaml
 domain: ecommerce_checkout
@@ -40,7 +44,11 @@ kpis:
 ```
 
 ### `config/entitlements.yaml` (Persona Entitlements)
-Controls which data sources, fields, and regions each user persona is authorized to query.
+- **Purpose**: Controls which data sources, fields, and regions each user persona is authorized to query.
+- **Loader**: `load_entitlements(path)`
+- **Primary Consumer**: `SecurityEngine` (which constrains E4 Evidence Assembly).
+- **Failure Behavior**: Missing file or invalid schema triggers fail-closed behavior (empty authorization scope).
+- **Important Keys**: `authorized_sources`, `authorized_regions`.
 
 ```yaml
 personas:
@@ -69,7 +77,11 @@ personas:
 ```
 
 ### `config/sources.yaml` (Source Registry)
-Registers all physical data stores, database tables, vector collections, data quality ratings, and freshness SLAs.
+- **Purpose**: Registers all physical data stores, database tables, vector collections, data quality ratings, and freshness SLAs.
+- **Loader**: `load_sources(path)`
+- **Primary Consumer**: `SourceRegistry` (used by E1 and E4).
+- **Failure Behavior**: Missing file or invalid schema raises `ConfigError`.
+- **Important Keys**: `type`, `table`/`collection`, `sla_minutes`, `data_quality`.
 
 ```yaml
 sources:
@@ -96,7 +108,11 @@ sources:
 ```
 
 ### `config/memory_retention.yaml` (Memory Retention Policy)
-Defines time-to-live (TTL) expiration windows for historical precedent records stored in ChromaDB (ISSUE-002 Phase 4).
+- **Purpose**: Defines time-to-live (TTL) expiration windows for historical precedent records stored in ChromaDB.
+- **Loader**: `load_memory_retention(path)`
+- **Primary Consumer**: Engine E9 (Precedent Memory).
+- **Failure Behavior**: Missing file or invalid schema raises `ConfigError`.
+- **Important Keys**: `default_ttl_days`, `by_source`.
 
 ```yaml
 retention:

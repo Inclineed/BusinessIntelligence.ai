@@ -95,11 +95,14 @@ Open **`http://localhost:8501`** in a browser to use the operational terminal.
 
 ## 5. Precedent Memory Maintenance & Rebuild
 
+> [!WARNING]
+> This operation deletes the existing `investigation_precedents` collection. Run only when intentionally rebuilding E9 memory.
+
 To reset ChromaDB precedent memory and index clean baseline investigations:
 ```bash
 python scripts/rebuild_memory.py
 ```
-This drops the `investigation_precedents` collection and re-inserts validated records for `INC_001`–`INC_008` with clean provenance and human-validation metadata.
+This drops the `investigation_precedents` collection and re-inserts clean provenance-complete precedents for `INC_001`–`INC_008` with human-validation fields initialized to unvalidated.
 
 ---
 

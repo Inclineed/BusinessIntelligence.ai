@@ -117,7 +117,7 @@ Decomposes detected KPI anomalies across dimensional hierarchies (e.g., `device`
 If dimensional tables have no data for a segment, logs warning and returns an empty contribution list without crashing the pipeline.
 
 ### Security Considerations
-Occurs *prior* to the entitlement boundary. Results are filtered by persona scopes in the subsequent step.
+Occurs *prior* to the entitlement boundary. E3 is safe to run before authorization because it operates exclusively on KPI-level aggregate data and dimensional segments defined in the semantic contract. It does not retrieve or expose raw unstructured evidence payloads. Results are naturally constrained by the persona scope in the subsequent E4 step.
 
 ### Memory Interaction
 None.
@@ -201,7 +201,7 @@ Generates competing candidate causal hypotheses grounded in the KPI driver space
 4. **Validation Guard**: Verifies that every cited evidence ID exists in the E4 evidence set. Drops hypotheses with hallucinated evidence IDs.
 
 ### Deterministic vs LLM Behavior
-**LLM-Generated Narrative.** The LLM writes statements, reasoning, and role linkages. The LLM is strictly prohibited from generating numbers, probabilities, or confidence scores.
+**LLM-Generated Narrative.** The LLM writes statements, reasoning, and role linkages. The LLM is strictly prohibited from generating numbers, probabilities, or confidence scores. While downstream scoring is deterministic conditional on the LLM's structured outputs, the LLM generation itself is not bit-for-bit deterministic, even with `temperature=0.0`.
 
 ### Provenance Tag
 `MethodTag.LLM`
@@ -240,7 +240,7 @@ Evaluates competing hypotheses against five deterministic operational rules, com
 - `ChallengeResult`: `scored_hypotheses`, `confidence_state` (`HIGH`, `MEDIUM`, `LOW`, `ABSTAIN`), `winning_hypothesis_id`, `abstained` flag.
 
 ### Core Logic
-1. **Citation Validation (D16)**: Verifies no duplicate citations, no phantom IDs, and exact normalized summary matching. Citation violations disqualify the hypothesis (`final_score=0.0, confidence=ABSTAIN`).
+1. **Citation Validation (D16)**: Verifies no duplicate citations, no phantom IDs, and exact normalized summary matching. Note: Formatting and whitespace drift is normalized away via canonicalization, so minor text drifts are not fatal. However, material quote mismatches, duplicate citations, and phantom (hallucinated) IDs are fatal citation violations that immediately disqualify the hypothesis (`final_score=0.0, confidence=ABSTAIN`).
 2. **Five Operational Rules**:
    - `timeline` (0.25): Verifies root cause precedes KPI anomaly.
    - `segment_alignment` (0.20): Verifies hypothesis accounts for dominant segment skew.
@@ -369,7 +369,7 @@ Precedents stored in E9 with simulated outcomes are tagged `outcome_type="simula
 ## E9: Provenance-Aware Memory Engine
 
 ### Purpose
-Persists complete investigation records into ChromaDB vector memory (`investigation_precedents`) and retrieves semantically similar past incidents weighted by historical confidence, human validation, and retention decay.
+Persists complete investigation records into ChromaDB vector memory (`investigation_precedents`) and retrieves semantically similar past incidents weighted by historical confidence, human validation, and retention decay. (Note: Precedent retrieval occurs pre-run, but the retrieved precedents are not currently injected into the active investigation loop; they are simply surfaced in the `InvestigationResult`).
 
 ### Inputs
 - **Storage**: `InvestigationResult`, `outcome_type` (`OBSERVED` or `SIMULATED`).

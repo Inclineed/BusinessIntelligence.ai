@@ -141,4 +141,7 @@ def validate_citations(hypothesis: Hypothesis, evidence_by_id: dict[str, Evidenc
     return violations
 ```
 
-If any violation occurs, the hypothesis is immediately **disqualified** (`final_score=0.0`, `confidence=ABSTAIN`).
+If any citation violation occurs, the hypothesis is immediately **disqualified** (`final_score=0.0`, `confidence=ABSTAIN`). 
+
+> [!NOTE]
+> Formatting and whitespace drift is normalized away via canonicalization, so minor text drifts are not fatal. Material quote mismatches, duplicate citations, and phantom IDs are fatal and cause immediate disqualification.
