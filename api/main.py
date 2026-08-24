@@ -233,14 +233,18 @@ async def health() -> dict:
 @app.get("/scenarios")
 async def scenarios() -> dict:
     """
-    Return the list of available scenario identifiers.
+    Return the complete list of available scenario identifiers with catalog metadata.
     """
     return {
         "scenarios": [
-            {"id": "INC_001", "status": "live", "label": "Checkout / Payment Degradation"},
-            {"id": "INC_002", "status": "live", "label": "Simultaneous Causes (Abstain)"},
-            {"id": "INC_003", "status": "evaluation_only", "label": "Sparse History (new KPI)"},
-            {"id": "INC_004", "status": "live", "label": "Data-Quality False Anomaly"},
+            {"id": "INC_001", "status": "live", "label": "Payment Gateway Latency Regression", "domain": "E-Commerce Checkout"},
+            {"id": "INC_002", "status": "live", "label": "Simultaneous Conflicting Causes", "domain": "E-Commerce Marketing"},
+            {"id": "INC_003", "status": "live", "label": "Sparse Baseline History", "domain": "E-Commerce Growth"},
+            {"id": "INC_004", "status": "live", "label": "ETL Ingestion Pipeline Delay", "domain": "Data Engineering"},
+            {"id": "INC_005", "status": "live", "label": "Seasonal Demand Pattern", "domain": "E-Commerce Demand"},
+            {"id": "INC_006", "status": "live", "label": "Compound Network & Deploy Failure", "domain": "Platform Infrastructure"},
+            {"id": "INC_007", "status": "live", "label": "Gradual Worker Memory Leak", "domain": "Backend Compute"},
+            {"id": "INC_008", "status": "live", "label": "Enterprise SAML SSO Outage", "domain": "Enterprise Security"},
         ]
     }
 

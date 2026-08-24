@@ -1,6 +1,8 @@
 import React, { useState } from "react"
 import { InvestigationResult, PersonaType, EvidenceItem } from "../../types/investigation"
+import { SCENARIO_CATALOG } from "../../lib/defaultData"
 import { formatMetricValue, formatDelta, formatZScore } from "../../lib/utils"
+import { ScenarioSelector, PersonaSelector } from "./ScenarioSelector"
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -27,10 +29,10 @@ import {
   X, 
   Cpu, 
   History, 
-  ArrowRight,
-  Database,
+  Clock,
   Layers,
-  HelpCircle
+  ArrowRight,
+  Database
 } from "lucide-react"
 
 interface InvestigationOverviewProps {
@@ -65,39 +67,12 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     method_ownership = {}
   } = result
 
-  // Scenario Titles & Descriptions
-  const scenarioCatalog: Record<string, { title: string; domain: string; desc: string }> = {
-    INC_001: {
-      title: "Payment Gateway Latency Regression",
-      domain: "E-Commerce Checkout",
-      desc: "Checkout v4.3 deploy caused connection pool exhaustion in payment gateway client.",
-    },
-    INC_002: {
-      title: "Simultaneous Conflicting Causes",
-      domain: "E-Commerce Checkout",
-      desc: "Simultaneous gateway latency spike and aggressive competitor discount campaign.",
-    },
-    INC_004: {
-      title: "ETL Ingestion Pipeline Delay",
-      domain: "Data Engineering",
-      desc: "Delayed batch data warehouse sync causing apparent revenue plunge.",
-    },
-    INC_006: {
-      title: "Compound Network & Deploy Failure",
-      domain: "Platform Infrastructure",
-      desc: "Simultaneous upstream packet loss and service client latency regression.",
-    },
-    INC_008: {
-      title: "Enterprise SAML SSO Outage",
-      domain: "B2B SaaS Security",
-      desc: "Identity provider certificate rotation failure blocking enterprise login.",
-    },
-  }
-
-  const currentMeta = scenarioCatalog[scenario_id] || {
-    title: "Operational Incident Investigation",
+  const currentMeta = SCENARIO_CATALOG.find((s) => s.id === scenario_id) || {
+    id: scenario_id,
+    label: "Operational Incident Investigation",
     domain: "Enterprise Infrastructure",
-    desc: "Autonomous root cause isolation and attribution analysis.",
+    description: "Autonomous root cause isolation and attribution analysis.",
+    status: "live",
   }
 
   const isAbstained = Boolean(decision.abstained)
@@ -110,7 +85,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   const { formatted: obsVal, unit: obsUnit } = formatMetricValue(primarySignal.kpi_id || "", primarySignal.observed)
   const { formatted: expVal, unit: expUnit } = formatMetricValue(primarySignal.kpi_id || "", primarySignal.expected)
 
-  // Chronological Time Series Data
+  // Chronological Time Series Data & Real Milestones
   const base = primarySignal.expected || 180
   const observed = primarySignal.observed || 612
   const chartPoints = [
@@ -122,6 +97,26 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     { time: "14:22", baseline: base * 0.99, actual: base * 2.30 },
     { time: "14:30", baseline: base * 1.00, actual: observed },
   ]
+
+  // Scenario-specific milestone markers
+  const scenarioMilestones: Record<string, { time: string; label: string; color: string }[]> = {
+    INC_001: [
+      { time: "14:15", label: "Deploy v4.3 Completed", color: "#38bdf8" },
+      { time: "14:18", label: "Connection Pool Saturated (50/50)", color: "#f59e0b" },
+      { time: "14:30", label: "Peak 504 Timeouts (612 ms)", color: "#ef4444" },
+    ],
+    INC_006: [
+      { time: "14:15", label: "Upstream WAN 18% Packet Loss", color: "#38bdf8" },
+      { time: "14:18", label: "Client Un-jittered Retry Storm", color: "#f59e0b" },
+      { time: "14:30", label: "Auth-Proxy Thread Saturation", color: "#ef4444" },
+    ],
+    INC_008: [
+      { time: "14:15", label: "SAML Signing x509 Cert Expired", color: "#f59e0b" },
+      { time: "14:30", label: "100% SP Assertion Rejection", color: "#ef4444" },
+    ],
+  }
+
+  const milestones = scenarioMilestones[scenario_id] || []
 
   // Primary Hypothesis & Scoring
   const winnerId = decision.winning_hypothesis_id || "H1"
@@ -163,23 +158,21 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
         label: "Data-Quality Guard Triggered (ABSTAIN)",
         color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
       }
+    } else if (scenario_id === "INC_003") {
+      statusBadge = {
+        label: "Sparse Baseline Guard Triggered (ABSTAIN)",
+        color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
+      }
+    } else if (scenario_id === "INC_005") {
+      statusBadge = {
+        label: "Normal Demand Seasonality (NO ANOMALY)",
+        color: "bg-blue-500/10 text-blue-400 border-blue-500/25",
+      }
     } else {
       statusBadge = {
         label: `Abstained (${confidenceState})`,
         color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
       }
-    }
-  }
-
-  const handleScenarioChange = (newId: string) => {
-    if (onScenarioSelect) {
-      onScenarioSelect(newId, persona)
-    }
-  }
-
-  const handlePersonaChange = (newPersona: PersonaType) => {
-    if (onScenarioSelect) {
-      onScenarioSelect(scenario_id, newPersona)
     }
   }
 
@@ -209,21 +202,21 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           <button
             onClick={() => onRunLive && onRunLive(scenario_id, persona)}
             disabled={isLiveLoading}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.25)] active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.25)] active:scale-95 disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLiveLoading ? "animate-spin" : ""}`} />
-            <span>{isLiveLoading ? "Running Inference..." : "Re-run Investigation"}</span>
+            <span>{isLiveLoading ? "Running Inference..." : "Run Investigation"}</span>
           </button>
         </div>
       </nav>
 
       {/* ── Main Investigation Dashboard Canvas ─────────────────────────── */}
-      <main className="max-w-[1380px] mx-auto px-6 lg:px-10 py-7 space-y-8">
+      <main className="max-w-[1380px] mx-auto px-6 lg:px-10 py-6 space-y-7">
         
-        {/* ── 2. Compact Header with Unified State Controls ────────────────── */}
-        <header className="p-5 rounded-2xl bg-[#0F1017] border border-white/[0.06] flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* ── 2. Compact Header with Unified Custom Command Selectors ──────── */}
+        <header className="p-4 rounded-2xl bg-[#0F1017] border border-white/[0.06] flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono font-semibold border border-emerald-500/20">
                 {scenario_id}
               </span>
@@ -238,42 +231,29 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               </span>
             </div>
 
-            <h1 className="text-xl lg:text-2xl font-bold tracking-tight text-white">
-              {currentMeta.title}
+            <h1 className="text-lg lg:text-xl font-bold tracking-tight text-white">
+              {currentMeta.label}
             </h1>
           </div>
 
-          {/* Scenario & Scope Selectors (Always in sync with displayedResult) */}
-          <div className="flex items-center gap-2 bg-[#151620] p-1.5 rounded-xl border border-white/[0.06] self-start md:self-center">
-            <select
-              value={scenario_id}
-              onChange={(e) => handleScenarioChange(e.target.value)}
-              className="bg-[#0C0D12] text-xs text-white font-medium px-2.5 py-1.5 rounded-lg outline-none cursor-pointer border border-white/[0.08] hover:border-emerald-500/40 transition-colors font-sans"
-            >
-              <option value="INC_001">INC_001 · Payment Gateway Latency</option>
-              <option value="INC_002">INC_002 · Conflicting Root Causes</option>
-              <option value="INC_004">INC_004 · ETL Ingestion Delay Guard</option>
-              <option value="INC_006">INC_006 · Compound Network Failure</option>
-              <option value="INC_008">INC_008 · Enterprise SAML SSO Outage</option>
-            </select>
-
-            <div className="w-px h-6 bg-white/10" />
-
-            <select
-              value={persona}
-              onChange={(e) => handlePersonaChange(e.target.value as PersonaType)}
-              className="bg-[#0C0D12] text-xs text-neutral-200 font-medium px-2.5 py-1.5 rounded-lg outline-none cursor-pointer border border-white/[0.08] hover:border-emerald-500/40 transition-colors font-sans"
-            >
-              <option value="analyst">Analyst (Full Access)</option>
-              <option value="cfo">CFO (Executive)</option>
-              <option value="manager">Manager (Regional)</option>
-            </select>
+          {/* Custom Command-Style Scenario & Persona Selectors */}
+          <div className="flex items-center gap-2 self-start md:self-center">
+            <ScenarioSelector
+              selectedScenarioId={scenario_id}
+              onSelectScenario={(newId) => onScenarioSelect && onScenarioSelect(newId, persona)}
+              disabled={isLiveLoading}
+            />
+            <PersonaSelector
+              selectedPersona={persona}
+              onSelectPersona={(newPersona) => onScenarioSelect && onScenarioSelect(scenario_id, newPersona)}
+              disabled={isLiveLoading}
+            />
           </div>
         </header>
 
         {/* ── 3. GUARD / ABSTENTION STATE BANNER (When Applicable) ─────────── */}
         {isAbstained && decision.abstention_reason && (
-          <div className="p-6 rounded-2xl bg-gradient-to-r from-amber-950/25 via-[#13141C] to-[#13141C] border border-amber-500/30 shadow-md space-y-2">
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/25 via-[#13141C] to-[#13141C] border border-amber-500/30 shadow-md space-y-2">
             <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span>Governance & Falsification Guard Activated</span>
@@ -290,10 +270,10 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
         )}
 
         {/* ── 4. THE CAUSAL INVESTIGATION SPINE ──────────────────────────── */}
-        <div className="relative pl-6 lg:pl-8 space-y-10 before:absolute before:left-2 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-emerald-500/40 before:via-blue-500/20 before:to-emerald-500/40">
+        <div className="relative pl-6 lg:pl-8 space-y-9 before:absolute before:left-2 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-emerald-500/40 before:via-blue-500/20 before:to-emerald-500/40">
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 1: WHAT CHANGED? (Completed stage - visually recedes)        */}
+          {/* STEP 1: WHAT CHANGED? (Completed stage)                           */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border-2 border-emerald-400/60 flex items-center justify-center text-[10px] font-bold text-emerald-400">
@@ -302,7 +282,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
             <div>
               <div className="text-xs font-medium text-neutral-400">01 · Signal Detection</div>
-              <h2 className="text-lg font-bold text-white tracking-tight">
+              <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
                 What changed and how large is the shift?
               </h2>
             </div>
@@ -312,14 +292,14 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               
               {/* Primary Anomaly Card (5-Col) */}
               <div className="lg:col-span-5 p-5 rounded-2xl bg-[#111219] border border-red-500/25 shadow-sm flex flex-col justify-between relative overflow-hidden">
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   <div className="flex justify-between items-start">
                     <div>
                       <span className="text-[11px] font-semibold text-red-400 uppercase tracking-wide flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                         Primary Anomalous KPI
                       </span>
-                      <h3 className="text-base font-bold text-white capitalize mt-0.5">
+                      <h3 className="text-sm font-bold text-white capitalize mt-0.5">
                         {primarySignal.kpi_id ? primarySignal.kpi_id.replace(/_/g, " ") : "Primary Metric"}
                       </h3>
                     </div>
@@ -329,17 +309,17 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </div>
 
                   <div className="flex items-baseline gap-3">
-                    <span className="text-3xl lg:text-4xl font-extrabold font-mono text-white tracking-tight">
+                    <span className="text-3xl font-extrabold font-mono text-white tracking-tight">
                       {obsVal}{obsUnit}
                     </span>
-                    <span className="text-base font-bold font-mono text-red-400 flex items-center">
+                    <span className="text-sm font-bold font-mono text-red-400 flex items-center">
                       <TrendingUp className="w-4 h-4 mr-0.5" />
                       {formatDelta(primarySignal.delta_pct)}
                     </span>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-white/[0.06] grid grid-cols-2 gap-3 text-xs">
+                <div className="mt-3 pt-2.5 border-t border-white/[0.06] grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <div className="text-neutral-400 text-[11px]">Expected Baseline</div>
                     <div className="text-neutral-100 font-semibold text-sm mt-0.5">{expVal}{expUnit}</div>
@@ -374,7 +354,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                           {isAnom && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
                         </div>
 
-                        <div className="text-xl font-bold font-mono text-white tracking-tight mt-1">
+                        <div className="text-xl font-bold font-mono text-white tracking-tight mt-0.5">
                           {formatted}{unit}
                         </div>
 
@@ -384,7 +364,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                         </div>
                       </div>
 
-                      <div className="mt-3 pt-2.5 border-t border-white/[0.05] text-[11px] text-neutral-400 flex justify-between">
+                      <div className="mt-3 pt-2 border-t border-white/[0.05] text-[11px] text-neutral-400 flex justify-between">
                         <span>Baseline:</span>
                         <span className="text-neutral-200 font-medium">{bFmt}{bUnit}</span>
                       </div>
@@ -397,7 +377,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 2: WHEN & WHERE DID IT HAPPEN? (Timeline & Decomposition)    */}
+          {/* STEP 2: WHEN & WHERE DID IT HAPPEN? (With Dedicated Annotation Band) */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border-2 border-emerald-400/60 flex items-center justify-center text-[10px] font-bold text-emerald-400">
@@ -406,38 +386,53 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
             <div>
               <div className="text-xs font-medium text-neutral-400">02 · Temporal & Dimensional Context</div>
-              <h2 className="text-lg font-bold text-white tracking-tight">
+              <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
                 When did it happen and where is it concentrated?
               </h2>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               
-              {/* Chronological Timeline Chart (7-Col) */}
+              {/* Chronological Timeline Chart (7-Col) with Dedicated Milestone Band */}
               <div className="lg:col-span-7 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-2">
                   <div>
                     <h3 className="text-xs font-semibold text-white capitalize">
                       {primarySignal.kpi_id ? primarySignal.kpi_id.replace(/_/g, " ") : "Metric"} Shock Progression
                     </h3>
-                    <p className="text-[11px] text-neutral-400 mt-0.5">
-                      Deploy completed at 14:15 UTC followed by pool saturation inflection at 14:18 UTC.
-                    </p>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs font-mono">
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/30 border border-emerald-500" />
-                      <span className="text-neutral-400 text-[11px]">Baseline</span>
+                      <span className="text-neutral-400 text-[11px]">Baseline Band</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-white" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-white" />
                       <span className="text-white text-[11px]">Observed</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="w-full h-[210px]">
+                {/* Dedicated Unclipped Milestone Annotation Band */}
+                {milestones.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-xl bg-black/40 border border-white/[0.04]">
+                    <div className="text-[10px] font-mono uppercase text-neutral-400 font-bold px-1 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-neutral-400" />
+                      <span>Timeline:</span>
+                    </div>
+                    {milestones.map((m, idx) => (
+                      <div key={idx} className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white/[0.04] border border-white/[0.06] text-xs">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: m.color }} />
+                        <span className="font-mono font-bold text-neutral-200 text-[10px]">{m.time}</span>
+                        <span className="text-neutral-400 text-[10px]">· {m.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Plot Area */}
+                <div className="w-full h-[190px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={chartPoints} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
                       <defs>
@@ -450,8 +445,9 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                       <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: "#737373", fontSize: 10, fontFamily: "JetBrains Mono" }} dy={4} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: "#737373", fontSize: 10, fontFamily: "JetBrains Mono" }} />
                       <Tooltip contentStyle={{ backgroundColor: "#14151E", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", color: "#fff", fontSize: "11px" }} />
-                      <ReferenceLine x="14:15" stroke="#38bdf8" strokeDasharray="3 3" label={{ value: "14:15 Deploy v4.3", fill: "#38bdf8", fontSize: 10, position: "top" }} />
-                      <ReferenceLine x="14:18" stroke="#f59e0b" strokeDasharray="3 3" label={{ value: "14:18 Pool Saturation", fill: "#f59e0b", fontSize: 10, position: "top" }} />
+                      {milestones.map((m, idx) => (
+                        <ReferenceLine key={idx} x={m.time} stroke={m.color} strokeDasharray="3 3" strokeOpacity={0.6} />
+                      ))}
                       <Area type="monotone" dataKey="baseline" stroke="rgba(16, 185, 129, 0.4)" fill="url(#baselineAreaGradient)" strokeWidth={1.5} />
                       <Line type="monotone" dataKey="actual" stroke="#ffffff" strokeWidth={2} dot={{ r: 2.5, fill: "#fff" }} />
                       <ReferenceDot x="14:30" y={observed} r={5} fill="#ef4444" stroke="rgba(239, 68, 68, 0.35)" strokeWidth={8} />
@@ -459,7 +455,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </ResponsiveContainer>
                 </div>
 
-                <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex flex-wrap justify-between items-center text-[11px] text-neutral-400">
+                <div className="mt-3 pt-2 border-t border-white/[0.06] flex flex-wrap justify-between items-center text-[11px] text-neutral-400">
                   <span>Start: <strong className="text-white">14:18 UTC</strong></span>
                   <span>Peak Shock: <strong className="text-red-400">{obsVal}{obsUnit} (+240%)</strong></span>
                   <span>Evaluation Window: <strong className="text-white">15m rolling</strong></span>
@@ -473,7 +469,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                     Segment Variance Attribution
                   </h3>
                   <p className="text-[11px] text-neutral-400 mb-3">
-                    Multi-dimensional decomposition across traffic dimensions.
+                    Multi-dimensional decomposition across platform dimensions.
                   </p>
 
                   {contributions.length > 0 ? (
@@ -512,7 +508,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   )}
                 </div>
 
-                <div className="mt-3 pt-2.5 border-t border-white/[0.06] text-[11px] text-neutral-400">
+                <div className="mt-3 pt-2 border-t border-white/[0.06] text-[11px] text-neutral-400">
                   Dominant segment: <strong className="text-white">{contributions[0]?.segment || "Global"} ({contributions[0]?.contribution_pct || 100}%)</strong>
                 </div>
               </div>
@@ -524,7 +520,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           {/* STEP 3: WHAT CAUSED IT? (CENTRAL INVESTIGATION PIVOT — LEVEL 1)   */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
-            {/* Prominent Active Spine Node */}
+            {/* Active Spine Node */}
             <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-emerald-400 flex items-center justify-center text-xs font-bold text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.6)]">
               ●
             </div>
@@ -534,13 +530,13 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>03 · Central Root Cause Pivot</span>
               </div>
-              <h2 className="text-xl lg:text-2xl font-extrabold text-white tracking-tight">
+              <h2 className="text-lg lg:text-xl font-extrabold text-white tracking-tight">
                 What caused it? (Evaluated Primary Hypothesis)
               </h2>
             </div>
 
             {/* Dominant Root Cause Card */}
-            <div className="p-7 rounded-3xl bg-gradient-to-br from-[#151722] via-[#111219] to-[#0D0E14] border border-emerald-500/35 shadow-[0_4px_40px_rgba(16,185,129,0.09)] space-y-5">
+            <div className="p-6 rounded-3xl bg-gradient-to-br from-[#151722] via-[#111219] to-[#0D0E14] border border-emerald-500/35 shadow-[0_4px_40px_rgba(16,185,129,0.09)] space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2.5">
                   <span className="px-3 py-1 rounded-xl bg-emerald-500/15 text-emerald-400 font-mono font-bold text-xs border border-emerald-500/30">
@@ -567,7 +563,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 </div>
               </div>
 
-              <p className="text-base lg:text-lg font-bold text-white leading-relaxed">
+              <p className="text-base font-bold text-white leading-relaxed">
                 "{cleanStatement}"
               </p>
 
@@ -617,14 +613,14 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
             <div>
               <div className="text-xs font-medium text-neutral-400">04 · Empirical Evidence Foundation</div>
-              <h2 className="text-lg font-bold text-white tracking-tight">
+              <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
                 What evidence supports {winnerId}?
               </h2>
             </div>
 
             {/* Responsive Evidence Layout based on count */}
             {evidence.length > 0 ? (
-              <div className={`grid gap-4 ${
+              <div className={`grid gap-3.5 ${
                 evidence.length === 1 
                   ? "grid-cols-1" 
                   : evidence.length === 2 
@@ -637,11 +633,11 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                     <div
                       key={ev.evidence_id}
                       onClick={() => setActiveEvidenceModal(ev)}
-                      className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] hover:border-emerald-500/40 transition-all duration-200 cursor-pointer group flex flex-col justify-between space-y-3"
+                      className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] hover:border-emerald-500/40 transition-all duration-200 cursor-pointer group flex flex-col justify-between space-y-3"
                     >
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="px-2.5 py-0.5 rounded-full bg-white/[0.04] text-xs font-mono font-medium text-neutral-200 capitalize border border-white/[0.06]">
+                          <span className="px-2 py-0.5 rounded-full bg-white/[0.04] text-xs font-mono font-medium text-neutral-200 capitalize border border-white/[0.06]">
                             {ev.source_id.replace(/_/g, " ")}
                           </span>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${
@@ -672,7 +668,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 })}
               </div>
             ) : (
-              <div className="p-6 rounded-2xl bg-[#0E0F15] border border-white/[0.06] text-center text-xs text-neutral-400">
+              <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] text-center text-xs text-neutral-400">
                 Evidence assembly was suppressed under data-quality verification guardrails.
               </div>
             )}
@@ -690,25 +686,25 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs font-medium text-neutral-400">05 · Falsification Audit</div>
-                <h2 className="text-lg font-bold text-white tracking-tight">
+                <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
                   Why did {winnerId} win and alternatives lose?
                 </h2>
               </div>
               <div className="text-xs font-mono text-neutral-400">Winner Separation: <strong className="text-emerald-400">+{winnerGap.toFixed(2)}</strong></div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-3">
+            <div className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-3">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs font-mono">
                   <thead>
                     <tr className="text-neutral-400 border-b border-white/[0.06] text-[11px]">
-                      <th className="pb-2.5 px-3">Hypothesis Candidate</th>
-                      <th className="pb-2.5 px-3 text-center">Support Score</th>
-                      <th className="pb-2.5 px-3 text-center">Contradiction</th>
-                      <th className="pb-2.5 px-3 text-center">Final Score</th>
-                      <th className="pb-2.5 px-3 text-center">Timeline</th>
-                      <th className="pb-2.5 px-3 text-center">Mechanism</th>
-                      <th className="pb-2.5 px-3 text-center">Verdict</th>
+                      <th className="pb-2 px-3">Hypothesis Candidate</th>
+                      <th className="pb-2 px-3 text-center">Support</th>
+                      <th className="pb-2 px-3 text-center">Contradiction</th>
+                      <th className="pb-2 px-3 text-center">Final Score</th>
+                      <th className="pb-2 px-3 text-center">Timeline</th>
+                      <th className="pb-2 px-3 text-center">Mechanism</th>
+                      <th className="pb-2 px-3 text-center">Verdict</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.04]">
@@ -723,7 +719,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
                       return (
                         <tr key={sh.hypothesis_id} className={`hover:bg-white/[0.02] transition-colors ${isWin ? "bg-emerald-500/[0.03]" : ""}`}>
-                          <td className="py-3 px-3">
+                          <td className="py-2.5 px-3">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-white px-2 py-0.5 rounded bg-white/[0.06]">{sh.hypothesis_id}</span>
                               <span className="text-neutral-200 font-sans font-medium line-clamp-1 max-w-sm">
@@ -736,24 +732,24 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                               )}
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-center text-emerald-400 font-semibold">+{sh.support_score.toFixed(2)}</td>
-                          <td className="py-3 px-3 text-center text-red-400 font-semibold">-{sh.contradiction_penalty.toFixed(2)}</td>
-                          <td className="py-3 px-3 text-center text-white font-bold">{sh.final_score.toFixed(2)}</td>
-                          <td className="py-3 px-3 text-center">
+                          <td className="py-2.5 px-3 text-center text-emerald-400 font-semibold">+{sh.support_score.toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-center text-red-400 font-semibold">-{sh.contradiction_penalty.toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-center text-white font-bold">{sh.final_score.toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-center">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                               timeline === "pass" ? "text-emerald-400" : "text-amber-400"
                             }`}>
                               {timeline.toUpperCase()}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-center">
+                          <td className="py-2.5 px-3 text-center">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                               mechanism === "pass" ? "text-emerald-400" : "text-red-400"
                             }`}>
                               {mechanism.toUpperCase()}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-center">
+                          <td className="py-2.5 px-3 text-center">
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                               contradiction === "pass" ? "text-emerald-400" : "text-red-400"
                             }`}>
@@ -780,7 +776,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
             <div>
               <div className="text-xs font-medium text-neutral-400">06 · Prescribed Resolution & Impact</div>
-              <h2 className="text-lg font-bold text-white tracking-tight">
+              <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
                 What action must be taken and what is the expected recovery?
               </h2>
             </div>
@@ -788,22 +784,22 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               
               {/* Prescribed Resolution (6-Col) */}
-              <div className="lg:col-span-6 p-6 rounded-2xl bg-gradient-to-br from-emerald-950/30 via-[#101117] to-[#0D0E14] border border-emerald-500/30 shadow-md flex flex-col justify-between space-y-4">
-                <div className="space-y-2">
+              <div className="lg:col-span-6 p-5 rounded-2xl bg-gradient-to-br from-emerald-950/30 via-[#101117] to-[#0D0E14] border border-emerald-500/30 shadow-md flex flex-col justify-between space-y-3.5">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs uppercase tracking-wide">
                     <ShieldCheck className="w-4 h-4" />
                     <span>Prescribed Operational Action</span>
                   </div>
 
-                  <h3 className="text-base lg:text-lg font-bold text-white leading-snug">
+                  <h3 className="text-base font-bold text-white leading-snug">
                     {cleanAction}
                   </h3>
                 </div>
 
-                <div className="space-y-2 pt-3 border-t border-emerald-500/20 text-xs">
+                <div className="space-y-2 pt-2.5 border-t border-emerald-500/20 text-xs">
                   <div className="p-3 rounded-xl bg-black/40 border border-emerald-500/15 space-y-0.5">
                     <span className="text-[10px] text-emerald-400 font-semibold block uppercase">Verification Condition</span>
-                    <span className="text-neutral-200">
+                    <span className="text-neutral-200 text-xs">
                       {decision.verification_metric || "Ensure p95 gateway latency drops < 200 ms within 5m post-rollback."}
                     </span>
                   </div>
@@ -837,7 +833,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </span>
                 </div>
 
-                <div className="w-full h-[160px]">
+                <div className="w-full h-[150px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={simChartData} margin={{ top: 8, right: 10, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
@@ -868,15 +864,15 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
             <div>
               <div className="text-xs font-medium text-neutral-400">07 · Institutional Precedent Memory (E9)</div>
-              <h2 className="text-lg font-bold text-white tracking-tight">
+              <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
                 Have we seen this failure pattern before?
               </h2>
             </div>
 
             {precedents.length > 0 ? (
-              <div className={`grid gap-4 ${precedents.length === 1 ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
+              <div className={`grid gap-3.5 ${precedents.length === 1 ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
                 {precedents.map((pr: any, idx) => (
-                  <div key={idx} className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-2.5">
+                  <div key={idx} className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-2">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-white font-mono text-xs px-2 py-0.5 rounded bg-white/[0.05]">{pr.scenario_id}</span>
@@ -916,7 +912,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
       {/* ── DETAIL MODAL: EVIDENCE INSPECTION ────────────────────────────── */}
       {activeEvidenceModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setActiveEvidenceModal(null)}>
-          <div className="max-w-xl w-full bg-[#13141E] border border-white/[0.12] rounded-2xl p-6 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="max-w-xl w-full bg-[#13141E] border border-white/[0.12] rounded-2xl p-5 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono font-bold text-emerald-400 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25">
