@@ -1113,3 +1113,171 @@ class TestPhase4DomainExpiry:
         assert len(results) == 1
         assert results[0]["scenario_id"] == "ANCIENT_V"
 
+
+class TestMemoryEngineAuthorizationProvenance:
+    """Tests for E9 precedent source provenance and persona entitlement filtering."""
+
+    def setup_method(self):
+        self.provider = _make_llm_provider()
+
+    def test_store_precedent_persists_evidence_source_ids(self):
+        """store_precedent derives source_ids from result.evidence and saves in metadata."""
+        from models import Evidence, MethodTag
+        chroma = _make_chroma_client(count=0)
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        result = _make_result(scenario_id="TEST_PROV_01")
+        result.evidence = [
+            Evidence(
+                evidence_id="ev_01",
+                source_id="payment_gateway",
+                kind="structured",
+                reliability_weight=0.99,
+                relevance=0.95,
+                summary="Payment pool saturated",
+                raw_ref="sql://payment_events",
+                method=MethodTag.SQL,
+            ),
+            Evidence(
+                evidence_id="ev_02",
+                source_id="deployment_log",
+                kind="unstructured",
+                reliability_weight=1.0,
+                relevance=0.90,
+                summary="Deploy v4.3",
+                raw_ref="doc://deploy.log",
+                method=MethodTag.RETRIEVAL,
+            ),
+        ]
+
+        ok = engine.store_precedent(result)
+        assert ok is True
+
+        collection = chroma.get_or_create_collection.return_value
+        assert collection.upsert.called
+        call_kwargs = collection.upsert.call_args.kwargs
+        metas = call_kwargs["metadatas"][0]
+        assert "source_ids" in metas
+        assert metas["source_ids"] == "deployment_log,payment_gateway"
+
+    def test_cfo_retrieval_excludes_unauthorized_infrastructure_sources(self):
+        """CFO scope (orders, inventory) excludes precedents requiring payment_gateway or deployment_log."""
+        cfo_sources = frozenset({"orders", "inventory"})
+        chroma = _make_chroma_client(
+            count=3,
+            query_ids=["INC_006", "INC_005", "INC_008"],
+            query_distances=[0.1, 0.2, 0.15],
+            query_metadatas=[
+                {
+                    "scenario_id": "INC_006",
+                    "source_ids": "payment_gateway,deployment_log,support_tickets",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "summary": "Payment gateway connection regression.",
+                },
+                {
+                    "scenario_id": "INC_005",
+                    "source_ids": "orders,inventory",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "summary": "Inventory stockout across key catalog SKUs.",
+                },
+                {
+                    "scenario_id": "INC_008",
+                    "source_ids": "release_notes,support_tickets",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "summary": "SSO authentication failure on enterprise tenant.",
+                },
+            ],
+            query_documents=[
+                "Payment gateway regression.",
+                "Inventory stockout.",
+                "SSO authentication failure.",
+            ],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        results = engine.retrieve_precedents(
+            "INC_001",
+            authorized_sources=cfo_sources,
+            persona="cfo",
+        )
+
+        # INC_006 and INC_008 require unauthorized sources; only INC_005 (orders, inventory) is allowed
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "INC_005"
+        assert set(results[0]["source_ids"]).issubset(cfo_sources)
+
+    def test_analyst_retrieval_includes_cross_domain_precedents(self):
+        """Analyst scope (7 sources) receives matching precedents across infrastructure & business domains."""
+        analyst_sources = frozenset({
+            "orders", "payment_gateway", "inventory", "marketing",
+            "deployment_log", "support_tickets", "release_notes",
+        })
+        chroma = _make_chroma_client(
+            count=3,
+            query_ids=["INC_006", "INC_005", "INC_008"],
+            query_distances=[0.1, 0.2, 0.15],
+            query_metadatas=[
+                {
+                    "scenario_id": "INC_006",
+                    "source_ids": "payment_gateway,deployment_log,support_tickets",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "summary": "Payment gateway connection regression.",
+                },
+                {
+                    "scenario_id": "INC_005",
+                    "source_ids": "orders,inventory",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "summary": "Inventory stockout across key catalog SKUs.",
+                },
+                {
+                    "scenario_id": "INC_008",
+                    "source_ids": "release_notes,support_tickets",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "summary": "SSO authentication failure.",
+                },
+            ],
+            query_documents=["Payment issue.", "Inventory issue.", "SSO issue."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        results = engine.retrieve_precedents(
+            "INC_001",
+            authorized_sources=analyst_sources,
+            persona="analyst",
+        )
+
+        assert len(results) == 3
+        for r in results:
+            assert set(r["source_ids"]).issubset(analyst_sources)
+
+    def test_fail_closed_empty_scope_blocks_all_precedents(self):
+        """Empty authorization scope returns zero precedents."""
+        empty_sources = frozenset()
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["INC_006"],
+            query_distances=[0.1],
+            query_metadatas=[{
+                "scenario_id": "INC_006",
+                "source_ids": "payment_gateway",
+                "confidence_state": "high",
+                "outcome_type": "observed",
+            }],
+            query_documents=["Payment issue."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        results = engine.retrieve_precedents(
+            "INC_001",
+            authorized_sources=empty_sources,
+            persona="unknown",
+        )
+        assert len(results) == 0
+
+

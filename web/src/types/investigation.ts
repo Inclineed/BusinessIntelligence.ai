@@ -90,6 +90,7 @@ export interface PrecedentItem {
   timestamp?: string
   created_at?: string
   evidence_ids?: string
+  source_ids?: string[]
   human_validated?: boolean
   validated_at?: string
   method?: string

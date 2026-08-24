@@ -100,6 +100,8 @@ class Dependencies:
     window_end: Optional[datetime] = None
     # Optional override for Challenge Engine thresholds
     challenge_thresholds: Optional[Any] = None
+    # Optional region filter for manager persona
+    region: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -332,10 +334,31 @@ def investigate(
     precedents: list[dict] = []
 
     # ------------------------------------------------------------------
-    # E9 (pre-run) — Memory Engine: retrieve precedents [RETRIEVAL]
-    # Requirement: 15.3
+    # Step 0b — Entitlement Authorization Scope (Requirements 5.1, 5.2)
     # ------------------------------------------------------------------
-    logger.info("investigate: [E9-pre] Memory Engine — retrieve precedents for scenario=%s", scenario_id)
+    logger.info("investigate: [Security] Entitlement boundary — persona=%s", persona_str)
+    try:
+        security_engine = SecurityEngine(deps.entitlements_config)
+        scope = security_engine.authorize(persona_str, region=getattr(deps, "region", None))
+        if scope.is_empty:
+            logger.warning(
+                "investigate: authorization scope is empty for persona '%s'; "
+                "evidence assembly and precedent retrieval will proceed with no authorized sources.",
+                persona_str,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "investigate: entitlement resolution failed: %s — using fail-closed empty scope.",
+            exc,
+            exc_info=True,
+        )
+        scope = SecurityEngine.fail_closed().authorize(persona_str, region=getattr(deps, "region", None))
+
+    # ------------------------------------------------------------------
+    # E9 (pre-run) — Memory Engine: retrieve precedents [RETRIEVAL]
+    # Filtered strictly by persona entitlement authorized_sources (Req 15.3, 5.2)
+    # ------------------------------------------------------------------
+    logger.info("investigate: [E9-pre] Memory Engine — retrieve precedents for scenario=%s persona=%s", scenario_id, persona_str)
     try:
         memory_engine = MemoryEngine(
             chroma_client=deps.chroma_client,
@@ -344,6 +367,8 @@ def investigate(
         precedents = memory_engine.retrieve_precedents(
             scenario_id=scenario_id,
             query_context=scenario_id,
+            authorized_sources=scope.authorized_sources,
+            persona=persona_str,
         )
     except Exception as exc:  # noqa: BLE001
         logger.error(
@@ -479,31 +504,10 @@ def investigate(
         )
 
     # ------------------------------------------------------------------
-    # Entitlement boundary — BEFORE E4 (Requirement 5.2)
-    # ------------------------------------------------------------------
-    logger.info("investigate: [Security] Entitlement boundary — persona=%s", persona_str)
-    try:
-        security_engine = SecurityEngine(deps.entitlements_config)
-        scope = security_engine.authorize(persona_str, region=None)
-        if scope.is_empty:
-            logger.warning(
-                "investigate: authorization scope is empty for persona '%s'; "
-                "evidence assembly will proceed with no authorized sources.",
-                persona_str,
-            )
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
-            "investigate: entitlement resolution failed: %s — using fail-closed empty scope.",
-            exc,
-            exc_info=True,
-        )
-        scope = SecurityEngine.fail_closed().authorize(persona_str, region=None)
-
-    # ------------------------------------------------------------------
     # E4 — Evidence [SQL+RETRIEVAL]
     # Requirement: 6.1–6.7, 7.3–7.5
     # ------------------------------------------------------------------
-    logger.info("investigate: [E4] Evidence Engine (constrained by authorized_sources before assembly)")
+    logger.info("investigate: [E4] Evidence Engine (constrained by authorized_sources=%s before assembly)", scope.authorized_sources)
     try:
         with telemetry_svc.measure_engine("evidence"):
             evidence_result = assemble_evidence(

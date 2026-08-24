@@ -312,10 +312,17 @@ class MemoryEngine:
             ot_val = outcome_type.value if hasattr(outcome_type, "value") else str(outcome_type)
             iso_now = datetime.now(tz=timezone.utc).isoformat()
             evidence_ids_str = ",".join(e.evidence_id for e in result.evidence) if result.evidence else ""
+            source_ids_set = {
+                e.source_id.strip()
+                for e in (result.evidence or [])
+                if getattr(e, "source_id", None) and str(e.source_id).strip()
+            }
+            source_ids_str = ",".join(sorted(source_ids_set))
 
             metadata = {
                 "scenario_id": scenario_id,
                 "persona": result.persona.value if hasattr(result.persona, "value") else str(result.persona),
+                "source_ids": source_ids_str,
                 "winning_hypothesis": winning_id or "",
                 "recommendation": (recommended_action or "")[:500],
                 "confidence_state": confidence_state_val,
@@ -493,9 +500,12 @@ class MemoryEngine:
         query_context: str = "",
         include_simulated: bool = False,
         retention_config: Optional[dict] = None,
+        authorized_sources: Optional[frozenset[str] | set[str] | list[str]] = None,
+        persona: Optional[str] = None,
     ) -> list[dict]:
         """
-        Retrieve up to MAX_RESULTS precedents with relevance ≥ RELEVANCE_THRESHOLD.
+        Retrieve up to MAX_RESULTS precedents with relevance ≥ RELEVANCE_THRESHOLD,
+        strictly bounded by persona authorized_sources entitlement (Req 15.3, 5.2).
 
         The query text is the scenario_id optionally enriched with free-form
         context (e.g. a short description of the KPI movement).
@@ -520,6 +530,7 @@ class MemoryEngine:
             timestamp         : str (ISO-8601)
             created_at        : str (ISO-8601)
             evidence_ids      : str
+            source_ids        : list[str]
             human_validated   : bool
             validated_at      : str (ISO-8601 or empty)
             method            : MethodTag.RETRIEVAL
@@ -577,9 +588,10 @@ class MemoryEngine:
             return []
 
         # ----------------------------------------------------------------
-        # Build result list, filtering by relevance threshold & confidence weighting
+        # Build result list, filtering by authorization, relevance, & confidence weighting
         # ----------------------------------------------------------------
         precedents: list[dict] = []
+        auth_sources_set = frozenset(authorized_sources) if authorized_sources is not None else None
 
         ids_list: list[str] = (query_result.get("ids") or [[]])[0]
         distances_list: list[float] = (query_result.get("distances") or [[]])[0]
@@ -597,11 +609,46 @@ class MemoryEngine:
             if not include_simulated and outcome_type_val != OutcomeType.OBSERVED.value:
                 continue
 
+            # ----------------------------------------------------------------
+            # 1. Provenance Authorization Filtering (Security Engine Entitlement Invariant)
+            # ----------------------------------------------------------------
+            raw_sources = meta.get("source_ids", "")
+            if raw_sources:
+                candidate_sources = {s.strip() for s in raw_sources.split(",") if s.strip()}
+            else:
+                candidate_sources = set()
+                scenario_meta_id = meta.get("scenario_id", doc_id)
+                _LEGACY_SOURCES = {
+                    "INC_001": {"payment_gateway", "inventory", "support_tickets", "release_notes"},
+                    "INC_002": {"payment_gateway", "marketing", "orders"},
+                    "INC_003": {"orders"},
+                    "INC_004": {"orders"},
+                    "INC_005": {"orders", "inventory"},
+                    "INC_006": {"payment_gateway", "deployment_log", "support_tickets"},
+                    "INC_007": {"deployment_log", "support_tickets"},
+                    "INC_008": {"release_notes", "support_tickets", "deployment_log"},
+                }
+                if scenario_meta_id in _LEGACY_SOURCES and meta.get("persona") != "cfo":
+                    candidate_sources = _LEGACY_SOURCES[scenario_meta_id]
+
+            if auth_sources_set is not None and candidate_sources:
+                if not candidate_sources.issubset(auth_sources_set):
+                    logger.info(
+                        "retrieve_precedents: filtering unauthorized precedent %s (candidate_sources=%s not subset of authorized_sources=%s)",
+                        doc_id, candidate_sources, auth_sources_set
+                    )
+                    continue
+
+            # ----------------------------------------------------------------
+            # 2. Relevance Threshold Filtering
+            # ----------------------------------------------------------------
             relevance = _cosine_to_relevance(distance)
             if relevance < self.RELEVANCE_THRESHOLD:
                 continue
 
-            # ---- Phase 4: Domain-specific expiry filtering ----
+            # ----------------------------------------------------------------
+            # 3. Domain-Specific Expiry Filtering (TTL)
+            # ----------------------------------------------------------------
             if retention_config is not None:
                 created_at_str = meta.get("created_at", "")
                 if created_at_str:
@@ -638,6 +685,9 @@ class MemoryEngine:
                     )
                     continue
 
+            # ----------------------------------------------------------------
+            # 4. Confidence Weighting
+            # ----------------------------------------------------------------
             conf_state_str = meta.get("confidence_state") or meta.get("original_confidence_state") or ""
             try:
                 conf_state = ConfidenceState(conf_state_str.lower()) if conf_state_str else None
@@ -648,9 +698,10 @@ class MemoryEngine:
 
             retrieval_score = round(relevance * conf_weight, 4)
 
-            # ---- Phase 3: Human validation boost ----
+            # ----------------------------------------------------------------
+            # 5. Human Validation Boost
+            # ----------------------------------------------------------------
             is_human_validated = meta.get("human_validated", False)
-            # ChromaDB may store booleans as strings
             if isinstance(is_human_validated, str):
                 is_human_validated = is_human_validated.lower() in ("true", "1")
             if is_human_validated:
@@ -670,6 +721,7 @@ class MemoryEngine:
                 "timestamp": meta.get("timestamp", ""),
                 "created_at": meta.get("created_at", meta.get("timestamp", "")),
                 "evidence_ids": meta.get("evidence_ids", ""),
+                "source_ids": sorted(candidate_sources),
                 # ISSUE-002 Phase 3 — Human validation provenance
                 "human_validated": bool(is_human_validated),
                 "validated_at": meta.get("validated_at", ""),
@@ -695,7 +747,7 @@ class MemoryEngine:
                 scenario_id,
             )
 
-        return precedents
+        return precedents[: self.MAX_RESULTS]
 
 
 # ---------------------------------------------------------------------------

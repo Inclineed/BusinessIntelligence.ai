@@ -352,6 +352,7 @@ async def investigate_endpoint(
         entitlements_config=entitlements_config,
         sources_config=state.sources_config,
         scenario_id=body.scenario_id,
+        region=body.region,
     )
 
     try:

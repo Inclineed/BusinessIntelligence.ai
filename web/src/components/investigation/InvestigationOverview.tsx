@@ -1432,6 +1432,18 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                             </p>
                           </div>
                         )}
+
+                        {/* Authorized Source Provenance Chips */}
+                        {pr.source_ids && pr.source_ids.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            <span className="text-[10px] font-mono text-neutral-400">Sources:</span>
+                            {pr.source_ids.map((src) => (
+                              <span key={src} className="px-1.5 py-0.2 rounded text-[10px] font-mono text-neutral-300 bg-white/[0.04] border border-white/[0.06]">
+                                {src}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Bottom Metric & Metadata Bar */}
@@ -1619,6 +1631,19 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 </div>
               </div>
             </div>
+
+            {activePrecedentModal.source_ids && activePrecedentModal.source_ids.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-mono text-neutral-400 uppercase">Authorized Source Provenance:</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {activePrecedentModal.source_ids.map((src) => (
+                    <span key={src} className="px-2 py-0.5 rounded-md bg-white/[0.04] border border-white/[0.08] text-xs font-mono text-neutral-200">
+                      {src}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {activePrecedentModal.evidence_ids && (
               <div className="space-y-1">
