@@ -17,6 +17,8 @@ export default defineConfig({
         target: "http://localhost:8080",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
+        timeout: 300000, // 5 minutes timeout for local LLM inference
+        proxyTimeout: 300000,
       },
     },
   },

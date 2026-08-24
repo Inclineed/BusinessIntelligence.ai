@@ -46,15 +46,23 @@ interface AnalysisConfig {
   region: string
 }
 
+interface ApiErrorState {
+  message: string
+  statusCode?: number
+  details?: string
+}
+
 interface InvestigationOverviewProps {
   result: InvestigationResult
   activeConfig: AnalysisConfig
   evaluatedConfig: AnalysisConfig
   isStale: boolean
   isPreviousResultPinned: boolean
+  apiError?: ApiErrorState | null
   onConfigChange: (scenarioId: string, persona: PersonaType, region: string) => void
   onRunLive: (scenarioId?: string, persona?: PersonaType, region?: string) => void
   onKeepViewingPrevious: () => void
+  onDismissError?: () => void
   isLiveLoading?: boolean
   liveElapsedSeconds?: number
 }
@@ -65,19 +73,21 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   evaluatedConfig,
   isStale,
   isPreviousResultPinned,
+  apiError = null,
   onConfigChange,
   onRunLive,
   onKeepViewingPrevious,
+  onDismissError,
   isLiveLoading = false,
   liveElapsedSeconds = 0,
 }) => {
   const [activeEvidenceModal, setActiveEvidenceModal] = useState<EvidenceItem | null>(null)
   const [showTelemetryDrawer, setShowTelemetryDrawer] = useState(false)
 
-  // 1. EXACT SOURCE OF TRUTH: All displayed fields derive strictly from `result`
+  // 1. EXACT SOURCE OF TRUTH: Safe extraction from active `result`
   const { 
-    scenario_id, 
-    persona = "analyst", 
+    scenario_id = activeConfig.scenarioId, 
+    persona = evaluatedConfig.persona || "analyst", 
     signals = [], 
     contributions = [], 
     evidence = [], 
@@ -87,8 +97,10 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     outcome = {}, 
     precedents = [], 
     telemetry = { latency_ms_by_engine: {}, llm_calls: 0, llm_tokens_in: 0, llm_tokens_out: 0 },
-    method_ownership = {}
-  } = result
+    method_ownership = {},
+    access_denied = false,
+    reason = "",
+  } = result || {}
 
   const currentMeta = SCENARIO_CATALOG.find((s) => s.id === scenario_id) || {
     id: scenario_id,
@@ -99,7 +111,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   }
 
   // Persona Scope Definitions
-  const personaScopes: Record<PersonaType, { label: string; sourcesCount: number; summary: string }> = {
+  const personaScopes: Record<string, { label: string; sourcesCount: number; summary: string }> = {
     analyst: {
       label: "Analyst",
       sourcesCount: 7,
@@ -117,27 +129,30 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     },
   }
 
+  const normalizedPersona = (persona || "analyst").toLowerCase()
+  const activePersonaScope = personaScopes[normalizedPersona] || personaScopes.analyst
+
   // 2. FUNDAMENTAL THREE-WAY STATE MODEL:
   // State A: isGuardTriggered (decision.abstained && hypotheses.length === 0)
   // State B: isAmbiguousAbstain (decision.abstained && hypotheses.length > 0)
   // State C: isSuccess (!decision.abstained && hypotheses.length > 0)
-  const isAbstained = Boolean(decision.abstained)
-  const hasHypotheses = hypotheses.length > 0
+  const isAbstained = Boolean(decision?.abstained) || Boolean(access_denied)
+  const hasHypotheses = Array.isArray(hypotheses) && hypotheses.length > 0
   const isGuardTriggered = isAbstained && !hasHypotheses
   const isAmbiguousAbstain = isAbstained && hasHypotheses
   const isSuccess = !isAbstained && hasHypotheses
 
   // Signal extraction
-  const anomalies = signals.filter((s) => s.is_anomaly)
+  const anomalies = signals.filter((s) => s?.is_anomaly)
   const primarySignal = anomalies[0] || signals[0] || {}
-  const secondarySignals = signals.filter((s) => s.kpi_id !== primarySignal.kpi_id)
+  const secondarySignals = signals.filter((s) => s?.kpi_id !== primarySignal?.kpi_id)
 
   const { formatted: obsVal, unit: obsUnit } = formatMetricValue(primarySignal.kpi_id || "", primarySignal.observed)
   const { formatted: expVal, unit: expUnit } = formatMetricValue(primarySignal.kpi_id || "", primarySignal.expected)
 
   // Chronological Time Series Data
-  const base = primarySignal.expected || 180
-  const observed = primarySignal.observed || 612
+  const base = typeof primarySignal.expected === "number" ? primarySignal.expected : 180
+  const observed = typeof primarySignal.observed === "number" ? primarySignal.observed : 612
   const chartPoints = [
     { time: "13:45", baseline: base * 0.98, actual: base * 0.99 },
     { time: "13:55", baseline: base * 0.99, actual: base * 1.01 },
@@ -169,30 +184,37 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   const milestones = scenarioMilestones[scenario_id] || []
 
   // Hypothesis & Scoring Computations
-  const sortedScores = [...scored].sort((a, b) => b.final_score - a.final_score)
-  const winnerId = decision.winning_hypothesis_id || sortedScores[0]?.hypothesis_id
-  const winningHyp = hypotheses.find((h) => h.hypothesis_id === winnerId)
-  const winningScored = scored.find((s) => s.hypothesis_id === winnerId) || sortedScores[0]
+  const sortedScores = Array.isArray(scored) ? [...scored].sort((a, b) => (b?.final_score || 0) - (a?.final_score || 0)) : []
+  const winnerId = decision?.winning_hypothesis_id || sortedScores[0]?.hypothesis_id || "H1"
+  const winningHyp = Array.isArray(hypotheses) ? hypotheses.find((h) => h?.hypothesis_id === winnerId) : undefined
+  const winningScored = Array.isArray(scored) ? (scored.find((s) => s?.hypothesis_id === winnerId) || sortedScores[0]) : undefined
 
-  const winnerGap = sortedScores.length > 1 ? sortedScores[0].final_score - sortedScores[1].final_score : 0.0
-  const confidenceState = winningScored?.confidence_state || (isAbstained ? "ABSTAIN" : "HIGH")
+  const winnerGap = sortedScores.length > 1 && typeof sortedScores[0]?.final_score === "number" && typeof sortedScores[1]?.final_score === "number"
+    ? sortedScores[0].final_score - sortedScores[1].final_score
+    : 0.0
+
+  const confidenceState = winningScored?.confidence_state?.toUpperCase() || (isAbstained ? "ABSTAIN" : "HIGH")
+  const winningScoreFmt = typeof winningScored?.final_score === "number" ? winningScored.final_score.toFixed(2) : "0.90"
 
   const cleanStatement = winningHyp?.statement
     ? winningHyp.statement.replace(/\[LLM_NARRATIVE\]|\[LLM\]|\[RULES\]/g, "").trim()
     : ""
 
-  const cleanAction = decision.recommended_action
+  const cleanAction = decision?.recommended_action
     ? decision.recommended_action.replace(/\[LLM_NARRATIVE\]|\[LLM\]/g, "").trim()
     : "Hold operational changes and monitor telemetry."
 
   // Guard Type Rationale
-  const isSparse = signals.some((s) => s.sparse_history) || scenario_id === "INC_003"
-  const isDataQuality = signals.some((s) => s.data_quality_suspect) || scenario_id === "INC_004"
-  const isNominal = signals.every((s) => !s.is_anomaly) || scenario_id === "INC_005"
+  const isSparse = signals.some((s) => s?.sparse_history) || scenario_id === "INC_003"
+  const isDataQuality = signals.some((s) => s?.data_quality_suspect) || scenario_id === "INC_004"
+  const isNominal = signals.length > 0 && signals.every((s) => !s?.is_anomaly) || scenario_id === "INC_005"
 
   let guardTitle = "Deterministic Safety Guardrail Triggered"
   let guardCategory = "Governance & Anomaly Suppression Guard"
-  if (isSparse) {
+  if (access_denied) {
+    guardTitle = "Entitlement Authorization Guard (Access Denied)"
+    guardCategory = "Pre-Retrieval Security Boundary"
+  } else if (isSparse) {
     guardTitle = "Sparse Baseline History Guard"
     guardCategory = "Data Volume Safety Guard"
   } else if (isDataQuality) {
@@ -205,11 +227,16 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
   // Status Badge Logic
   let statusBadge = {
-    label: `Completed (${confidenceState} ${winningScored?.final_score?.toFixed(2) || "0.90"})`,
+    label: `Completed (${confidenceState} ${winningScoreFmt})`,
     color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25",
   }
 
-  if (isGuardTriggered) {
+  if (access_denied) {
+    statusBadge = {
+      label: "Access Denied (403 FORBIDDEN)",
+      color: "bg-red-500/10 text-red-400 border-red-500/25",
+    }
+  } else if (isGuardTriggered) {
     if (isSparse) {
       statusBadge = {
         label: "Sparse Baseline Guard (ABSTAIN)",
@@ -269,8 +296,8 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   const activeCausalTrail = causalTrailByScenario[scenario_id] || []
 
   // E8 Simulation Data
-  const recoveryPct = outcome.projected_recovery_pct || 88.0
-  const dropDelta = Math.abs(primarySignal.delta_pct || 40)
+  const recoveryPct = typeof outcome?.projected_recovery_pct === "number" ? outcome.projected_recovery_pct : 88.0
+  const dropDelta = Math.abs(typeof primarySignal?.delta_pct === "number" ? primarySignal.delta_pct : 40)
   const simChartData = [
     { period: "t-2 (Normal)", actual: 100, projected: null },
     { period: "t-1 (Shock Start)", actual: 100 - dropDelta * 0.45, projected: null },
@@ -360,7 +387,52 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           </div>
         </header>
 
-        {/* ── 3. CONFIGURATION CHANGED / STALE RESULT BANNER ──────────────── */}
+        {/* ── 3. VISIBLE ERROR PANEL (When API Error Occurs) ────────────────── */}
+        {apiError && (
+          <div className="p-5 rounded-2xl bg-[#1D1214] border border-red-500/40 shadow-xl space-y-3 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-red-400 font-bold text-sm">
+                <AlertTriangle className="w-4 h-4 text-red-400" />
+                <span>Investigation Execution Failed {apiError.statusCode ? `(HTTP ${apiError.statusCode})` : ""}</span>
+              </div>
+              {onDismissError && (
+                <button onClick={onDismissError} className="p-1 rounded-lg text-neutral-400 hover:text-white cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs text-neutral-200 leading-relaxed">
+              {apiError.message}
+            </p>
+
+            {apiError.details && (
+              <div className="p-3 rounded-xl bg-black/60 border border-white/[0.06] text-[11px] font-mono text-neutral-400 break-all leading-tight">
+                {apiError.details}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                onClick={() => onRunLive(activeConfig.scenarioId, activeConfig.persona, activeConfig.region)}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Retry Request</span>
+              </button>
+              {onDismissError && (
+                <button
+                  onClick={onDismissError}
+                  className="px-3.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-neutral-300 text-xs transition-all border border-white/[0.08] cursor-pointer"
+                >
+                  Dismiss & View Active Data
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── 4. CONFIGURATION CHANGED / STALE RESULT BANNER ──────────────── */}
         {isStale && !isPreviousResultPinned && (
           <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-950/30 via-[#12131D] to-[#12131D] border border-blue-500/35 shadow-xl space-y-3.5 animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -379,7 +451,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <div className="text-white font-bold flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded bg-white/[0.06]">{evaluatedConfig.scenarioId}</span>
                   <span className="capitalize">{evaluatedConfig.persona}</span> · {evaluatedConfig.region === "all" ? "Global" : evaluatedConfig.region}
-                  <span className="text-neutral-400 text-[10px]">({personaScopes[evaluatedConfig.persona]?.sourcesCount} sources)</span>
+                  <span className="text-neutral-400 text-[10px]">({personaScopes[evaluatedConfig.persona.toLowerCase()]?.sourcesCount || 7} sources)</span>
                 </div>
               </div>
 
@@ -388,7 +460,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <div className="text-blue-300 font-bold flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">{activeConfig.scenarioId}</span>
                   <span className="capitalize">{activeConfig.persona}</span> · {activeConfig.region === "all" ? "Global" : activeConfig.region}
-                  <span className="text-neutral-400 text-[10px]">({personaScopes[activeConfig.persona]?.sourcesCount} sources)</span>
+                  <span className="text-neutral-400 text-[10px]">({personaScopes[activeConfig.persona.toLowerCase()]?.sourcesCount || 7} sources)</span>
                 </div>
               </div>
             </div>
@@ -414,7 +486,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           </div>
         )}
 
-        {/* ── 4. PINNED PREVIOUS RESULT NOTICE (When user explicitly chose to keep viewing) ── */}
+        {/* ── 5. PINNED PREVIOUS RESULT NOTICE ─────────────────────────────── */}
         {isStale && isPreviousResultPinned && (
           <div className="px-4 py-2 rounded-xl bg-[#14151F] border border-white/[0.08] flex items-center justify-between text-xs text-neutral-300">
             <div className="flex items-center gap-2">
@@ -430,15 +502,15 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           </div>
         )}
 
-        {/* ── 5. GUARD BANNER (When Applicable) ────────────────────────────── */}
-        {isAbstained && decision.abstention_reason && (
+        {/* ── 6. GUARD BANNER (When Applicable) ────────────────────────────── */}
+        {isAbstained && (decision?.abstention_reason || reason) && (
           <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/25 via-[#13141C] to-[#13141C] border border-amber-500/30 shadow-md space-y-2">
             <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span>{guardCategory}</span>
             </div>
             <p className="text-xs text-neutral-300 leading-relaxed pl-6">
-              {decision.abstention_reason}
+              {decision?.abstention_reason || reason || "Investigation returned an abstention outcome."}
             </p>
             <div className="pl-6 pt-1 flex flex-wrap gap-4 text-xs font-mono text-neutral-400">
               <span>Evidence Assembled: <strong className="text-white">{evidence.length}</strong></span>
@@ -448,7 +520,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           </div>
         )}
 
-        {/* ── 6. THE CAUSAL INVESTIGATION SPINE ──────────────────────────── */}
+        {/* ── 7. THE CAUSAL INVESTIGATION SPINE ──────────────────────────── */}
         <div className="relative pl-6 lg:pl-8 space-y-9 before:absolute before:left-2 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-emerald-500/40 before:via-blue-500/20 before:to-emerald-500/40">
 
           {/* ═════════════════════════════════════════════════════════════════ */}
@@ -680,12 +752,13 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                     </p>
                   </div>
 
-                  {contributions.length > 0 ? (
+                  {Array.isArray(contributions) && contributions.length > 0 ? (
                     <div className="space-y-2.5">
                       {contributions.map((c, idx) => {
                         const isDominant = idx === 0
                         const rank = idx + 1
-                        const delta = c.segment_delta_pct !== undefined ? c.segment_delta_pct : null
+                        const cPct = typeof c?.contribution_pct === "number" ? c.contribution_pct : 0
+                        const delta = typeof c?.segment_delta_pct === "number" ? c.segment_delta_pct : null
 
                         return (
                           <div
@@ -709,8 +782,8 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                                 </span>
                                 <div>
                                   <div className="flex items-center gap-1.5">
-                                    <span className="text-xs font-bold text-white font-mono">{c.segment}</span>
-                                    <span className="text-[10px] text-neutral-400 uppercase font-mono">({c.dimension})</span>
+                                    <span className="text-xs font-bold text-white font-mono">{c?.segment || "segment"}</span>
+                                    <span className="text-[10px] text-neutral-400 uppercase font-mono">({c?.dimension || "dimension"})</span>
                                     {isDominant && (
                                       <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
                                         DOMINANT
@@ -722,7 +795,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
                               <div className="text-right">
                                 <div className={`text-sm font-extrabold font-mono tracking-tight ${isDominant ? "text-white" : "text-neutral-200"}`}>
-                                  {c.contribution_pct.toFixed(1)}% <span className="text-[10px] font-normal text-neutral-400 font-sans">variance</span>
+                                  {cPct.toFixed(1)}% <span className="text-[10px] font-normal text-neutral-400 font-sans">variance</span>
                                 </div>
                                 {delta !== null && (
                                   <div className={`text-[10px] font-mono font-semibold ${delta > 0 ? "text-red-400" : "text-emerald-400"}`}>
@@ -737,7 +810,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                                 className={`h-full rounded-full transition-all duration-300 ${
                                   isDominant ? "bg-emerald-400" : "bg-neutral-500/60"
                                 }`}
-                                style={{ width: `${Math.min(100, c.contribution_pct)}%` }}
+                                style={{ width: `${Math.min(100, cPct)}%` }}
                               />
                             </div>
                           </div>
@@ -755,7 +828,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <div className="pt-2.5 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-neutral-400">
                   <span>DOMINANT CONTRIBUTOR:</span>
                   <span className="text-white font-mono font-bold">
-                    {contributions[0]?.segment || "Global"} · {contributions[0]?.contribution_pct ? `${contributions[0].contribution_pct.toFixed(1)}%` : "100%"} of variance
+                    {contributions[0]?.segment || "Global"} · {typeof contributions[0]?.contribution_pct === "number" ? `${contributions[0].contribution_pct.toFixed(1)}%` : "100%"} of variance
                   </span>
                 </div>
               </div>
@@ -806,7 +879,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                     <span>Guardrail Trigger Rationale:</span>
                   </div>
                   <p className="text-xs text-neutral-200 leading-relaxed font-sans">
-                    {decision.abstention_reason || "Deterministic safety guard prevented hypothesis formulation."}
+                    {decision?.abstention_reason || reason || "Deterministic safety guard prevented hypothesis formulation."}
                   </p>
                 </div>
 
@@ -820,7 +893,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
                   <div className="p-3.5 rounded-xl bg-[#14151F] border border-white/[0.06] space-y-1">
                     <span className="text-[10px] text-neutral-400 font-semibold block uppercase">Evidence Assembled</span>
-                    <div className="text-base font-bold text-amber-400">0 Items</div>
+                    <div className="text-base font-bold text-amber-400">{evidence.length} Items</div>
                     <div className="text-[10px] text-neutral-400">Retrieval Suppressed</div>
                   </div>
 
@@ -877,26 +950,26 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/20 space-y-1">
                   <div className="text-[11px] font-mono uppercase font-bold text-amber-400">Primary Challenge Conclusion:</div>
                   <p className="text-xs text-neutral-200 leading-relaxed font-sans">
-                    {decision.abstention_reason}
+                    {decision?.abstention_reason || reason}
                   </p>
                 </div>
 
                 {/* Competing Top Hypotheses Side-by-Side */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs">
                   {sortedScores.slice(0, 2).map((sh, idx) => {
-                    const hypObj = hypotheses.find((h) => h.hypothesis_id === sh.hypothesis_id)
+                    const hypObj = hypotheses.find((h) => h?.hypothesis_id === sh?.hypothesis_id)
                     return (
-                      <div key={sh.hypothesis_id} className="p-4 rounded-2xl bg-[#14151F] border border-white/[0.06] space-y-2">
+                      <div key={sh?.hypothesis_id || idx} className="p-4 rounded-2xl bg-[#14151F] border border-white/[0.06] space-y-2">
                         <div className="flex justify-between items-center">
                           <span className="font-bold text-white font-mono px-2 py-0.5 rounded bg-white/[0.06]">
-                            Candidate {idx + 1}: {sh.hypothesis_id}
+                            Candidate {idx + 1}: {sh?.hypothesis_id}
                           </span>
                           <span className="font-mono font-bold text-amber-400 text-xs">
-                            Score: {sh.final_score.toFixed(2)}
+                            Score: {typeof sh?.final_score === "number" ? sh.final_score.toFixed(2) : "0.00"}
                           </span>
                         </div>
                         <p className="text-xs text-neutral-200 leading-relaxed font-sans">
-                          "{hypObj?.statement}"
+                          "{hypObj?.statement || "Alternative hypothesis"}"
                         </p>
                       </div>
                     )
@@ -937,7 +1010,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                       <span className="text-neutral-400 text-[11px]">CONFIDENCE:</span>
                       <span className="text-emerald-400 font-bold flex items-center gap-1">
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        {confidenceState} ({winningScored?.final_score?.toFixed(2) || "0.90"})
+                        {confidenceState} ({winningScoreFmt})
                       </span>
                     </div>
 
@@ -978,7 +1051,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           {/* ═════════════════════════════════════════════════════════════════ */}
           {/* STEP 4: SUPPORTING EVIDENCE                                       */}
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {evidence.length > 0 && (
+          {Array.isArray(evidence) && evidence.length > 0 && (
             <section className="relative space-y-3">
               <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
                 →
@@ -999,7 +1072,10 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   : "grid-cols-1 md:grid-cols-3"
               }`}>
                 {evidence.map((ev) => {
-                  const isHighReliability = ev.reliability_weight >= 0.9
+                  const isHighReliability = (ev?.reliability_weight ?? 1.0) >= 0.9
+                  const sourceStr = (ev?.source_id || "source").replace(/_/g, " ")
+                  const relPct = Math.round((ev?.relevance ?? 0.9) * 100)
+
                   return (
                     <div
                       key={ev.evidence_id}
@@ -1009,7 +1085,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="px-2 py-0.5 rounded-full bg-white/[0.04] text-xs font-mono font-medium text-neutral-200 capitalize border border-white/[0.06]">
-                            {ev.source_id.replace(/_/g, " ")}
+                            {sourceStr}
                           </span>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${
                             isHighReliability 
@@ -1028,7 +1104,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                       <div className="pt-2.5 border-t border-white/[0.05] text-xs font-mono text-neutral-400 flex justify-between items-center">
                         <div>
                           <span className="text-[11px] text-neutral-300 font-semibold block">{ev.evidence_id}</span>
-                          <span className="text-[10px] text-neutral-500">Relevance: {(ev.relevance * 100).toFixed(0)}% • Method: {ev.method}</span>
+                          <span className="text-[10px] text-neutral-500">Relevance: {relPct}% • Method: {ev.method || "SQL"}</span>
                         </div>
                         <span className="text-emerald-400 group-hover:translate-x-0.5 transition-transform flex items-center font-sans font-medium text-xs">
                           Inspect <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
@@ -1045,7 +1121,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           {/* ═════════════════════════════════════════════════════════════════ */}
           {/* STEP 5: FALSIFICATION AUDIT                                       */}
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {scored.length > 0 && (
+          {Array.isArray(scored) && scored.length > 0 && (
             <section className="relative space-y-3">
               <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
                 →
@@ -1079,19 +1155,19 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
                       {scored.map((sh) => {
-                        const isWin = sh.hypothesis_id === winnerId && !isAbstained
-                        const hypObj = hypotheses.find((h) => h.hypothesis_id === sh.hypothesis_id)
-                        const ruleMap = new Map(sh.rule_results?.map((r) => [r.rule_name, r]))
+                        const isWin = sh?.hypothesis_id === winnerId && !isAbstained
+                        const hypObj = hypotheses.find((h) => h?.hypothesis_id === sh?.hypothesis_id)
+                        const ruleMap = new Map(sh?.rule_results?.map((r) => [r?.rule_name, r]))
 
                         const timeline = ruleMap.get("timeline")?.verdict || "pass"
                         const mechanism = ruleMap.get("mechanism_consistency")?.verdict || "pass"
                         const contradiction = ruleMap.get("contradiction")?.verdict || "pass"
 
                         return (
-                          <tr key={sh.hypothesis_id} className={`hover:bg-white/[0.02] transition-colors ${isWin ? "bg-emerald-500/[0.03]" : ""}`}>
+                          <tr key={sh?.hypothesis_id} className={`hover:bg-white/[0.02] transition-colors ${isWin ? "bg-emerald-500/[0.03]" : ""}`}>
                             <td className="py-2.5 px-3">
                               <div className="flex items-center gap-2">
-                                <span className="font-bold text-white px-2 py-0.5 rounded bg-white/[0.06]">{sh.hypothesis_id}</span>
+                                <span className="font-bold text-white px-2 py-0.5 rounded bg-white/[0.06]">{sh?.hypothesis_id}</span>
                                 <span className="text-neutral-200 font-sans font-medium line-clamp-1 max-w-sm">
                                   {hypObj?.statement || "Alternative causal explanation"}
                                 </span>
@@ -1102,9 +1178,9 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                                 )}
                               </div>
                             </td>
-                            <td className="py-2.5 px-3 text-center text-emerald-400 font-semibold">+{sh.support_score.toFixed(2)}</td>
-                            <td className="py-2.5 px-3 text-center text-red-400 font-semibold">-{sh.contradiction_penalty.toFixed(2)}</td>
-                            <td className="py-2.5 px-3 text-center text-white font-bold">{sh.final_score.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-center text-emerald-400 font-semibold">+{typeof sh?.support_score === "number" ? sh.support_score.toFixed(2) : "0.00"}</td>
+                            <td className="py-2.5 px-3 text-center text-red-400 font-semibold">-{typeof sh?.contradiction_penalty === "number" ? sh.contradiction_penalty.toFixed(2) : "0.00"}</td>
+                            <td className="py-2.5 px-3 text-center text-white font-bold">{typeof sh?.final_score === "number" ? sh.final_score.toFixed(2) : "0.00"}</td>
                             <td className="py-2.5 px-3 text-center">
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                                 timeline === "pass" ? "text-emerald-400" : "text-amber-400"
@@ -1175,7 +1251,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   <div className="p-3 rounded-xl bg-black/40 border border-white/[0.06] space-y-0.5">
                     <span className="text-[10px] text-neutral-400 font-semibold block uppercase">Protocol Objective</span>
                     <span className="text-neutral-200 text-xs">
-                      {decision.verification_metric || (
+                      {decision?.verification_metric || (
                         isGuardTriggered 
                           ? "Accumulate baseline telemetry and re-evaluate once observation criteria are satisfied."
                           : "Verify metric stabilization within expected operational threshold."
@@ -1222,7 +1298,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </div>
 
                   <div className="pt-2 border-t border-white/[0.05] text-[10px] text-neutral-400 leading-relaxed">
-                    {outcome.disclaimer || "Model-generated recovery projection based on historical deploy rollback rebound curves — not empirical evidence."}
+                    {outcome?.disclaimer || "Model-generated recovery projection based on historical deploy rollback rebound curves — not empirical evidence."}
                   </div>
                 </div>
               )}
@@ -1249,40 +1325,51 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               {/* Explicit Persona Retrieval Scope Badge */}
               <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-black/40 border border-white/[0.06] text-[11px] font-mono text-neutral-400">
                 <Lock className="w-3 h-3 text-neutral-400" />
-                <span>Scope: <strong className="text-white capitalize">{persona}</strong> ({personaScopes[persona]?.sourcesCount || 7} authorized sources)</span>
+                <span>Scope: <strong className="text-white capitalize">{persona}</strong> ({activePersonaScope.sourcesCount} authorized sources)</span>
               </div>
             </div>
 
-            {precedents.length > 0 ? (
+            {Array.isArray(precedents) && precedents.length > 0 ? (
               <div className={`grid gap-3.5 ${precedents.length === 1 ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
-                {precedents.map((pr: any, idx) => (
-                  <div key={idx} className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-2">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-white font-mono text-xs px-2 py-0.5 rounded bg-white/[0.05]">{pr.scenario_id}</span>
-                        <span className="text-[10px] text-neutral-400 font-mono">{pr.created_at || "Historical Precedent"}</span>
+                {precedents.map((pr: any, idx) => {
+                  const prScenarioId = typeof pr === "string" ? pr : pr?.scenario_id || `PREC_${idx + 1}`
+                  const prSimilarity = typeof pr === "object" && typeof pr?.similarity === "number" ? pr.similarity : 0.88
+                  const prConfidence = typeof pr === "object" && pr?.confidence_state ? pr.confidence_state : "HIGH"
+                  const prHumanValidated = typeof pr === "object" ? Boolean(pr?.human_validated) : false
+                  const prSummary = typeof pr === "object" && pr?.summary
+                    ? pr.summary
+                    : `Historical operational precedent record for ${prScenarioId} archived with resolution trail.`
+                  const prCreatedAt = typeof pr === "object" && pr?.created_at ? pr.created_at : "Historical Precedent"
+
+                  return (
+                    <div key={idx} className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-2">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white font-mono text-xs px-2 py-0.5 rounded bg-white/[0.05]">{prScenarioId}</span>
+                          <span className="text-[10px] text-neutral-400 font-mono">{prCreatedAt}</span>
+                        </div>
+                        {prHumanValidated ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Human Verified
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] text-neutral-400 bg-white/[0.04] border border-white/[0.06]">
+                            Unvalidated Baseline
+                          </span>
+                        )}
                       </div>
-                      {pr.human_validated ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Human Verified
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] text-neutral-400 bg-white/[0.04] border border-white/[0.06]">
-                          Unvalidated Baseline
-                        </span>
-                      )}
-                    </div>
 
-                    <p className="text-xs text-neutral-200 leading-relaxed font-sans">
-                      {pr.summary || "Prior operational precedent record archived with complete resolution trail."}
-                    </p>
+                      <p className="text-xs text-neutral-200 leading-relaxed font-sans">
+                        {prSummary}
+                      </p>
 
-                    <div className="pt-2 border-t border-white/[0.05] flex justify-between text-[11px] text-neutral-400 font-mono">
-                      <span>Similarity: <strong className="text-emerald-400">{((pr.similarity || 0.88) * 100).toFixed(0)}%</strong></span>
-                      <span>Confidence: <strong className="text-white">{pr.confidence_state || "HIGH"}</strong></span>
+                      <div className="pt-2 border-t border-white/[0.05] flex justify-between text-[11px] text-neutral-400 font-mono">
+                        <span>Similarity: <strong className="text-emerald-400">{(prSimilarity * 100).toFixed(0)}%</strong></span>
+                        <span>Confidence: <strong className="text-white">{prConfidence}</strong></span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-1.5 text-center">
@@ -1290,7 +1377,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   No matching precedent was available within the current authorization scope.
                 </div>
                 <div className="text-[11px] text-neutral-400 max-w-xl mx-auto leading-relaxed">
-                  Historical precedent retrieval is constrained by the active entitlement boundary ({personaScopes[persona]?.summary || "active persona scope"}). Precedent records outside this authorization scope are not accessible.
+                  Historical precedent retrieval is constrained by the active entitlement boundary ({activePersonaScope.summary}). Precedent records outside this authorization scope are not accessible.
                 </div>
               </div>
             )}
@@ -1298,7 +1385,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
         </div>
       </main>
 
-      {/* ── 7. TRUTHFUL LIVE INVESTIGATION EXECUTION PROGRESS OVERLAY ────── */}
+      {/* ── 8. TRUTHFUL LIVE INVESTIGATION EXECUTION PROGRESS OVERLAY ────── */}
       {isLiveLoading && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="max-w-lg w-full bg-[#12131D] border border-emerald-500/30 rounded-3xl p-7 space-y-5 shadow-[0_0_50px_rgba(16,185,129,0.15)] text-center animate-in fade-in zoom-in-95 duration-150">
@@ -1368,11 +1455,11 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             <div className="grid grid-cols-2 gap-3 text-xs font-mono">
               <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06]">
                 <div className="text-neutral-400 text-[10px]">SOURCE RELIABILITY</div>
-                <div className="text-emerald-400 font-bold text-sm mt-0.5">{((activeEvidenceModal.reliability_weight || 1.0) * 100).toFixed(0)}% (Within SLA)</div>
+                <div className="text-emerald-400 font-bold text-sm mt-0.5">{(((activeEvidenceModal?.reliability_weight ?? 1.0)) * 100).toFixed(0)}% (Within SLA)</div>
               </div>
               <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06]">
                 <div className="text-neutral-400 text-[10px]">RELEVANCE MATCH</div>
-                <div className="text-white font-bold text-sm mt-0.5">{((activeEvidenceModal.relevance || 0.9) * 100).toFixed(0)}% (Cosine Match)</div>
+                <div className="text-white font-bold text-sm mt-0.5">{(((activeEvidenceModal?.relevance ?? 0.9)) * 100).toFixed(0)}% (Cosine Match)</div>
               </div>
             </div>
 
@@ -1403,10 +1490,10 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             <div className="space-y-3 font-mono text-xs">
               <div className="text-xs uppercase font-bold text-neutral-400">ENGINE LATENCY WATERFALL (MS):</div>
               <div className="space-y-2">
-                {Object.entries(telemetry.latency_ms_by_engine || {}).map(([eng, ms]) => (
+                {Object.entries(telemetry?.latency_ms_by_engine || {}).map(([eng, ms]) => (
                   <div key={eng} className="p-2.5 rounded-xl bg-black/40 border border-white/[0.04] flex justify-between">
                     <span className="text-neutral-300 uppercase">{eng}</span>
-                    <span className="text-emerald-400 font-bold">{Number(ms).toFixed(1)} ms</span>
+                    <span className="text-emerald-400 font-bold">{Number(ms || 0).toFixed(1)} ms</span>
                   </div>
                 ))}
               </div>
@@ -1418,7 +1505,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 {Object.entries(method_ownership || {}).map(([eng, tag]) => (
                   <div key={eng} className="p-2.5 rounded-xl bg-black/40 border border-white/[0.04] flex justify-between">
                     <span className="text-white uppercase">{eng}</span>
-                    <span className="text-emerald-400 font-semibold">{Array.isArray(tag) ? tag.join(", ") : tag}</span>
+                    <span className="text-emerald-400 font-semibold">{Array.isArray(tag) ? tag.join(", ") : String(tag)}</span>
                   </div>
                 ))}
               </div>

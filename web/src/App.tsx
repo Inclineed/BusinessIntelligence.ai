@@ -1,13 +1,20 @@
 import React, { useState, useEffect } from "react"
 import { InvestigationOverview } from "./components/investigation/InvestigationOverview"
 import { DEFAULT_INC_001, SCENARIO_PREVIEWS } from "./lib/defaultData"
-import { runInvestigation } from "./lib/api"
+import { runInvestigation, ApiInvestigationError } from "./lib/api"
 import { InvestigationResult, PersonaType } from "./types/investigation"
+import { ErrorBoundary } from "./components/common/ErrorBoundary"
 
 export interface AnalysisConfig {
   scenarioId: string
   persona: PersonaType
   region: string
+}
+
+export interface ApiErrorState {
+  message: string
+  statusCode?: number
+  details?: string
 }
 
 export const App: React.FC = () => {
@@ -29,6 +36,7 @@ export const App: React.FC = () => {
   const [isLiveLoading, setIsLiveLoading] = useState(false)
   const [liveElapsedSeconds, setLiveElapsedSeconds] = useState(0)
   const [isPreviousResultPinned, setIsPreviousResultPinned] = useState(false)
+  const [apiError, setApiError] = useState<ApiErrorState | null>(null)
 
   // Stopwatch timer for truthful live progress display
   useEffect(() => {
@@ -60,6 +68,7 @@ export const App: React.FC = () => {
       region: newRegion,
     })
     setIsPreviousResultPinned(false)
+    setApiError(null)
   }
 
   const handleRunInvestigation = async (scenarioId?: string, persona?: PersonaType, region?: string) => {
@@ -68,21 +77,23 @@ export const App: React.FC = () => {
     const reg = region || activeConfig.region
 
     setIsLiveLoading(true)
+    setApiError(null)
+
     try {
       const liveRes = await runInvestigation(scId, pers, reg)
       setResult(liveRes)
       setEvaluatedConfig({ scenarioId: scId, persona: pers, region: reg })
       setActiveConfig({ scenarioId: scId, persona: pers, region: reg })
       setIsPreviousResultPinned(false)
-    } catch (err) {
-      console.warn("Live API call encountered issue; active analytical state preserved:", err)
-      // Fallback to precomputed preview if available
-      if (SCENARIO_PREVIEWS[scId]) {
-        setResult({ ...SCENARIO_PREVIEWS[scId], persona: pers })
-        setEvaluatedConfig({ scenarioId: scId, persona: pers, region: reg })
-        setActiveConfig({ scenarioId: scId, persona: pers, region: reg })
-        setIsPreviousResultPinned(false)
+      setApiError(null)
+    } catch (err: any) {
+      console.error("Investigation run failed:", err)
+      const errState: ApiErrorState = {
+        message: err.message || "Investigation execution failed",
+        statusCode: err.statusCode || 500,
+        details: err.details || "The FastAPI backend on http://localhost:8080 encountered an error or timeout while processing this request.",
       }
+      setApiError(errState)
     } finally {
       setIsLiveLoading(false)
     }
@@ -92,19 +103,27 @@ export const App: React.FC = () => {
     setIsPreviousResultPinned(true)
   }
 
+  const handleDismissError = () => {
+    setApiError(null)
+  }
+
   return (
-    <InvestigationOverview
-      result={result}
-      activeConfig={activeConfig}
-      evaluatedConfig={evaluatedConfig}
-      isStale={isStale}
-      isPreviousResultPinned={isPreviousResultPinned}
-      onConfigChange={handleConfigChange}
-      onRunLive={handleRunInvestigation}
-      onKeepViewingPrevious={handleKeepViewingPrevious}
-      isLiveLoading={isLiveLoading}
-      liveElapsedSeconds={liveElapsedSeconds}
-    />
+    <ErrorBoundary>
+      <InvestigationOverview
+        result={result}
+        activeConfig={activeConfig}
+        evaluatedConfig={evaluatedConfig}
+        isStale={isStale}
+        isPreviousResultPinned={isPreviousResultPinned}
+        apiError={apiError}
+        onConfigChange={handleConfigChange}
+        onRunLive={handleRunInvestigation}
+        onKeepViewingPrevious={handleKeepViewingPrevious}
+        onDismissError={handleDismissError}
+        isLiveLoading={isLiveLoading}
+        liveElapsedSeconds={liveElapsedSeconds}
+      />
+    </ErrorBoundary>
   )
 }
 
