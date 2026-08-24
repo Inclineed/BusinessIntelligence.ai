@@ -369,6 +369,7 @@ def investigate(
             query_context=scenario_id,
             authorized_sources=scope.authorized_sources,
             persona=persona_str,
+            region=getattr(deps, "region", None),
         )
     except Exception as exc:  # noqa: BLE001
         logger.error(

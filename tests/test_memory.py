@@ -1280,4 +1280,112 @@ class TestMemoryEngineAuthorizationProvenance:
         )
         assert len(results) == 0
 
+    def test_fail_closed_on_missing_source_ids_under_authorization(self):
+        """Precedents lacking verified source_ids fail closed under active authorization."""
+        cfo_sources = frozenset({"orders", "inventory"})
+        chroma = _make_chroma_client(
+            count=2,
+            query_ids=["LEGACY_NO_PROV", "VERIFIED_CFO"],
+            query_distances=[0.1, 0.2],
+            query_metadatas=[
+                {
+                    "scenario_id": "LEGACY_NO_PROV",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "",  # missing provenance
+                    "summary": "Legacy incident without source provenance.",
+                },
+                {
+                    "scenario_id": "VERIFIED_CFO",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders,inventory",  # verified provenance
+                    "summary": "Verified inventory stockout precedent.",
+                },
+            ],
+            query_documents=["Legacy incident.", "Verified precedent."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        results = engine.retrieve_precedents(
+            "INC_001",
+            authorized_sources=cfo_sources,
+            persona="cfo",
+        )
+
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "VERIFIED_CFO"
+
+    def test_controlled_fixture_ranking_quality(self):
+        """
+        Controlled retrieval quality fixture:
+          A: Highly relevant HIGH     (dist=0.20 -> rel=0.90, conf=HIGH    -> score=0.90)
+          B: Highly relevant ABSTAIN  (dist=0.16 -> rel=0.92, conf=ABSTAIN -> score=0.184)
+          C: Moderately relevant HIGH (dist=0.60 -> rel=0.70, conf=HIGH    -> score=0.70)
+          D: Irrelevant HIGH          (dist=1.00 -> rel=0.50, conf=HIGH    -> score=0.50 -> EXCLUDED by 0.65 threshold)
+
+        Expected ranking order: A (0.90) > C (0.70) > B (0.184). D is excluded.
+        """
+        chroma = _make_chroma_client(
+            count=4,
+            query_ids=["PREC_A", "PREC_B", "PREC_C", "PREC_D"],
+            query_distances=[0.20, 0.16, 0.60, 1.00],
+            query_metadatas=[
+                {
+                    "scenario_id": "PREC_A",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                    "summary": "Highly relevant confirmed root cause.",
+                },
+                {
+                    "scenario_id": "PREC_B",
+                    "confidence_state": "abstain",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                    "summary": "Highly relevant ambiguous investigation.",
+                },
+                {
+                    "scenario_id": "PREC_C",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                    "summary": "Moderately relevant confirmed root cause.",
+                },
+                {
+                    "scenario_id": "PREC_D",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                    "summary": "Irrelevant historical incident below threshold.",
+                },
+            ],
+            query_documents=["A", "B", "C", "D"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        results = engine.retrieve_precedents("QUERY")
+
+        assert len(results) == 3
+        # D is excluded because relevance 0.50 < 0.65
+        assert [r["scenario_id"] for r in results] == ["PREC_A", "PREC_C", "PREC_B"]
+
+        # Verify exact retrieval scores and metrics
+        prec_a = results[0]
+        prec_c = results[1]
+        prec_b = results[2]
+
+        assert prec_a["relevance"] == pytest.approx(0.90, abs=0.01)
+        assert prec_a["retrieval_score"] == pytest.approx(0.90, abs=0.01)
+        assert prec_a["confidence_state"] == "high"
+
+        assert prec_c["relevance"] == pytest.approx(0.70, abs=0.01)
+        assert prec_c["retrieval_score"] == pytest.approx(0.70, abs=0.01)
+        assert prec_c["confidence_state"] == "high"
+
+        assert prec_b["relevance"] == pytest.approx(0.92, abs=0.01)
+        assert prec_b["retrieval_score"] == pytest.approx(0.184, abs=0.01)
+        assert prec_b["confidence_state"] == "abstain"
+
+
 

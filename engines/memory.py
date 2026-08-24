@@ -502,6 +502,7 @@ class MemoryEngine:
         retention_config: Optional[dict] = None,
         authorized_sources: Optional[frozenset[str] | set[str] | list[str]] = None,
         persona: Optional[str] = None,
+        region: Optional[str] = None,
     ) -> list[dict]:
         """
         Retrieve up to MAX_RESULTS precedents with relevance ≥ RELEVANCE_THRESHOLD,
@@ -617,25 +618,31 @@ class MemoryEngine:
                 candidate_sources = {s.strip() for s in raw_sources.split(",") if s.strip()}
             else:
                 candidate_sources = set()
-                scenario_meta_id = meta.get("scenario_id", doc_id)
-                _LEGACY_SOURCES = {
-                    "INC_001": {"payment_gateway", "inventory", "support_tickets", "release_notes"},
-                    "INC_002": {"payment_gateway", "marketing", "orders"},
-                    "INC_003": {"orders"},
-                    "INC_004": {"orders"},
-                    "INC_005": {"orders", "inventory"},
-                    "INC_006": {"payment_gateway", "deployment_log", "support_tickets"},
-                    "INC_007": {"deployment_log", "support_tickets"},
-                    "INC_008": {"release_notes", "support_tickets", "deployment_log"},
-                }
-                if scenario_meta_id in _LEGACY_SOURCES and meta.get("persona") != "cfo":
-                    candidate_sources = _LEGACY_SOURCES[scenario_meta_id]
 
-            if auth_sources_set is not None and candidate_sources:
+            if auth_sources_set is not None:
+                # Fail-closed: If precedent lacks verified source_ids, it cannot be
+                # proven to satisfy the active authorization boundary and MUST be excluded.
+                if not candidate_sources:
+                    logger.info(
+                        "retrieve_precedents: failing closed on precedent %s due to missing/unverifiable source_ids under active authorization",
+                        doc_id,
+                    )
+                    continue
                 if not candidate_sources.issubset(auth_sources_set):
                     logger.info(
                         "retrieve_precedents: filtering unauthorized precedent %s (candidate_sources=%s not subset of authorized_sources=%s)",
                         doc_id, candidate_sources, auth_sources_set
+                    )
+                    continue
+
+            # Region-scoped provenance filtering
+            if region:
+                prec_region = str(meta.get("region", "")).strip().lower()
+                req_region = str(region).strip().lower()
+                if prec_region and prec_region not in ("all", "global", req_region):
+                    logger.info(
+                        "retrieve_precedents: filtering regional precedent %s (prec_region=%s != req_region=%s)",
+                        doc_id, prec_region, req_region
                     )
                     continue
 

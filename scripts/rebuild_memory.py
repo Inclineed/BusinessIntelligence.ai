@@ -89,7 +89,7 @@ def main() -> None:
     sources_config = load_sources(CONFIG_DIR / "sources.yaml")
     llm_provider = OllamaProvider()
 
-    scenarios = ["INC_001", "INC_002", "INC_003", "INC_004"]
+    scenarios = ["INC_001", "INC_002", "INC_003", "INC_004", "INC_005", "INC_006", "INC_007", "INC_008"]
     results = {}
 
     print("\n[4] Running investigations through pipeline and rebuilding precedents...")
