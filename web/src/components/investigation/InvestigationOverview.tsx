@@ -377,7 +377,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 2: WHEN & WHERE DID IT HAPPEN? (With Dedicated Annotation Band) */}
+          {/* STEP 2: WHEN & WHERE DID IT HAPPEN?                               */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border-2 border-emerald-400/60 flex items-center justify-center text-[10px] font-bold text-emerald-400">
@@ -393,13 +393,16 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               
-              {/* Chronological Timeline Chart (7-Col) with Dedicated Milestone Band */}
-              <div className="lg:col-span-7 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between">
-                <div className="flex items-center justify-between mb-2">
+              {/* Chronological Timeline Chart (7-Col) with Dedicated Inside-Card Milestone Band */}
+              <div className="lg:col-span-7 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-xs font-semibold text-white capitalize">
+                    <h3 className="text-xs font-bold text-white capitalize">
                       {primarySignal.kpi_id ? primarySignal.kpi_id.replace(/_/g, " ") : "Metric"} Shock Progression
                     </h3>
+                    <p className="text-[11px] text-neutral-400 mt-0.5">
+                      Deploy completed at 14:15 UTC followed by pool saturation inflection at 14:18 UTC.
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs font-mono">
@@ -414,20 +417,28 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </div>
                 </div>
 
-                {/* Dedicated Unclipped Milestone Annotation Band */}
+                {/* Dedicated Inside-Card Timeline Annotation Band */}
                 {milestones.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 mb-2 p-2 rounded-xl bg-black/40 border border-white/[0.04]">
-                    <div className="text-[10px] font-mono uppercase text-neutral-400 font-bold px-1 flex items-center gap-1">
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/[0.04] space-y-1.5">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 font-bold flex items-center gap-1.5">
                       <Clock className="w-3 h-3 text-neutral-400" />
-                      <span>Timeline:</span>
+                      <span>Incident Timeline Sequence</span>
                     </div>
-                    {milestones.map((m, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white/[0.04] border border-white/[0.06] text-xs">
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: m.color }} />
-                        <span className="font-mono font-bold text-neutral-200 text-[10px]">{m.time}</span>
-                        <span className="text-neutral-400 text-[10px]">· {m.label}</span>
-                      </div>
-                    ))}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {milestones.map((m, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#14151F] border border-white/[0.08] text-xs font-mono"
+                        >
+                          <span
+                            className="w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: m.color }}
+                          />
+                          <span className="font-bold text-white text-[11px]">{m.time}</span>
+                          <span className="text-neutral-300 text-[11px] font-sans font-medium">{m.label}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -446,7 +457,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                       <YAxis axisLine={false} tickLine={false} tick={{ fill: "#737373", fontSize: 10, fontFamily: "JetBrains Mono" }} />
                       <Tooltip contentStyle={{ backgroundColor: "#14151E", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", color: "#fff", fontSize: "11px" }} />
                       {milestones.map((m, idx) => (
-                        <ReferenceLine key={idx} x={m.time} stroke={m.color} strokeDasharray="3 3" strokeOpacity={0.6} />
+                        <ReferenceLine key={idx} x={m.time} stroke={m.color} strokeDasharray="3 3" strokeOpacity={0.7} />
                       ))}
                       <Area type="monotone" dataKey="baseline" stroke="rgba(16, 185, 129, 0.4)" fill="url(#baselineAreaGradient)" strokeWidth={1.5} />
                       <Line type="monotone" dataKey="actual" stroke="#ffffff" strokeWidth={2} dot={{ r: 2.5, fill: "#fff" }} />
@@ -455,61 +466,102 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </ResponsiveContainer>
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-white/[0.06] flex flex-wrap justify-between items-center text-[11px] text-neutral-400">
+                <div className="pt-2.5 border-t border-white/[0.06] flex flex-wrap justify-between items-center text-[11px] text-neutral-400">
                   <span>Start: <strong className="text-white">14:18 UTC</strong></span>
                   <span>Peak Shock: <strong className="text-red-400">{obsVal}{obsUnit} (+240%)</strong></span>
                   <span>Evaluation Window: <strong className="text-white">15m rolling</strong></span>
                 </div>
               </div>
 
-              {/* Dimensional Breakdown (5-Col) */}
-              <div className="lg:col-span-5 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between">
-                <div>
-                  <h3 className="text-xs font-semibold text-white mb-0.5">
-                    Segment Variance Attribution
-                  </h3>
-                  <p className="text-[11px] text-neutral-400 mb-3">
-                    Multi-dimensional decomposition across platform dimensions.
-                  </p>
+              {/* Dimensional Breakdown (5-Col) — Ranked Analytical Contribution List */}
+              <div className="lg:col-span-5 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between space-y-3">
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-white mb-0.5">
+                      Where is the anomaly concentrated?
+                    </h3>
+                    <p className="text-[11px] text-neutral-400">
+                      Ranked multi-dimensional variance attribution across traffic.
+                    </p>
+                  </div>
 
                   {contributions.length > 0 ? (
-                    <div className="space-y-2.5 text-xs">
-                      {contributions.map((c, idx) => (
-                        <div key={idx} className="p-3 rounded-xl bg-[#14151F] border border-white/[0.04] space-y-1">
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-white font-medium">
-                              {c.dimension}: <strong className="text-emerald-400 font-semibold">{c.segment}</strong>
-                            </span>
-                            <span className="text-white font-bold">{c.contribution_pct.toFixed(1)}% variance</span>
-                          </div>
-                          
-                          <div className="w-full bg-black/40 h-1.5 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${idx === 0 ? "bg-red-500" : "bg-emerald-500"}`}
-                              style={{ width: `${c.contribution_pct}%` }}
-                            />
-                          </div>
+                    <div className="space-y-2.5">
+                      {contributions.map((c, idx) => {
+                        const isDominant = idx === 0
+                        const rank = idx + 1
+                        const delta = c.segment_delta_pct !== undefined ? c.segment_delta_pct : null
 
-                          {c.segment_delta_pct !== undefined && (
-                            <div className="flex justify-between text-[10px] text-neutral-400 pt-0.5">
-                              <span>Segment Shift:</span>
-                              <span className={c.segment_delta_pct > 0 ? "text-red-400 font-semibold" : "text-emerald-400"}>
-                                {c.segment_delta_pct > 0 ? `+${c.segment_delta_pct}%` : `${c.segment_delta_pct}%`}
-                              </span>
+                        return (
+                          <div
+                            key={idx}
+                            className={`p-3 rounded-xl transition-all border ${
+                              isDominant
+                                ? "bg-[#151722] border-emerald-500/30 shadow-sm"
+                                : "bg-[#11121A] border-white/[0.04] opacity-85 hover:opacity-100"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2.5">
+                                <span
+                                  className={`w-5 h-5 rounded-md flex items-center justify-center font-mono font-bold text-[11px] ${
+                                    isDominant
+                                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                      : "bg-white/[0.05] text-neutral-400 border border-white/[0.06]"
+                                  }`}
+                                >
+                                  {rank}
+                                </span>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-bold text-white font-mono">{c.segment}</span>
+                                    <span className="text-[10px] text-neutral-400 uppercase font-mono">({c.dimension})</span>
+                                    {isDominant && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                                        DOMINANT
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right">
+                                <div className={`text-sm font-extrabold font-mono tracking-tight ${isDominant ? "text-white" : "text-neutral-200"}`}>
+                                  {c.contribution_pct.toFixed(1)}% <span className="text-[10px] font-normal text-neutral-400 font-sans">variance</span>
+                                </div>
+                                {delta !== null && (
+                                  <div className={`text-[10px] font-mono font-semibold ${delta > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                    {delta > 0 ? `+${delta}%` : `${delta}%`} shift
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      ))}
+
+                            {/* Clean, restrained proportional bar */}
+                            <div className="w-full bg-black/40 h-1 rounded-full overflow-hidden mt-2">
+                              <div
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                  isDominant ? "bg-emerald-400" : "bg-neutral-500/60"
+                                }`}
+                                style={{ width: `${Math.min(100, c.contribution_pct)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   ) : (
-                    <div className="p-5 rounded-xl bg-[#14151F] text-center text-xs text-neutral-400">
+                    <div className="p-4 rounded-xl bg-[#14151F] text-center text-xs text-neutral-400">
                       Variance is uniformly distributed across platform dimensions.
                     </div>
                   )}
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-white/[0.06] text-[11px] text-neutral-400">
-                  Dominant segment: <strong className="text-white">{contributions[0]?.segment || "Global"} ({contributions[0]?.contribution_pct || 100}%)</strong>
+                <div className="pt-2.5 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-neutral-400">
+                  <span>DOMINANT CONTRIBUTOR:</span>
+                  <span className="text-white font-mono font-bold">
+                    {contributions[0]?.segment || "Global"} · {contributions[0]?.contribution_pct.toFixed(1) || "100"}% of variance
+                  </span>
                 </div>
               </div>
             </div>
