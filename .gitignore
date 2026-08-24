@@ -53,10 +53,9 @@ coverage.xml
 
 # Environments and Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.env
-!*.env.example
 *.pem
 *.key
 
@@ -74,7 +73,14 @@ venv.bak/
 *.db
 chroma_data/
 chroma_db/
+chroma_benchmark_data/
 .chroma/
+
+# Benchmark local caches and scratch files
+benchmark_report_T*.json
+test_where.py
+trace_e9.py
+benchmarks/scratch/
 
 # Logs and runtime artifacts
 *.log

@@ -36,6 +36,9 @@ MODEL_PRICING_PER_1M: dict[str, tuple[float, float]] = {
     "mixtral-8x7b-32768":        (0.24, 0.24),
     "gemma2-9b-it":              (0.20, 0.20),
     "qwen-2.5-32b":              (0.79, 0.79),
+    "qwen/qwen3.6-27b":          (0.59, 0.79),
+    "qwen3.6-27b":               (0.59, 0.79),
+    "qwen/qwen-2.5-32b":         (0.79, 0.79),
     # Major benchmark models
     "claude-3-5-sonnet-20241022":(3.00, 15.00),
     "claude-3-5-sonnet":         (3.00, 15.00),

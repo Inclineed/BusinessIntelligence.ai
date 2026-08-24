@@ -288,26 +288,43 @@ class GroqProvider(LLMProvider):
 
     DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
     DEFAULT_BASE_URL: str = "https://api.groq.com/openai/v1"
-    DEFAULT_TIMEOUT: float = 30.0  # seconds
-    DEFAULT_MAX_RETRIES: int = 3
+    DEFAULT_TIMEOUT: float = 45.0  # seconds
+    DEFAULT_MAX_RETRIES: int = 5
 
     def __init__(
         self,
-        api_key: str | None = None,
+        api_key: str | list[str] | None = None,
         model: str | None = None,
         base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         ollama_embed_host: str | None = None,
+        credential_mode: str | None = None,
     ) -> None:
-        self._api_key = api_key or os.getenv("GROQ_API_KEY", "")
-        if not self._api_key:
+        self._credential_mode = credential_mode or os.getenv("GROQ_CREDENTIAL_MODE", "single").lower()
+
+        raw_keys = api_key or os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
+        if isinstance(raw_keys, list):
+            parsed_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+        else:
+            parsed_keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
+
+        if not parsed_keys:
             raise ValueError(
                 "GROQ_API_KEY is required for GroqProvider. "
-                "Set GROQ_API_KEY in your environment or .env file."
+                "Set GROQ_API_KEY in your local environment or untracked .env file."
             )
 
+        # In production single mode, use strictly a single credential
+        if self._credential_mode == "single" and len(parsed_keys) > 1 and api_key is None:
+            self._api_keys = [parsed_keys[0]]
+        else:
+            self._api_keys = parsed_keys
+
+        self._current_key_idx = 0
+        self._api_key = self._api_keys[0]
         self._model = model or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
+        self.DEFAULT_MODEL = self._model
         self._base_url = (base_url or os.getenv("GROQ_BASE_URL", self.DEFAULT_BASE_URL)).rstrip("/")
         self._timeout = timeout
         self._max_retries = max_retries
@@ -319,6 +336,22 @@ class GroqProvider(LLMProvider):
     @property
     def provider_name(self) -> str:
         return "groq"
+
+    def _get_active_key(self) -> str:
+        return self._api_keys[self._current_key_idx % len(self._api_keys)]
+
+    def _rotate_key(self) -> str:
+        if len(self._api_keys) > 1:
+            self._current_key_idx = (self._current_key_idx + 1) % len(self._api_keys)
+            logger.info("Rotated Groq credential pool to index %d of %d", self._current_key_idx, len(self._api_keys))
+        return self._get_active_key()
+
+    @staticmethod
+    def _sanitize_error_text(text: str) -> str:
+        """Sanitize error messages to ensure no tokens or authorization secrets are reflected."""
+        if not text:
+            return ""
+        return re.sub(r"gsk_[A-Za-z0-9_\-]+", "gsk_****", text)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -337,35 +370,54 @@ class GroqProvider(LLMProvider):
         """
         Execute chat completion via Groq OpenAI-compatible API.
 
-        Handles HTTP 429 rate limits, 5xx server errors, and network timeouts
-        with exponential backoff up to max_retries.
+        Handles HTTP 429 rate limits (with local key rotation if configured in pool mode),
+        5xx server errors, and network timeouts with exponential backoff up to max_retries.
         """
-        target_model = model if model is not None else self._model
+        # When engines pass generic default model or None, use instance's configured Groq model
+        if model is None or model in ("qwen3:8b", "default"):
+            target_model = self._model
+        else:
+            target_model = model
         url = f"{self._base_url}/chat/completions"
 
+        is_reasoning_model = any(r in target_model.lower() for r in ("qwen", "deepseek", "r1", "qwq"))
+
         messages: list[dict[str, str]] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+        effective_system = system
+        if format_json and "json" not in (system + prompt).lower():
+            effective_system = (system + "\nYou MUST respond in valid JSON format.").strip()
+        if is_reasoning_model:
+            effective_system = (effective_system + "\nCRITICAL: Keep your thinking process concise and output valid JSON matching the exact schema immediately.").strip()
+
+        if effective_system:
+            messages.append({"role": "system", "content": effective_system})
+
+        user_content = prompt
+        if is_reasoning_model:
+            user_content = prompt + "\n\nCRITICAL INSTRUCTION: Keep thinking process brief. Output ONLY valid JSON matching the schema immediately."
+        messages.append({"role": "user", "content": user_content})
+
+        # For reasoning models, provide enough headroom for thinking chain + JSON output
+        actual_max_tokens = max(max_tokens, 6000) if is_reasoning_model else max_tokens
 
         payload: dict[str, Any] = {
             "model": target_model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": actual_max_tokens,
         }
-        if format_json:
+        # Only attach response_format for non-reasoning models (reasoning models fail json_validate)
+        if format_json and not is_reasoning_model:
             payload["response_format"] = {"type": "json_object"}
-
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
 
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries + 1):
             t0 = time.perf_counter()
+            headers = {
+                "Authorization": f"Bearer {self._get_active_key()}",
+                "Content-Type": "application/json",
+            }
             try:
                 response = httpx.post(
                     url,
@@ -377,18 +429,31 @@ class GroqProvider(LLMProvider):
 
                 # Check for rate limiting
                 if response.status_code == 429:
-                    retry_after_sec = self._parse_retry_after(response.headers, attempt)
+                    if len(self._api_keys) > 1:
+                        self._rotate_key()
+                        logger.warning(
+                            "Groq rate limit (429) hit on attempt %d/%d (credential_index=%d). Rotating to next credential...",
+                            attempt + 1,
+                            self._max_retries + 1,
+                            self._current_key_idx,
+                        )
+                        time.sleep(0.2)
+                        continue
+
+                    retry_after_sec = self._parse_retry_after(response.headers, attempt, response.text)
                     logger.warning(
-                        "Groq rate limit (429) hit on attempt %d/%d. Retrying after %.2fs...",
+                        "Groq rate limit (429) hit on attempt %d/%d (credential_index=%d). Retrying after %.2fs...",
                         attempt + 1,
                         self._max_retries + 1,
+                        self._current_key_idx,
                         retry_after_sec,
                     )
                     if attempt < self._max_retries:
                         time.sleep(retry_after_sec)
                         continue
+                    sanitized_err = self._sanitize_error_text(response.text)
                     raise GroqAPIError(
-                        f"Groq rate limit (HTTP 429) exceeded after {self._max_retries} retries: {response.text}"
+                        f"Groq rate limit (HTTP 429) exceeded after {self._max_retries} retries: {sanitized_err}"
                     )
 
                 # Check for transient server errors (500, 502, 503, 504)
@@ -404,14 +469,23 @@ class GroqProvider(LLMProvider):
                     if attempt < self._max_retries:
                         time.sleep(backoff)
                         continue
+                    sanitized_err = self._sanitize_error_text(response.text)
                     raise GroqAPIError(
-                        f"Groq server error (HTTP {response.status_code}) after {self._max_retries} retries: {response.text}"
+                        f"Groq server error (HTTP {response.status_code}) after {self._max_retries} retries: {sanitized_err}"
                     )
+
+                # If model failed strict json_validate, retry without response_format constraint
+                if response.status_code == 400 and "json_validate_failed" in response.text:
+                    if "response_format" in payload:
+                        logger.warning("Groq json_validate_failed; retrying with prompt-based JSON instructions...")
+                        del payload["response_format"]
+                        continue
 
                 # Client error
                 if response.status_code >= 400:
+                    sanitized_err = self._sanitize_error_text(response.text)
                     raise GroqAPIError(
-                        f"Groq API error (HTTP {response.status_code}): {response.text}"
+                        f"Groq API error (HTTP {response.status_code}): {sanitized_err}"
                     )
 
                 # Success
@@ -427,12 +501,24 @@ class GroqProvider(LLMProvider):
                     raise GroqAPIError(f"Malformed Groq response (no choices): {data}")
 
                 content = choices[0].get("message", {}).get("content", "") or ""
+                if "</think>" in content:
+                    content = content.split("</think>", 1)[1].strip()
+                elif content.startswith("<think>"):
+                    content = re.sub(r"^<think>.*", "", content, flags=re.DOTALL).strip()
+                else:
+                    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+                if format_json:
+                    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
+                    if fence_match:
+                        content = fence_match.group(1).strip()
+
                 usage = data.get("usage", {}) or {}
                 prompt_tokens = usage.get("prompt_tokens", 0)
                 completion_tokens = usage.get("completion_tokens", 0)
 
                 return LLMResponse(
-                    text=content.strip(),
+                    text=content,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     latency_ms=round(latency_ms, 3),
@@ -482,25 +568,35 @@ class GroqProvider(LLMProvider):
         return self._embedder.embed(texts, model=model)
 
     @staticmethod
-    def _parse_retry_after(headers: httpx.Headers, attempt: int) -> float:
-        """Parse Retry-After header if available, or compute exponential backoff."""
+    def _parse_retry_after(headers: httpx.Headers, attempt: int, response_text: str = "") -> float:
+        """Parse Retry-After header or rate limit reset values if available, or compute backoff."""
         raw_header = headers.get("retry-after")
         if raw_header:
             try:
                 return max(0.5, float(raw_header))
             except ValueError:
                 pass
-        raw_reset = headers.get("x-ratelimit-reset-requests")
-        if raw_reset:
-            try:
-                # e.g., "1.2s" or "60ms"
-                if raw_reset.endswith("ms"):
-                    return max(0.2, float(raw_reset[:-2]) / 1000.0)
-                if raw_reset.endswith("s"):
-                    return max(0.5, float(raw_reset[:-1]))
-                return max(0.5, float(raw_reset))
-            except ValueError:
-                pass
+        for header_key in ("x-ratelimit-reset-tokens", "x-ratelimit-reset-requests"):
+            raw_reset = headers.get(header_key)
+            if raw_reset:
+                try:
+                    if raw_reset.endswith("ms"):
+                        return max(0.2, float(raw_reset[:-2]) / 1000.0)
+                    if raw_reset.endswith("s"):
+                        return max(0.5, float(raw_reset[:-1]))
+                    return max(0.5, float(raw_reset))
+                except ValueError:
+                    pass
+
+        # Try parsing "Please try again in X.XXs" from error response text
+        if response_text:
+            match = re.search(r"try again in ([\d\.]+)s", response_text)
+            if match:
+                try:
+                    return max(1.0, float(match.group(1)) + 0.5)
+                except ValueError:
+                    pass
+
         return float(1.0 * (2 ** attempt))
 
 

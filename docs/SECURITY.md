@@ -136,3 +136,16 @@ The security boundary is validated by `tests/test_security.py`, covering:
 - Zero-leakage verification when running restricted personas (`cfo`, `manager`) against scenarios containing technical deployment evidence (`INC_001`).
 - Region-filtering enforcement.
 - Query filter construction and secondary check validation.
+
+---
+
+## 8. Precedent Memory Authorization & Fail-Closed Python Filtering (E9)
+
+To achieve high-throughput scale without SQLite metadata query bottlenecks, Engine E9 implements a Search $\to$ Oversample $\to$ Filter model:
+1. **Raw Vector Search**: Queries top candidates without database-level metadata filtering.
+2. **Authoritative Python Security Gate**:
+   - **Missing Provenance Exclusion**: If a precedent record lacks verified `source_ids`, it fails closed and is dropped.
+   - **Entitlement Scope Enforcement**: A precedent is returned if and only if all its constituent source IDs are a strict subset of the querying persona's authorization scope ($\text{source\_ids} \subseteq \text{authorized\_sources}$).
+   - **Simulation Isolation**: Non-observed (`simulated` or `unknown`) records are strictly excluded from historical precedent retrieval.
+   - **Region Scope Enforcement**: Regional scope mismatches are discarded.
+3. **Defense-in-Depth Guarantee**: Zero unauthorized precedent summaries can reach the user interface or downstream processes.

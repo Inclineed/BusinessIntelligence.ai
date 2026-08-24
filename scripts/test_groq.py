@@ -52,13 +52,11 @@ def main() -> int:
         print("        Example (PowerShell): $env:GROQ_API_KEY='gsk_...'")
         return 1
 
-    # Masked API key display
-    masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
     print("=" * 60)
     print("  BusinessIntelligence.ai — Groq Live Smoke Test")
     print("=" * 60)
     print(f"  Provider:     groq")
-    print(f"  API Key:      {masked_key} (Valid format)")
+    print(f"  Credentials:  [CONFIGURED] ({len(provider._api_keys)} active credential(s) in pool)")
 
     try:
         provider = GroqProvider(api_key=api_key, model=args.model)

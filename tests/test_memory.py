@@ -764,10 +764,10 @@ class TestMemoryContaminationRemediation:
         assert results[0]["scenario_id"] == "VALID_OBSERVED"
         assert results[0]["outcome_type"] == "observed"
 
-        # Verify ChromaDB query received where={"outcome_type": "observed"}
+        # Verify ChromaDB query does NOT use where filter (eliminated for performance)
         collection = chroma.get_or_create_collection.return_value
         collection.query.assert_called_once()
-        assert collection.query.call_args.kwargs.get("where") == {"outcome_type": "observed"}
+        assert collection.query.call_args.kwargs.get("where") is None
 
 
 # ---------------------------------------------------------------------------
@@ -1386,6 +1386,172 @@ class TestMemoryEngineAuthorizationProvenance:
         assert prec_b["relevance"] == pytest.approx(0.92, abs=0.01)
         assert prec_b["retrieval_score"] == pytest.approx(0.184, abs=0.01)
         assert prec_b["confidence_state"] == "abstain"
+
+
+# ---------------------------------------------------------------------------
+# E9 Scalability & Candidate-Pool Oversampling Tests (Round 2)
+# ---------------------------------------------------------------------------
+
+class TestE9CandidatePoolOversampling:
+    """Comprehensive test suite for the benchmark-backed E9 candidate oversampling policy."""
+
+    def setup_method(self):
+        self.provider = _make_llm_provider("Candidate oversampling summary.")
+
+    def test_multiplier_applied_correctly(self):
+        """Verify ChromaDB query receives candidate_results = min(MAX_RESULTS * multiplier, count)."""
+        chroma = _make_chroma_client(
+            count=100,
+            query_ids=[f"P_{i}" for i in range(50)],
+            query_distances=[0.1] * 50,
+            query_metadatas=[
+                {
+                    "scenario_id": f"P_{i}",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                }
+                for i in range(50)
+            ],
+            query_documents=["Doc"] * 50,
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider, candidate_multiplier=5)
+        engine.retrieve_precedents("QUERY")
+
+        collection = chroma.get_or_create_collection.return_value
+        collection.query.assert_called_once()
+        # With MAX_RESULTS=10 and multiplier=5, n_results must be 50
+        assert collection.query.call_args.kwargs.get("n_results") == 50
+        assert collection.query.call_args.kwargs.get("where") is None
+
+    def test_explicit_runtime_multiplier_override(self):
+        """Verify candidate_multiplier argument in retrieve_precedents overrides constructor default."""
+        chroma = _make_chroma_client(
+            count=100,
+            query_ids=[f"P_{i}" for i in range(20)],
+            query_distances=[0.1] * 20,
+            query_metadatas=[
+                {
+                    "scenario_id": f"P_{i}",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                }
+                for i in range(20)
+            ],
+            query_documents=["Doc"] * 20,
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider, candidate_multiplier=5)
+        engine.retrieve_precedents("QUERY", candidate_multiplier=2)
+
+        collection = chroma.get_or_create_collection.return_value
+        assert collection.query.call_args.kwargs.get("n_results") == 20
+
+    def test_final_result_count_bounded_by_max_results(self):
+        """Verify that even with 50 returned candidates, output is truncated to MAX_RESULTS (10)."""
+        chroma = _make_chroma_client(
+            count=100,
+            query_ids=[f"P_{i}" for i in range(50)],
+            query_distances=[0.1] * 50,
+            query_metadatas=[
+                {
+                    "scenario_id": f"P_{i}",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                }
+                for i in range(50)
+            ],
+            query_documents=["Doc"] * 50,
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider, candidate_multiplier=5)
+        results = engine.retrieve_precedents("QUERY")
+        assert len(results) == 10
+
+    def test_simulated_and_unknown_records_excluded_by_python(self):
+        """Verify simulated and unknown provenance records in candidate pool are dropped by Python."""
+        chroma = _make_chroma_client(
+            count=10,
+            query_ids=["SIM_1", "UNK_2", "OBS_3"],
+            query_distances=[0.05, 0.06, 0.07],
+            query_metadatas=[
+                {"scenario_id": "SIM_1", "outcome_type": "simulated", "confidence_state": "high", "source_ids": "orders"},
+                {"scenario_id": "UNK_2", "outcome_type": "unknown", "confidence_state": "high", "source_ids": "orders"},
+                {"scenario_id": "OBS_3", "outcome_type": "observed", "confidence_state": "high", "source_ids": "orders"},
+            ],
+            query_documents=["Sim", "Unk", "Obs"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("QUERY", include_simulated=False)
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "OBS_3"
+
+    def test_unauthorized_sources_fail_closed_in_oversampled_pool(self):
+        """Verify unauthorized candidates are dropped by Python entitlement checks."""
+        chroma = _make_chroma_client(
+            count=10,
+            query_ids=["UNAUTH_1", "AUTH_2"],
+            query_distances=[0.05, 0.10],
+            query_metadatas=[
+                {"scenario_id": "UNAUTH_1", "outcome_type": "observed", "confidence_state": "high", "source_ids": "support_tickets,deployment_log"},
+                {"scenario_id": "AUTH_2", "outcome_type": "observed", "confidence_state": "high", "source_ids": "orders,inventory"},
+            ],
+            query_documents=["Unauth", "Auth"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        results = engine.retrieve_precedents("QUERY", authorized_sources=frozenset(["orders", "inventory"]))
+        assert len(results) == 1
+        assert results[0]["scenario_id"] == "AUTH_2"
+
+    def test_recall_under_controlled_adversarial_noise(self):
+        """
+        Verify that when 15 noise candidates (simulated/unauthorized) rank ahead of 5 valid candidates,
+        x1 multiplier fails (drops valid candidates) while x5 multiplier achieves 100% recall.
+        """
+        noise_ids = [f"NOISE_{i}" for i in range(15)]
+        noise_distances = [0.01 + i * 0.005 for i in range(15)] # highly similar noise
+        noise_metas = [
+            {"scenario_id": f"NOISE_{i}", "outcome_type": "simulated", "confidence_state": "high", "source_ids": "orders"}
+            for i in range(15)
+        ]
+
+        valid_ids = [f"VALID_{i}" for i in range(5)]
+        valid_distances = [0.15 + i * 0.01 for i in range(5)]
+        valid_metas = [
+            {"scenario_id": f"VALID_{i}", "outcome_type": "observed", "confidence_state": "high", "source_ids": "orders"}
+            for i in range(5)
+        ]
+
+        all_ids = noise_ids + valid_ids
+        all_distances = noise_distances + valid_distances
+        all_metas = noise_metas + valid_metas
+        all_docs = ["Doc"] * 20
+
+        # Scenario A: Multiplier x1 queries top 10 -> receives only 10 noise records -> 0% recall
+        chroma_x1 = _make_chroma_client(
+            count=20,
+            query_ids=all_ids[:10],
+            query_distances=all_distances[:10],
+            query_metadatas=all_metas[:10],
+            query_documents=all_docs[:10],
+        )
+        engine_x1 = MemoryEngine(chroma_client=chroma_x1, llm_provider=self.provider, candidate_multiplier=1)
+        res_x1 = engine_x1.retrieve_precedents("QUERY")
+        assert len(res_x1) == 0  # all 10 were noise
+
+        # Scenario B: Multiplier x5 queries top 20 -> receives all 20 records -> 100% recall of valid
+        chroma_x5 = _make_chroma_client(
+            count=20,
+            query_ids=all_ids,
+            query_distances=all_distances,
+            query_metadatas=all_metas,
+            query_documents=all_docs,
+        )
+        engine_x5 = MemoryEngine(chroma_client=chroma_x5, llm_provider=self.provider, candidate_multiplier=5)
+        res_x5 = engine_x5.retrieve_precedents("QUERY")
+        assert len(res_x5) == 5
+        assert {r["scenario_id"] for r in res_x5} == {f"VALID_{i}" for i in range(5)}
+
 
 
 

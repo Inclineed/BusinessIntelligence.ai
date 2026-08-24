@@ -39,6 +39,7 @@ _RELEVANCE_THRESHOLD = 0.7   # minimum cosine-similarity score [0, 1]
 _MAX_RESULTS = 10
 _MAX_RETRY_ATTEMPTS = 3
 _STORE_TIMEOUT_S = 60.0        # Requirement 15.1 — within 5 seconds
+DEFAULT_CANDIDATE_MULTIPLIER = 5  # Candidate oversampling compensates for post-retrieval authorization/provenance filtering.
 
 # Explicit retrieval weights for confidence states (ISSUE-002 Phase 1)
 # Preserves the strict invariant: HIGH > MEDIUM > ABSTAIN > LOW for equivalent semantic relevance
@@ -131,12 +132,14 @@ class MemoryEngine:
     RELEVANCE_THRESHOLD: float = _RELEVANCE_THRESHOLD
     MAX_RESULTS: int = _MAX_RESULTS
     MAX_RETRY_ATTEMPTS: int = _MAX_RETRY_ATTEMPTS
+    CANDIDATE_MULTIPLIER: int = DEFAULT_CANDIDATE_MULTIPLIER
     RETRIEVAL_WEIGHTS: dict[ConfidenceState, float] = RETRIEVAL_WEIGHTS
 
     def __init__(
         self,
         chroma_client: Any,
         llm_provider: LLMProvider,
+        candidate_multiplier: int | None = None,
     ) -> None:
         """
         Parameters
@@ -144,9 +147,15 @@ class MemoryEngine:
         chroma_client : A chromadb.Client (or compatible) instance.
                         May be None for unit tests that don't exercise storage.
         llm_provider  : An LLMProvider for generating text summaries.
+        candidate_multiplier : Factor by which MAX_RESULTS is multiplied for initial candidate retrieval.
         """
         self._chroma = chroma_client
         self._llm = llm_provider
+        self._candidate_multiplier = (
+            candidate_multiplier
+            if candidate_multiplier is not None
+            else self.CANDIDATE_MULTIPLIER
+        )
         # Pending queue for failed store attempts (Req 15.2)
         self._pending: deque[PendingPrecedent] = deque()
 
@@ -524,6 +533,7 @@ class MemoryEngine:
         authorized_sources: Optional[frozenset[str] | set[str] | list[str]] = None,
         persona: Optional[str] = None,
         region: Optional[str] = None,
+        candidate_multiplier: Optional[int] = None,
     ) -> list[dict]:
         """
         Retrieve up to MAX_RESULTS precedents with relevance ≥ RELEVANCE_THRESHOLD,
@@ -580,26 +590,26 @@ class MemoryEngine:
                 )
                 return []
 
-            # Query ChromaDB for nearest neighbours
-            n_results = min(self.MAX_RESULTS, count)
-            where_filter = None
-            if not include_simulated:
-                where_filter = {"outcome_type": OutcomeType.OBSERVED.value}
+            desired_results = self.MAX_RESULTS
+            multiplier = candidate_multiplier if candidate_multiplier is not None else self._candidate_multiplier
+            # Candidate oversampling compensates for post-retrieval authorization/provenance filtering.
+            candidate_results = min(desired_results * max(1, multiplier), count)
 
-            try:
-                query_result = collection.query(
-                    query_embeddings=[query_vector],
-                    n_results=n_results,
-                    where=where_filter,
-                    include=["documents", "metadatas", "distances"],
-                )
-            except Exception:
-                # Fallback if where filter is unsupported in mock or specific backend
-                query_result = collection.query(
-                    query_embeddings=[query_vector],
-                    n_results=n_results,
-                    include=["documents", "metadatas", "distances"],
-                )
+            # ARCHITECTURAL DECISION (Round 2 E9 Scalability Optimization):
+            # -------------------------------------------------------------
+            # 1. ChromaDB local SQLite metadata filtering (where={"outcome_type": "observed"})
+            #    was benchmarked as a severe bottleneck causing full-table scans & SQLite lock contention (9.4s+).
+            # 2. Raw HNSW vector search is used strictly for candidate generation (sub-30ms at 100k scale).
+            # 3. Python is the authoritative provenance, security, and authorization boundary (<1ms).
+            # 4. Oversampling (candidate_multiplier=5 by default) is necessary because simulated or unauthorized
+            #    precedents can occupy raw vector top-K slots before post-retrieval filtering drops them.
+            # 5. The multiplier (5x) is benchmark-derived from controlled fixtures (yielding 100% recall) and must
+            #    be periodically revalidated when corpus size or simulation distribution shifts materially.
+            query_result = collection.query(
+                query_embeddings=[query_vector],
+                n_results=candidate_results,
+                include=["documents", "metadatas", "distances"],
+            )
 
         except Exception as exc:  # noqa: BLE001
             logger.error(

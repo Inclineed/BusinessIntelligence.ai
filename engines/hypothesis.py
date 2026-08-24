@@ -235,17 +235,32 @@ def _parse_llm_hypotheses(response_text: str) -> list[dict]:
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # Strategy 2: extract the first {...} block that contains "hypotheses"
-    # (handles the case where the model emits prose before/after the JSON)
-    brace_pattern = re.compile(r'\{.*?"hypotheses"\s*:\s*\[.*?\]\s*\}', re.DOTALL)
-    match = brace_pattern.search(response_text)
-    if match:
+    # Strategy 1.5: extract from markdown json code block if present
+    fence_pattern = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.DOTALL)
+    for m in fence_pattern.finditer(response_text):
         try:
-            data = json.loads(match.group(0))
+            data = json.loads(m.group(1).strip())
             if isinstance(data, dict) and "hypotheses" in data:
                 hyps = data["hypotheses"]
                 if isinstance(hyps, list):
                     return hyps
+            if isinstance(data, list):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Strategy 2: find outermost JSON object containing "hypotheses"
+    start_idx = response_text.find("{")
+    end_idx = response_text.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        try:
+            data = json.loads(response_text[start_idx:end_idx + 1])
+            if isinstance(data, dict) and "hypotheses" in data:
+                hyps = data["hypotheses"]
+                if isinstance(hyps, list):
+                    return hyps
+            if isinstance(data, list):
+                return data
         except (json.JSONDecodeError, ValueError):
             pass
 

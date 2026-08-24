@@ -1,0 +1,397 @@
+{
+  "timestamp": "2026-08-24T21:13:47.206616+00:00",
+  "policy_parameters": {
+    "default_candidate_multiplier": 5,
+    "max_results": 10,
+    "relevance_threshold": 0.7,
+    "python_authoritative_filtering": true,
+    "chroma_where_filter_used": false
+  },
+  "adversarial_recall_by_multiplier": {
+    "A. Mostly Authorized (80% auth, 20% noise)": [
+      {
+        "multiplier": 1,
+        "candidate_pool_size": 10,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 23.064
+      },
+      {
+        "multiplier": 2,
+        "candidate_pool_size": 20,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.618
+      },
+      {
+        "multiplier": 5,
+        "candidate_pool_size": 50,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.128
+      },
+      {
+        "multiplier": 10,
+        "candidate_pool_size": 100,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.228
+      }
+    ],
+    "B. Mostly Unauthorized (20% auth, 80% unauth)": [
+      {
+        "multiplier": 1,
+        "candidate_pool_size": 10,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 10,
+        "recall": 0.0,
+        "latency_ms": 22.283
+      },
+      {
+        "multiplier": 2,
+        "candidate_pool_size": 20,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 10,
+        "recall": 0.0,
+        "latency_ms": 12.045
+      },
+      {
+        "multiplier": 5,
+        "candidate_pool_size": 50,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.911
+      },
+      {
+        "multiplier": 10,
+        "candidate_pool_size": 100,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.83
+      }
+    ],
+    "C. Mostly Simulated (20% observed, 80% simulated)": [
+      {
+        "multiplier": 1,
+        "candidate_pool_size": 10,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 10,
+        "recall": 0.0,
+        "latency_ms": 22.683
+      },
+      {
+        "multiplier": 2,
+        "candidate_pool_size": 20,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 10,
+        "recall": 0.0,
+        "latency_ms": 13.171
+      },
+      {
+        "multiplier": 5,
+        "candidate_pool_size": 50,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.683
+      },
+      {
+        "multiplier": 10,
+        "candidate_pool_size": 100,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.856
+      }
+    ],
+    "D. Mixed Unauthorized + Simulated Noise": [
+      {
+        "multiplier": 1,
+        "candidate_pool_size": 10,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 10,
+        "recall": 0.0,
+        "latency_ms": 22.804
+      },
+      {
+        "multiplier": 2,
+        "candidate_pool_size": 20,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 10,
+        "recall": 0.0,
+        "latency_ms": 11.95
+      },
+      {
+        "multiplier": 5,
+        "candidate_pool_size": 50,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 12.36
+      },
+      {
+        "multiplier": 10,
+        "candidate_pool_size": 100,
+        "returned_count": 10,
+        "valid_retrieved": 10,
+        "target_k": 10,
+        "recall": 1.0,
+        "latency_ms": 13.843
+      }
+    ],
+    "E. Highly Similar Unauthorized Noise (Top-K Stealing)": [
+      {
+        "multiplier": 1,
+        "candidate_pool_size": 10,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 5,
+        "recall": 0.0,
+        "latency_ms": 23.831
+      },
+      {
+        "multiplier": 2,
+        "candidate_pool_size": 20,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 5,
+        "recall": 0.0,
+        "latency_ms": 12.418
+      },
+      {
+        "multiplier": 5,
+        "candidate_pool_size": 50,
+        "returned_count": 5,
+        "valid_retrieved": 5,
+        "target_k": 5,
+        "recall": 1.0,
+        "latency_ms": 12.819
+      },
+      {
+        "multiplier": 10,
+        "candidate_pool_size": 100,
+        "returned_count": 5,
+        "valid_retrieved": 5,
+        "target_k": 5,
+        "recall": 1.0,
+        "latency_ms": 12.542
+      }
+    ],
+    "F. Highly Similar Simulated Noise (Top-K Stealing)": [
+      {
+        "multiplier": 1,
+        "candidate_pool_size": 10,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 5,
+        "recall": 0.0,
+        "latency_ms": 23.465
+      },
+      {
+        "multiplier": 2,
+        "candidate_pool_size": 20,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 5,
+        "recall": 0.0,
+        "latency_ms": 12.569
+      },
+      {
+        "multiplier": 5,
+        "candidate_pool_size": 50,
+        "returned_count": 5,
+        "valid_retrieved": 5,
+        "target_k": 5,
+        "recall": 1.0,
+        "latency_ms": 11.88
+      },
+      {
+        "multiplier": 10,
+        "candidate_pool_size": 100,
+        "returned_count": 5,
+        "valid_retrieved": 5,
+        "target_k": 5,
+        "recall": 1.0,
+        "latency_ms": 11.927
+      }
+    ],
+    "G. Combined Dense Noise (50 noise candidates)": [
+      {
+        "multiplier": 1,
+        "candidate_pool_size": 10,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 5,
+        "recall": 0.0,
+        "latency_ms": 23.282
+      },
+      {
+        "multiplier": 2,
+        "candidate_pool_size": 20,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 5,
+        "recall": 0.0,
+        "latency_ms": 12.422
+      },
+      {
+        "multiplier": 5,
+        "candidate_pool_size": 50,
+        "returned_count": 0,
+        "valid_retrieved": 0,
+        "target_k": 5,
+        "recall": 0.0,
+        "latency_ms": 12.97
+      },
+      {
+        "multiplier": 10,
+        "candidate_pool_size": 100,
+        "returned_count": 5,
+        "valid_retrieved": 5,
+        "target_k": 5,
+        "recall": 1.0,
+        "latency_ms": 12.584
+      }
+    ]
+  },
+  "scale_tier_concurrency_benchmarks": {
+    "Tier 1 (~100 precedents)": {
+      "C=1": {
+        "requests": 10,
+        "p50_ms": 13.54,
+        "p95_ms": 25.2,
+        "max_ms": 25.2,
+        "payload_candidates": 50
+      },
+      "C=5": {
+        "requests": 10,
+        "p50_ms": 22.83,
+        "p95_ms": 28.0,
+        "max_ms": 28.0,
+        "payload_candidates": 50
+      },
+      "C=25": {
+        "requests": 50,
+        "p50_ms": 79.17,
+        "p95_ms": 88.78,
+        "max_ms": 91.81,
+        "payload_candidates": 50
+      }
+    },
+    "Tier 2 (~1,000 precedents)": {
+      "C=1": {
+        "requests": 10,
+        "p50_ms": 12.27,
+        "p95_ms": 25.2,
+        "max_ms": 25.2,
+        "payload_candidates": 50
+      },
+      "C=5": {
+        "requests": 10,
+        "p50_ms": 23.48,
+        "p95_ms": 25.05,
+        "max_ms": 25.05,
+        "payload_candidates": 50
+      },
+      "C=25": {
+        "requests": 50,
+        "p50_ms": 85.42,
+        "p95_ms": 94.98,
+        "max_ms": 96.68,
+        "payload_candidates": 50
+      }
+    },
+    "Tier 3 (~10,000 precedents)": {
+      "C=1": {
+        "requests": 10,
+        "p50_ms": 13.14,
+        "p95_ms": 24.06,
+        "max_ms": 24.06,
+        "payload_candidates": 50
+      },
+      "C=5": {
+        "requests": 10,
+        "p50_ms": 25.28,
+        "p95_ms": 28.89,
+        "max_ms": 28.89,
+        "payload_candidates": 50
+      },
+      "C=25": {
+        "requests": 50,
+        "p50_ms": 96.48,
+        "p95_ms": 108.98,
+        "max_ms": 110.34,
+        "payload_candidates": 50
+      }
+    },
+    "Tier 4 (~100,000 precedents)": {
+      "C=1": {
+        "requests": 10,
+        "p50_ms": 13.41,
+        "p95_ms": 23.38,
+        "max_ms": 23.38,
+        "payload_candidates": 50
+      },
+      "C=5": {
+        "requests": 10,
+        "p50_ms": 23.3,
+        "p95_ms": 28.45,
+        "max_ms": 28.45,
+        "payload_candidates": 50
+      },
+      "C=25": {
+        "requests": 50,
+        "p50_ms": 98.23,
+        "p95_ms": 117.24,
+        "max_ms": 122.05,
+        "payload_candidates": 50
+      }
+    }
+  },
+  "adaptive_vs_fixed_strategy_evaluation": {
+    "fixed_x5": {
+      "p50_ms": 12.59,
+      "p95_ms": 23.38,
+      "queries_per_req": 1
+    },
+    "adaptive_x2_x5": {
+      "p50_ms": 24.88,
+      "p95_ms": 25.95,
+      "queries_per_req": 1.8
+    },
+    "recommendation": "Maintain fixed x5 multiplier; adaptive multi-query adds ~80% latency overhead when retries occur."
+  },
+  "revalidation_triggers": [
+    "Precedent corpus crosses 50,000 records",
+    "Simulated or unauthorized candidate ratio exceeds 70% in raw candidate pools",
+    "E9 p95 latency exceeds 50ms at C=5",
+    "Recall drops below 95% on benchmark verification suite",
+    "New metadata filtering dimensions are introduced"
+  ],
+  "migration_triggers_for_pgvector": [
+    "E9 p95 latency under high concurrency (C=25) exceeds 250ms",
+    "Corpus exceeds 500,000 precedents causing memory pressure on local Chroma HNSW index",
+    "Multi-tenant transactional metadata joins become mandatory across SQL and vector indices"
+  ]
+}

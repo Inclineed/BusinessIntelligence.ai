@@ -17,14 +17,13 @@ flowchart TD
         META --> UPSERT[Upsert to ChromaDB\n'investigation_precedents']
     end
 
-    subgraph Retrieval_Lifecycle ["2. Retrieval Lifecycle"]
+    subgraph Retrieval_Lifecycle ["2. Retrieval Lifecycle (Search -> Oversample -> Filter)"]
         QUERY[Target Scenario Query] --> QEMB[bge-m3 Query Embedding]
-        QEMB --> CHROMA_Q[ChromaDB Cosine Search\nwhere outcome_type = 'observed']
-        CHROMA_Q --> FILTER1[Relevance Filter\nrelevance >= 0.70]
-        FILTER1 --> FILTER2[Domain Retention Filter\ncreated_at + TTL >= now]
-        FILTER2 --> WEIGHT[Confidence Weighting\nHIGH=1.0, MED=0.6, ABS=0.2, LOW=0.1]
+        QEMB --> RAW_SEARCH[Raw Vector Candidate Search\nn_results = 10 x candidate_multiplier\n(No SQLite where filter)]
+        RAW_SEARCH --> PY_FILTER[Authoritative Python Security & Provenance Filter\n1. outcome_type == 'observed'\n2. source_ids present & valid\n3. source_ids subset of authorized_sources\n4. region scope match\n5. relevance >= 0.70\n6. created_at + TTL >= now]
+        PY_FILTER --> WEIGHT[Confidence Weighting\nHIGH=1.0, MED=0.6, ABS=0.2, LOW=0.1]
         WEIGHT --> BOOST[Human Validation Boost\n+0.1 if human_validated=true]
-        BOOST --> RANK[Sort by retrieval_score Descending]
+        BOOST --> RANK[Sort by retrieval_score Descending\nTruncate to MAX_RESULTS = 10]
     end
 ```
 
@@ -151,7 +150,7 @@ During `retrieve_precedents()`, if `retention_config` is provided:
 
 To prevent memory contamination and feedback loops:
 
-1. **Observed vs. Simulated Segregation**: Simulated outcome projections from Engine E8 are stored with `outcome_type="simulated"`. Normal precedent retrieval queries ChromaDB with `where={"outcome_type": "observed"}`. Simulated scenarios are never returned as historical truth.
+1. **Observed vs. Simulated Segregation**: Simulated outcome projections from Engine E8 are stored with `outcome_type="simulated"`. Post-retrieval Python filtering enforces `outcome_type == "observed"`. Simulated scenarios are never returned as historical truth.
 2. **Legacy / Unknown Provenance Exclusion**: Any record lacking an explicit `outcome_type="observed"` tag is filtered out by default.
 3. **Collection Boundary Protection**: Engine E4 (evidence assembly) is strictly barred from querying the `investigation_precedents` collection. Precedents can never masquerade as direct empirical evidence for current investigations.
 
@@ -164,3 +163,43 @@ To reset memory to a clean, verified state, use `scripts/rebuild_memory.py`:
 python scripts/rebuild_memory.py
 ```
 This drops the `investigation_precedents` collection, recreates it with cosine space metadata, and re-indexes clean provenance-complete precedents for baseline scenarios (`INC_001` through `INC_008`) with their `human_validated` field initialized to `False`.
+
+---
+
+## 9. Scalability Architecture: Search → Oversample → Filter Policy
+
+### 9.1 The ChromaDB Metadata Bottleneck & Solution
+Scalability benchmarking revealed that applying ChromaDB metadata filters (`where={"outcome_type": "observed"}`) inside local embedded ChromaDB triggers full SQLite table scans and severe lock contention (9.4s+ latency at just 1,000 precedents).
+
+By removing the `where` filter from the ChromaDB query and delegating all provenance, security, and status filtering to Python, retrieval latency drops to **<25ms at 100,000 precedents**.
+
+### 9.2 The Search → Oversample → Filter Pipeline
+1. **Raw Vector Search**: Queries ChromaDB for $N = \text{desired\_results} \times \text{candidate\_multiplier}$ candidates (default: $10 \times 5 = 50$ candidates).
+2. **Authoritative Python Security & Provenance Filter**:
+   1. `outcome_type == "observed"`
+   2. `source_ids` present and non-empty (fail-closed)
+   3. `source_ids` $\subseteq$ `authorized_sources` (Security Engine Entitlement Invariant)
+   4. Region scope matching
+   5. Relevance threshold filtering ($\text{relevance} \ge 0.70$)
+   6. Domain TTL expiration
+3. **Confidence Weighting & Validation Boost**: Applies `RETRIEVAL_WEIGHTS` and `HUMAN_VALIDATION_BOOST`.
+4. **Ranking & Truncation**: Sorts by `retrieval_score` descending and truncates to `MAX_RESULTS = 10`.
+
+### 9.3 Benchmark Evidence & Absence of Theoretical Guarantee
+> [!IMPORTANT]
+> **Benchmark-Backed Parameter**: The default candidate multiplier **x5** achieved **100% recall** across controlled adversarial noise distributions (simulated noise, unauthorized noise, and mixed noise up to 40 noise items). However, **x5 is an operational parameter, NOT a universal theoretical guarantee**. In extreme synthetic adversarial fixtures with $\ge 50$ dense noise items occupying all 50 candidate slots, recall requires higher oversampling (e.g. x10).
+
+### 9.4 Revalidation Triggers
+The candidate oversampling factor must be re-benchmarked when any of the following operational triggers occur:
+* **Corpus Growth**: Total precedent collection exceeds 50,000 records.
+* **Distribution Shift**: Proportion of simulated or restricted precedents in the database exceeds 70%.
+* **Latency Regression**: E9 retrieval p95 latency exceeds 50ms under normal concurrency ($C=5$).
+* **Recall Regression**: Retrieval recall falls below 95% on automated validation benchmarks.
+* **New Metadata Dimensions**: Additional post-filtering constraints (e.g. new multi-tenant tags) are introduced.
+
+### 9.5 Migration Triggers for pgvector / Chroma Server
+Architecture migration to `pgvector` or client/server ChromaDB should be revisited only when measured empirical evidence justifies it:
+* E9 p95 latency under high concurrency ($C=25$) exceeds 250ms.
+* Precedent corpus exceeds 500,000 records causing memory pressure on in-process HNSW graphs.
+* Complex SQL joins between relational transactions and vector distance become mandatory.
+

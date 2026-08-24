@@ -58,11 +58,18 @@ OLLAMA_HOST=http://localhost:11434
 ```
 
 ### Selecting Groq Cloud Provider
-In `.env` or shell:
+In untracked `.env` or shell:
 ```bash
 LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_your_actual_key_here
+GROQ_API_KEY=<your_provisioned_groq_api_key>
 GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_CREDENTIAL_MODE=single
+```
+
+For local testing / hackathon concurrency pooling (untracked `.env` only):
+```bash
+GROQ_CREDENTIAL_MODE=local_pool
+GROQ_API_KEYS=<key1>,<key2>,<key3>
 ```
 
 ### Running the Live Groq Smoke Test

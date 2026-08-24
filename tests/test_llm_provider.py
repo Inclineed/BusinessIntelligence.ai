@@ -73,7 +73,8 @@ def test_provider_selection_unsupported():
 
 def test_groq_missing_api_key_fails(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="GROQ_API_KEY is required"):
+    monkeypatch.delenv("GROQ_API_KEYS", raising=False)
+    with pytest.raises(ValueError, match="GROQ_API_KEY.*is required"):
         GroqProvider(api_key=None)
 
 
@@ -319,3 +320,69 @@ def test_ollama_fallback_on_primary_failure(mock_post):
     assert response.text == "Fallback answer"
     assert response.model == "gemma3:12b"
     assert mock_post.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Multi-Key Rotation Tests
+# ---------------------------------------------------------------------------
+
+@patch("time.sleep", return_value=None)
+@patch("llm.provider.httpx.post")
+def test_groq_multi_key_rotation_on_429(mock_post, mock_sleep):
+    # Key 1 hits 429 -> Rotates to Key 2 which succeeds with 200 OK
+    resp_429 = httpx.Response(
+        status_code=429,
+        text="Rate limit exceeded on Key 1",
+        headers={"retry-after": "10"},
+        request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+    )
+    resp_200 = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [{"message": {"content": "Success from Key 2"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+        },
+        request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+    )
+    mock_post.side_effect = [resp_429, resp_200]
+
+    provider = GroqProvider(api_key=["gsk_key1", "gsk_key2", "gsk_key3"], max_retries=2)
+    response = provider.complete("Test prompt")
+
+    assert response.text == "Success from Key 2"
+    assert mock_post.call_count == 2
+    # Verify Authorization header changed on retry
+    first_call_auth = mock_post.call_args_list[0][1]["headers"]["Authorization"]
+    second_call_auth = mock_post.call_args_list[1][1]["headers"]["Authorization"]
+    assert first_call_auth == "Bearer gsk_key1"
+    assert second_call_auth == "Bearer gsk_key2"
+
+
+def test_groq_single_credential_mode(monkeypatch):
+    monkeypatch.setenv("GROQ_CREDENTIAL_MODE", "single")
+    monkeypatch.setenv("GROQ_API_KEYS", "gsk_test1,gsk_test2,gsk_test3")
+    provider = GroqProvider()
+    assert len(provider._api_keys) == 1
+    assert provider._get_active_key() == "gsk_test1"
+
+
+def test_groq_local_pool_credential_mode(monkeypatch):
+    monkeypatch.setenv("GROQ_CREDENTIAL_MODE", "local_pool")
+    monkeypatch.setenv("GROQ_API_KEYS", "gsk_test1,gsk_test2,gsk_test3")
+    provider = GroqProvider()
+    assert len(provider._api_keys) == 3
+
+
+@patch("llm.provider.httpx.post")
+def test_groq_sanitizes_error_messages(mock_post):
+    mock_post.return_value = httpx.Response(
+        status_code=400,
+        text="Invalid request with token gsk_secret_token_12345 in header",
+        request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+    )
+    provider = GroqProvider(api_key="gsk_test_key")
+    with pytest.raises(GroqAPIError) as exc_info:
+        provider.complete("Test")
+    err_str = str(exc_info.value)
+    assert "gsk_****" in err_str
+    assert "gsk_secret_token_12345" not in err_str

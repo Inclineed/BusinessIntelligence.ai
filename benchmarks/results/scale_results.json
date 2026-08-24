@@ -1,0 +1,338 @@
+[
+  {
+    "tier": 2,
+    "concurrency": 1,
+    "pg_e4": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0,
+      "errors": 0,
+      "throughput": 0,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0,
+      "errors": 0,
+      "throughput": 0,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 1,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 2,
+    "concurrency": 5,
+    "pg_e4": {
+      "p50": 15.0,
+      "p95": 15.0,
+      "max": 15.0,
+      "errors": 0,
+      "throughput": 333.33,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 31.0,
+      "p95": 31.0,
+      "max": 31.0,
+      "errors": 0,
+      "throughput": 161.29,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 5,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 2,
+    "concurrency": 10,
+    "pg_e4": {
+      "p50": 16.0,
+      "p95": 16.0,
+      "max": 16.0,
+      "errors": 0,
+      "throughput": 625.0,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 47.0,
+      "p95": 62.0,
+      "max": 62.0,
+      "errors": 0,
+      "throughput": 161.29,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 10,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 2,
+    "concurrency": 25,
+    "pg_e4": {
+      "p50": 47.0,
+      "p95": 47.0,
+      "max": 47.0,
+      "errors": 0,
+      "throughput": 403.23,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 125.0,
+      "p95": 141.0,
+      "max": 141.0,
+      "errors": 0,
+      "throughput": 177.3,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 25,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 3,
+    "concurrency": 1,
+    "pg_e4": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0,
+      "errors": 0,
+      "throughput": 0,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0,
+      "errors": 0,
+      "throughput": 0,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 1,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 3,
+    "concurrency": 5,
+    "pg_e4": {
+      "p50": 15.0,
+      "p95": 15.0,
+      "max": 15.0,
+      "errors": 0,
+      "throughput": 333.33,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 31.0,
+      "p95": 31.0,
+      "max": 31.0,
+      "errors": 0,
+      "throughput": 161.29,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 5,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 3,
+    "concurrency": 10,
+    "pg_e4": {
+      "p50": 16.0,
+      "p95": 16.0,
+      "max": 16.0,
+      "errors": 0,
+      "throughput": 625.0,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 47.0,
+      "p95": 47.0,
+      "max": 47.0,
+      "errors": 0,
+      "throughput": 161.29,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 10,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 3,
+    "concurrency": 25,
+    "pg_e4": {
+      "p50": 63.0,
+      "p95": 78.0,
+      "max": 78.0,
+      "errors": 0,
+      "throughput": 320.51,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 109.0,
+      "p95": 109.0,
+      "max": 109.0,
+      "errors": 0,
+      "throughput": 229.36,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 25,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 4,
+    "concurrency": 1,
+    "pg_e4": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0,
+      "errors": 0,
+      "throughput": 0,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "max": 0.0,
+      "errors": 0,
+      "throughput": 0,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 1,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 4,
+    "concurrency": 5,
+    "pg_e4": {
+      "p50": 16.0,
+      "p95": 16.0,
+      "max": 16.0,
+      "errors": 0,
+      "throughput": 312.5,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 62.0,
+      "p95": 78.0,
+      "max": 78.0,
+      "errors": 0,
+      "throughput": 64.1,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 5,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 4,
+    "concurrency": 10,
+    "pg_e4": {
+      "p50": 469.0,
+      "p95": 484.0,
+      "max": 484.0,
+      "errors": 0,
+      "throughput": 20.66,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 594.0,
+      "p95": 625.0,
+      "max": 625.0,
+      "errors": 0,
+      "throughput": 15.24,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 10,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  },
+  {
+    "tier": 4,
+    "concurrency": 25,
+    "pg_e4": {
+      "p50": 281.0,
+      "p95": 297.0,
+      "max": 312.0,
+      "errors": 0,
+      "throughput": 80.13,
+      "avg_results": 1.0
+    },
+    "chroma_raw": {
+      "p50": 219.0,
+      "p95": 250.0,
+      "max": 250.0,
+      "errors": 0,
+      "throughput": 100.0,
+      "avg_results": 10.0
+    },
+    "chroma_e9": {
+      "p50": 0,
+      "p95": 0,
+      "max": 0,
+      "errors": 25,
+      "throughput": 0,
+      "avg_results": 0
+    }
+  }
+]

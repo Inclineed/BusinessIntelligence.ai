@@ -117,3 +117,13 @@ Switching providers via `LLM_PROVIDER=ollama` or `LLM_PROVIDER=groq` alters **ze
 ### Graceful Pipeline Degradation:
 - E5 produces 0 hypotheses $\rightarrow$ E6 sets `abstained=True` $\rightarrow$ E7 sets `recommended_action=None`.
 - E9 invokes `_build_fallback_summary` template and indexes the investigation without crashing.
+
+---
+
+## 6. Credential Architecture & Secret Isolation
+
+1. **Untracked Secret Storage**: All API keys and secrets reside strictly in local, untracked `.env` files (excluded by `.gitignore`). No keys are embedded in source code, configuration YAMLs, test snapshots, or documentation.
+2. **Production vs. Local Testing Mode**:
+   - **Production (`GROQ_CREDENTIAL_MODE=single`)**: Uses a single provisioned credential. The system makes no assumptions regarding multi-organization pools or multiple keys.
+   - **Local Testing Pool (`GROQ_CREDENTIAL_MODE=local_pool`)**: An optional local-only testing utility supporting comma-separated `GROQ_API_KEYS=key1,key2...` for concurrency benchmark evaluation.
+3. **Secret-Safe Observability**: All logs and telemetry sanitize error messages and reference non-sensitive identifiers (`credential_index=N`), guaranteeing zero secret leakage in application traces or frontend responses.

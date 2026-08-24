@@ -143,6 +143,7 @@ A rich user interface providing:
 9. **Single Ground Truth Chokepoint**: `_GROUND_TRUTH_LOAD_ALLOWED = True` is declared exclusively in `evaluation/evaluator.py`. No engine code imports ground truth.
 10. **Dynamic Evaluator Extensibility**: The evaluation framework contains zero hardcoded scenario dispatching; all validation dimensions are dynamically discovered.
 11. **Shared Institutional Precedents & Authoritative Preservation**: Engine E9 maintains a single shared institutional precedent record per incident scenario (`scenario_id`). Precedents represent full ground-truth operational history evaluated under the Analyst cross-domain scope. Restricted role runs (CFO/Manager) do not create separate persona-siloed precedents or overwrite/degrade existing authoritative Analyst precedents. Entitlement isolation is enforced at query retrieval time ($\text{source\_ids} \subseteq \text{authorized\_sources}$).
+12. **E9 Search → Oversample → Filter Pipeline**: Precedent retrieval executes raw candidate vector search with a benchmark-backed candidate oversampling policy ($x5$), delegating all provenance, authorization, TTL, and status checks to the authoritative Python security boundary without relying on slow ChromaDB SQLite metadata filters.
 
 ---
 

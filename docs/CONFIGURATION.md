@@ -166,9 +166,22 @@ LLM_FALLBACK_MODEL=gemma3:12b           # Fallback local reasoning model
 EMBED_MODEL=bge-m3                      # ChromaDB embedding model
 
 # Groq Cloud Settings (required when LLM_PROVIDER=groq)
-GROQ_API_KEY=gsk_...                    # Official Groq API token
+GROQ_API_KEY=                           # Single provisioned API token for production
 GROQ_MODEL=llama-3.3-70b-versatile      # Default Groq reasoning model
 GROQ_BASE_URL=https://api.groq.com/openai/v1
-GROQ_TIMEOUT=30.0                       # Request timeout in seconds
-GROQ_MAX_RETRIES=3                      # Max retries for 429/5xx errors
+GROQ_TIMEOUT=45.0                       # Request timeout in seconds
+GROQ_MAX_RETRIES=5                      # Max retries for 429/5xx errors
+
+# Credential Mode
+GROQ_CREDENTIAL_MODE=single             # "single" (production default) or "local_pool" (local testing)
+
+# Local Multi-Credential Testing Only (Untracked .env file only; never committed):
+# GROQ_CREDENTIAL_MODE=local_pool
+# GROQ_API_KEYS=key1,key2,key3
 ```
+
+### Security & Secret Isolation Guidelines
+* **Untracked Secret Storage**: Real credentials (`GROQ_API_KEY`, `GROQ_API_KEYS`) must strictly reside in untracked `.env` files and are excluded by `.gitignore`.
+* **Production vs. Local Architecture**: Production deployments use a single, centrally managed production credential (`GROQ_CREDENTIAL_MODE=single`). Multi-credential rotation is a local-only testing utility for concurrency evaluation.
+* **Secret-Safe Telemetry & Logs**: Telemetry metrics, structured logs, and benchmark reports record only non-sensitive metadata (`provider`, `model`, `credential_index`, `latency_ms`, `tokens`). All authorization tokens and `gsk_*` values are scrubbed and never exposed in logs or frontend responses.
+
