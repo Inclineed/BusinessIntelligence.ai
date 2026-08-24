@@ -1,5 +1,5 @@
 """
-api/main.py â€” FastAPI application for BusinessIntelligence.ai.
+api/main.py — FastAPI application for BusinessIntelligence.ai.
 
 Exposes the /investigate endpoint with server-side entitlement enforcement,
 and the /feedback endpoint for capturing analyst feedback on investigation
@@ -38,7 +38,7 @@ from security.entitlements import SecurityEngine
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Configuration â€” read once at import time (overrideable by env)
+# Configuration — read once at import time (overrideable by env)
 # ---------------------------------------------------------------------------
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
@@ -63,11 +63,11 @@ def _to_json(obj: Any) -> Any:
     Recursively convert dataclasses, enums, and nested structures into
     JSON-serializable primitives.
 
-    - dataclass  â†’ dict (field name â†’ converted value)
-    - Enum       â†’ its .value
-    - list/tuple â†’ list of converted elements
-    - dict       â†’ dict with converted values
-    - Everything else (str, int, float, bool, None) â†’ pass through
+    - dataclass  → dict (field name → converted value)
+    - Enum       → its .value
+    - list/tuple → list of converted elements
+    - dict       → dict with converted values
+    - Everything else (str, int, float, bool, None) → pass through
     """
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         d = {
@@ -94,7 +94,7 @@ def _to_json(obj: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Lifespan â€” startup / shutdown
+# Lifespan — startup / shutdown
 # ---------------------------------------------------------------------------
 
 
@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
     # ------------------------------------------------------------------
     try:
         state.kpi_contract = load_kpi_contract(_CONFIG_DIR / "kpi_contracts.yaml")
-        logger.info("Loaded kpi_contracts.yaml â€” domain=%s", state.kpi_contract.get("domain"))
+        logger.info("Loaded kpi_contracts.yaml — domain=%s", state.kpi_contract.get("domain"))
     except ConfigError as exc:
         logger.error("Failed to load kpi_contracts.yaml: %s", exc)
         state.kpi_contract = None
@@ -134,7 +134,7 @@ async def lifespan(app: FastAPI):
 
     try:
         state.sources_config = load_sources(_CONFIG_DIR / "sources.yaml")
-        logger.info("Loaded sources.yaml â€” %d source(s)", len(state.sources_config))
+        logger.info("Loaded sources.yaml — %d source(s)", len(state.sources_config))
     except ConfigError as exc:
         logger.error("Failed to load sources.yaml: %s", exc)
         state.sources_config = []
@@ -147,7 +147,7 @@ async def lifespan(app: FastAPI):
         state.db_conn = psycopg2.connect(DATABASE_URL)
         logger.info("Connected to Postgres at %s", DATABASE_URL)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Postgres connection failed: %s â€” investigate will degrade gracefully.", exc)
+        logger.error("Postgres connection failed: %s — investigate will degrade gracefully.", exc)
 
     # ------------------------------------------------------------------
     # ChromaDB client
@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
         state.chroma_client.get_collection  # lightweight check
         logger.info("Connected to ChromaDB at %s:%s", CHROMA_HOST, CHROMA_PORT)
     except Exception as exc:  # noqa: BLE001
-        logger.error("ChromaDB connection failed: %s â€” investigate will degrade gracefully.", exc)
+        logger.error("ChromaDB connection failed: %s — investigate will degrade gracefully.", exc)
 
     # ------------------------------------------------------------------
     # LLM provider (Ollama)
@@ -170,7 +170,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # ------------------------------------------------------------------
-    # Shutdown â€” close Postgres connection
+    # Shutdown — close Postgres connection
     # ------------------------------------------------------------------
     if state.db_conn is not None:
         try:
@@ -271,7 +271,7 @@ async def kpi_contract(request: Request) -> JSONResponse:
     if contract is None:
         raise HTTPException(
             status_code=503,
-            detail="KPI contract is not available â€” check server logs for config errors.",
+            detail="KPI contract is not available — check server logs for config errors.",
         )
     return JSONResponse(content=_to_json(contract))
 
@@ -282,14 +282,14 @@ async def investigate_endpoint(
     request: Request,
 ) -> JSONResponse:
     """
-    Run the full E1â†’E7 pipeline and return a structured InvestigationResult.
+    Run the full E1→E7 pipeline and return a structured InvestigationResult.
 
     Server-side entitlement enforcement (Requirements 5.6, 5.7, 5.8):
 
-    1. Unsupported persona                â†’ HTTP 422
-    2. entitlements.yaml unresolvable     â†’ HTTP 403, access_denied payload
-    3. Empty scope after authorization    â†’ HTTP 403, access_denied payload
-    4. Authorized persona, normal run     â†’ HTTP 200, InvestigationResult JSON
+    1. Unsupported persona                → HTTP 422
+    2. entitlements.yaml unresolvable     → HTTP 403, access_denied payload
+    3. Empty scope after authorization    → HTTP 403, access_denied payload
+    4. Authorized persona, normal run     → HTTP 200, InvestigationResult JSON
     """
     state = request.app.state
     persona_str = body.persona.strip().lower()
@@ -311,7 +311,7 @@ async def investigate_endpoint(
     # ------------------------------------------------------------------
     entitlements_config = state.entitlements_config
     if entitlements_config is None:
-        # entitlements.yaml failed to load at startup â€” fail closed (Req 5.8)
+        # entitlements.yaml failed to load at startup — fail closed (Req 5.8)
         logger.warning(
             "/investigate: entitlements_config unavailable for persona=%s scenario=%s",
             persona_str, body.scenario_id,
@@ -328,7 +328,7 @@ async def investigate_endpoint(
     security_engine = SecurityEngine(entitlements_config)
     try:
         scope = security_engine.authorize(persona_str, region=body.region)
-    except Exception as exc:  # noqa: BLE001 â€” e.g. ValueError from own_only + no region
+    except Exception as exc:  # noqa: BLE001 — e.g. ValueError from own_only + no region
         logger.error(
             "/investigate: entitlement authorization error for persona=%s: %s",
             persona_str, exc,
@@ -379,7 +379,7 @@ async def investigate_endpoint(
         )
         raise HTTPException(
             status_code=500,
-            detail="Internal pipeline error â€” see server logs for details.",
+            detail="Internal pipeline error — see server logs for details.",
         ) from exc
 
     # ------------------------------------------------------------------
@@ -573,7 +573,7 @@ async def feedback_endpoint(
                     body.corrected_action,
                     body.evidence_grounding_correct,
                     analyst_notes,
-                    body.content,  # preserve legacy content column
+                    body.content,
                 ),
             )
             feedback_id = cur.fetchone()[0]
@@ -584,7 +584,7 @@ async def feedback_endpoint(
         if verdict_str == "CORRECT" and inv_persona == "analyst" and scenario_id:
             try:
                 from engines.memory import MemoryEngine
-                memory = MemoryEngine(chroma_client=state.chroma_client)
+                memory = MemoryEngine(chroma_client=state.chroma_client, llm_provider=state.llm_provider)
 
                 # First-wins check: only validate if not already validated
                 collection = memory._get_or_create_collection()
