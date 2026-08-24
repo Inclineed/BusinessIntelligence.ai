@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-24T21:13:47.206616+00:00",
+  "timestamp": "2026-08-24T21:53:10.498328+00:00",
   "policy_parameters": {
     "default_candidate_multiplier": 5,
     "max_results": 10,
@@ -16,7 +16,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 23.064
+        "latency_ms": 20.871
       },
       {
         "multiplier": 2,
@@ -25,7 +25,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.618
+        "latency_ms": 12.231
       },
       {
         "multiplier": 5,
@@ -34,7 +34,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.128
+        "latency_ms": 12.63
       },
       {
         "multiplier": 10,
@@ -43,7 +43,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.228
+        "latency_ms": 12.818
       }
     ],
     "B. Mostly Unauthorized (20% auth, 80% unauth)": [
@@ -54,7 +54,7 @@
         "valid_retrieved": 0,
         "target_k": 10,
         "recall": 0.0,
-        "latency_ms": 22.283
+        "latency_ms": 22.745
       },
       {
         "multiplier": 2,
@@ -63,7 +63,7 @@
         "valid_retrieved": 0,
         "target_k": 10,
         "recall": 0.0,
-        "latency_ms": 12.045
+        "latency_ms": 10.829
       },
       {
         "multiplier": 5,
@@ -72,7 +72,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.911
+        "latency_ms": 11.054
       },
       {
         "multiplier": 10,
@@ -81,7 +81,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.83
+        "latency_ms": 12.424
       }
     ],
     "C. Mostly Simulated (20% observed, 80% simulated)": [
@@ -92,7 +92,7 @@
         "valid_retrieved": 0,
         "target_k": 10,
         "recall": 0.0,
-        "latency_ms": 22.683
+        "latency_ms": 20.101
       },
       {
         "multiplier": 2,
@@ -101,7 +101,7 @@
         "valid_retrieved": 0,
         "target_k": 10,
         "recall": 0.0,
-        "latency_ms": 13.171
+        "latency_ms": 11.479
       },
       {
         "multiplier": 5,
@@ -110,7 +110,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.683
+        "latency_ms": 11.339
       },
       {
         "multiplier": 10,
@@ -119,7 +119,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.856
+        "latency_ms": 11.253
       }
     ],
     "D. Mixed Unauthorized + Simulated Noise": [
@@ -130,7 +130,7 @@
         "valid_retrieved": 0,
         "target_k": 10,
         "recall": 0.0,
-        "latency_ms": 22.804
+        "latency_ms": 21.295
       },
       {
         "multiplier": 2,
@@ -139,7 +139,7 @@
         "valid_retrieved": 0,
         "target_k": 10,
         "recall": 0.0,
-        "latency_ms": 11.95
+        "latency_ms": 11.355
       },
       {
         "multiplier": 5,
@@ -148,7 +148,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 12.36
+        "latency_ms": 11.18
       },
       {
         "multiplier": 10,
@@ -157,7 +157,7 @@
         "valid_retrieved": 10,
         "target_k": 10,
         "recall": 1.0,
-        "latency_ms": 13.843
+        "latency_ms": 11.403
       }
     ],
     "E. Highly Similar Unauthorized Noise (Top-K Stealing)": [
@@ -168,7 +168,7 @@
         "valid_retrieved": 0,
         "target_k": 5,
         "recall": 0.0,
-        "latency_ms": 23.831
+        "latency_ms": 21.431
       },
       {
         "multiplier": 2,
@@ -177,7 +177,7 @@
         "valid_retrieved": 0,
         "target_k": 5,
         "recall": 0.0,
-        "latency_ms": 12.418
+        "latency_ms": 11.077
       },
       {
         "multiplier": 5,
@@ -186,7 +186,7 @@
         "valid_retrieved": 5,
         "target_k": 5,
         "recall": 1.0,
-        "latency_ms": 12.819
+        "latency_ms": 10.435
       },
       {
         "multiplier": 10,
@@ -195,7 +195,7 @@
         "valid_retrieved": 5,
         "target_k": 5,
         "recall": 1.0,
-        "latency_ms": 12.542
+        "latency_ms": 10.893
       }
     ],
     "F. Highly Similar Simulated Noise (Top-K Stealing)": [
@@ -206,7 +206,7 @@
         "valid_retrieved": 0,
         "target_k": 5,
         "recall": 0.0,
-        "latency_ms": 23.465
+        "latency_ms": 20.206
       },
       {
         "multiplier": 2,
@@ -215,7 +215,7 @@
         "valid_retrieved": 0,
         "target_k": 5,
         "recall": 0.0,
-        "latency_ms": 12.569
+        "latency_ms": 11.441
       },
       {
         "multiplier": 5,
@@ -224,7 +224,7 @@
         "valid_retrieved": 5,
         "target_k": 5,
         "recall": 1.0,
-        "latency_ms": 11.88
+        "latency_ms": 10.811
       },
       {
         "multiplier": 10,
@@ -233,7 +233,7 @@
         "valid_retrieved": 5,
         "target_k": 5,
         "recall": 1.0,
-        "latency_ms": 11.927
+        "latency_ms": 10.501
       }
     ],
     "G. Combined Dense Noise (50 noise candidates)": [
@@ -244,7 +244,7 @@
         "valid_retrieved": 0,
         "target_k": 5,
         "recall": 0.0,
-        "latency_ms": 23.282
+        "latency_ms": 19.286
       },
       {
         "multiplier": 2,
@@ -253,7 +253,7 @@
         "valid_retrieved": 0,
         "target_k": 5,
         "recall": 0.0,
-        "latency_ms": 12.422
+        "latency_ms": 10.08
       },
       {
         "multiplier": 5,
@@ -262,7 +262,7 @@
         "valid_retrieved": 0,
         "target_k": 5,
         "recall": 0.0,
-        "latency_ms": 12.97
+        "latency_ms": 12.182
       },
       {
         "multiplier": 10,
@@ -271,7 +271,7 @@
         "valid_retrieved": 5,
         "target_k": 5,
         "recall": 1.0,
-        "latency_ms": 12.584
+        "latency_ms": 11.904
       }
     ]
   },
@@ -279,105 +279,105 @@
     "Tier 1 (~100 precedents)": {
       "C=1": {
         "requests": 10,
-        "p50_ms": 13.54,
-        "p95_ms": 25.2,
-        "max_ms": 25.2,
+        "p50_ms": 13.09,
+        "p95_ms": 24.15,
+        "max_ms": 24.15,
         "payload_candidates": 50
       },
       "C=5": {
         "requests": 10,
-        "p50_ms": 22.83,
-        "p95_ms": 28.0,
-        "max_ms": 28.0,
+        "p50_ms": 19.63,
+        "p95_ms": 22.07,
+        "max_ms": 22.07,
         "payload_candidates": 50
       },
       "C=25": {
         "requests": 50,
-        "p50_ms": 79.17,
-        "p95_ms": 88.78,
-        "max_ms": 91.81,
+        "p50_ms": 76.16,
+        "p95_ms": 84.82,
+        "max_ms": 86.59,
         "payload_candidates": 50
       }
     },
     "Tier 2 (~1,000 precedents)": {
       "C=1": {
         "requests": 10,
-        "p50_ms": 12.27,
-        "p95_ms": 25.2,
-        "max_ms": 25.2,
+        "p50_ms": 12.26,
+        "p95_ms": 21.48,
+        "max_ms": 21.48,
         "payload_candidates": 50
       },
       "C=5": {
         "requests": 10,
-        "p50_ms": 23.48,
-        "p95_ms": 25.05,
-        "max_ms": 25.05,
+        "p50_ms": 21.18,
+        "p95_ms": 23.38,
+        "max_ms": 23.38,
         "payload_candidates": 50
       },
       "C=25": {
         "requests": 50,
-        "p50_ms": 85.42,
-        "p95_ms": 94.98,
-        "max_ms": 96.68,
+        "p50_ms": 81.35,
+        "p95_ms": 88.7,
+        "max_ms": 91.09,
         "payload_candidates": 50
       }
     },
     "Tier 3 (~10,000 precedents)": {
       "C=1": {
         "requests": 10,
-        "p50_ms": 13.14,
-        "p95_ms": 24.06,
-        "max_ms": 24.06,
+        "p50_ms": 13.18,
+        "p95_ms": 25.9,
+        "max_ms": 25.9,
         "payload_candidates": 50
       },
       "C=5": {
         "requests": 10,
-        "p50_ms": 25.28,
-        "p95_ms": 28.89,
-        "max_ms": 28.89,
+        "p50_ms": 22.43,
+        "p95_ms": 29.22,
+        "max_ms": 29.22,
         "payload_candidates": 50
       },
       "C=25": {
         "requests": 50,
-        "p50_ms": 96.48,
-        "p95_ms": 108.98,
-        "max_ms": 110.34,
+        "p50_ms": 88.53,
+        "p95_ms": 97.57,
+        "max_ms": 100.09,
         "payload_candidates": 50
       }
     },
     "Tier 4 (~100,000 precedents)": {
       "C=1": {
         "requests": 10,
-        "p50_ms": 13.41,
-        "p95_ms": 23.38,
-        "max_ms": 23.38,
+        "p50_ms": 14.19,
+        "p95_ms": 26.15,
+        "max_ms": 26.15,
         "payload_candidates": 50
       },
       "C=5": {
         "requests": 10,
-        "p50_ms": 23.3,
-        "p95_ms": 28.45,
-        "max_ms": 28.45,
+        "p50_ms": 24.14,
+        "p95_ms": 25.95,
+        "max_ms": 25.95,
         "payload_candidates": 50
       },
       "C=25": {
         "requests": 50,
-        "p50_ms": 98.23,
-        "p95_ms": 117.24,
-        "max_ms": 122.05,
+        "p50_ms": 84.19,
+        "p95_ms": 93.96,
+        "max_ms": 94.38,
         "payload_candidates": 50
       }
     }
   },
   "adaptive_vs_fixed_strategy_evaluation": {
     "fixed_x5": {
-      "p50_ms": 12.59,
-      "p95_ms": 23.38,
+      "p50_ms": 12.05,
+      "p95_ms": 21.79,
       "queries_per_req": 1
     },
     "adaptive_x2_x5": {
-      "p50_ms": 24.88,
-      "p95_ms": 25.95,
+      "p50_ms": 23.51,
+      "p95_ms": 26.2,
       "queries_per_req": 1.8
     },
     "recommendation": "Maintain fixed x5 multiplier; adaptive multi-query adds ~80% latency overhead when retries occur."

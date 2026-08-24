@@ -14,6 +14,7 @@ Requirements: 15.1, 15.2, 15.3, 15.4, 15.5
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -39,7 +40,7 @@ _RELEVANCE_THRESHOLD = 0.7   # minimum cosine-similarity score [0, 1]
 _MAX_RESULTS = 10
 _MAX_RETRY_ATTEMPTS = 3
 _STORE_TIMEOUT_S = 60.0        # Requirement 15.1 — within 5 seconds
-DEFAULT_CANDIDATE_MULTIPLIER = 5  # Candidate oversampling compensates for post-retrieval authorization/provenance filtering.
+DEFAULT_CANDIDATE_MULTIPLIER = int(os.environ.get("E9_CANDIDATE_MULTIPLIER", "5"))  # Candidate oversampling compensates for post-retrieval authorization/provenance filtering.
 
 # Explicit retrieval weights for confidence states (ISSUE-002 Phase 1)
 # Preserves the strict invariant: HIGH > MEDIUM > ABSTAIN > LOW for equivalent semantic relevance

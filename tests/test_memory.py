@@ -1447,6 +1447,35 @@ class TestE9CandidatePoolOversampling:
         collection = chroma.get_or_create_collection.return_value
         assert collection.query.call_args.kwargs.get("n_results") == 20
 
+    def test_env_var_multiplier_override(self, monkeypatch):
+        """Verify E9_CANDIDATE_MULTIPLIER environment variable is respected."""
+        monkeypatch.setenv("E9_CANDIDATE_MULTIPLIER", "3")
+        import importlib
+        import engines.memory
+        importlib.reload(engines.memory)
+
+        chroma = _make_chroma_client(
+            count=100,
+            query_ids=[f"P_{i}" for i in range(30)],
+            query_distances=[0.1] * 30,
+            query_metadatas=[
+                {
+                    "scenario_id": f"P_{i}",
+                    "confidence_state": "high",
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                }
+                for i in range(30)
+            ],
+            query_documents=["Doc"] * 30,
+        )
+        engine = engines.memory.MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        engine.retrieve_precedents("QUERY")
+
+        collection = chroma.get_or_create_collection.return_value
+        assert collection.query.call_args.kwargs.get("n_results") == 30
+
+
     def test_final_result_count_bounded_by_max_results(self):
         """Verify that even with 50 returned candidates, output is truncated to MAX_RESULTS (10)."""
         chroma = _make_chroma_client(
