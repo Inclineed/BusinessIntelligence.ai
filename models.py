@@ -399,6 +399,6 @@ class InvestigationResult:
     scored: list[ScoredHypothesis] = field(default_factory=list)
     decision: Optional[Decision] = None
     outcome: Optional[OutcomeProjection] = None
-    precedents: list[str] = field(default_factory=list)
+    precedents: list[Any] = field(default_factory=list)
     telemetry: Telemetry = field(default_factory=Telemetry)
     method_ownership: dict[str, list[MethodTag]] = field(default_factory=dict)

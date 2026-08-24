@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { InvestigationResult, PersonaType, EvidenceItem } from "../../types/investigation"
+import { InvestigationResult, PersonaType, EvidenceItem, PrecedentItem } from "../../types/investigation"
 import { SCENARIO_CATALOG } from "../../lib/defaultData"
 import { formatMetricValue, formatDelta, formatZScore } from "../../lib/utils"
 import { ScenarioSelector, PersonaSelector, RegionSelector } from "./ScenarioSelector"
@@ -37,7 +37,10 @@ import {
   Lock,
   ArrowRight,
   Database,
-  Layers
+  Layers,
+  History,
+  FileText,
+  Tag
 } from "lucide-react"
 
 interface AnalysisConfig {
@@ -82,6 +85,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   liveElapsedSeconds = 0,
 }) => {
   const [activeEvidenceModal, setActiveEvidenceModal] = useState<EvidenceItem | null>(null)
+  const [activePrecedentModal, setActivePrecedentModal] = useState<PrecedentItem | null>(null)
   const [showTelemetryDrawer, setShowTelemetryDrawer] = useState(false)
 
   // 1. EXACT SOURCE OF TRUTH: Safe extraction from active `result`
@@ -133,9 +137,6 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   const activePersonaScope = personaScopes[normalizedPersona] || personaScopes.analyst
 
   // 2. FUNDAMENTAL THREE-WAY STATE MODEL:
-  // State A: isGuardTriggered (decision.abstained && hypotheses.length === 0)
-  // State B: isAmbiguousAbstain (decision.abstained && hypotheses.length > 0)
-  // State C: isSuccess (!decision.abstained && hypotheses.length > 0)
   const isAbstained = Boolean(decision?.abstained) || Boolean(access_denied)
   const hasHypotheses = Array.isArray(hypotheses) && hypotheses.length > 0
   const isGuardTriggered = isAbstained && !hasHypotheses
@@ -306,6 +307,18 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     { period: "+5m (Stabilizing)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100) * 0.88) },
     { period: "+10m (Target Normal)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100)) },
   ]
+
+  // Date formatting helper for timestamps
+  const formatTimestamp = (rawTs?: string): string => {
+    if (!rawTs) return ""
+    try {
+      const dt = new Date(rawTs)
+      if (isNaN(dt.getTime())) return rawTs
+      return dt.toISOString().replace("T", " ").substring(0, 16) + " UTC"
+    } catch {
+      return rawTs
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#08090C] text-white font-sans selection:bg-emerald-500/20 antialiased relative">
@@ -1307,7 +1320,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 7: HAVE WE SEEN THIS BEFORE? (PERSONA-AWARE E9 MEMORY)       */}
+          {/* STEP 7: HAVE WE SEEN THIS BEFORE? (ACTUAL E9 HISTORICAL CONTEXT)  */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
@@ -1316,68 +1329,141 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-xs font-medium text-neutral-400">07 · Institutional Precedent Memory (E9)</div>
+                <div className="text-xs font-medium text-neutral-400">07 · Historical Context & Precedent Memory (E9)</div>
                 <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
                   Have we seen this failure pattern before?
                 </h2>
               </div>
 
               {/* Explicit Persona Retrieval Scope Badge */}
-              <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-black/40 border border-white/[0.06] text-[11px] font-mono text-neutral-400">
-                <Lock className="w-3 h-3 text-neutral-400" />
+              <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-black/40 border border-white/[0.06] text-xs font-mono text-neutral-300">
+                <Lock className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Scope: <strong className="text-white capitalize">{persona}</strong> ({activePersonaScope.sourcesCount} authorized sources)</span>
               </div>
             </div>
 
+            {/* Explanatory Context Note on Non-Causal Coupling */}
+            <div className="px-3.5 py-2 rounded-xl bg-white/[0.02] border border-white/[0.04] text-[11px] text-neutral-400 flex items-center gap-2">
+              <History className="w-3.5 h-3.5 text-neutral-400 flex-shrink-0" />
+              <span>
+                {Array.isArray(precedents) && precedents.length > 0 
+                  ? "Matching historical precedents retrieved via vector similarity search under active entitlement scope."
+                  : "No matching precedent was available within the current authorization scope."}
+              </span>
+            </div>
+
             {Array.isArray(precedents) && precedents.length > 0 ? (
-              <div className={`grid gap-3.5 ${precedents.length === 1 ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
-                {precedents.map((pr: any, idx) => {
-                  const prScenarioId = typeof pr === "string" ? pr : pr?.scenario_id || `PREC_${idx + 1}`
-                  const prSimilarity = typeof pr === "object" && typeof pr?.similarity === "number" ? pr.similarity : 0.88
-                  const prConfidence = typeof pr === "object" && pr?.confidence_state ? pr.confidence_state : "HIGH"
-                  const prHumanValidated = typeof pr === "object" ? Boolean(pr?.human_validated) : false
-                  const prSummary = typeof pr === "object" && pr?.summary
-                    ? pr.summary
-                    : `Historical operational precedent record for ${prScenarioId} archived with resolution trail.`
-                  const prCreatedAt = typeof pr === "object" && pr?.created_at ? pr.created_at : "Historical Precedent"
+              <div className={`grid gap-4 ${precedents.length === 1 ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
+                {precedents.map((prItem: any, idx) => {
+                  const pr: PrecedentItem = typeof prItem === "string" ? { scenario_id: prItem } : prItem
+                  const scenarioId = pr.scenario_id || `PREC_${idx + 1}`
+                  
+                  // Actual metric extraction: Cosine Relevance vs Weighted Score
+                  const relevanceScore = typeof pr.relevance === "number" ? pr.relevance : (typeof pr.similarity === "number" ? pr.similarity : null)
+                  const retrievalScore = typeof pr.retrieval_score === "number" ? pr.retrieval_score : null
+                  const confState = pr.confidence_state || pr.original_confidence_state || null
+                  
+                  const isObserved = (pr.outcome_type || "").toLowerCase() === "observed"
+                  const isSimulated = (pr.outcome_type || "").toLowerCase() === "simulated"
+                  const isHumanVal = Boolean(pr.human_validated)
+                  const formattedDate = formatTimestamp(pr.created_at || pr.timestamp)
+                  const summaryText = pr.summary || "Precedent summary unavailable"
+                  const recommendationText = pr.recommendation
 
                   return (
-                    <div key={idx} className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-2">
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-white font-mono text-xs px-2 py-0.5 rounded bg-white/[0.05]">{prScenarioId}</span>
-                          <span className="text-[10px] text-neutral-400 font-mono">{prCreatedAt}</span>
+                    <div
+                      key={idx}
+                      onClick={() => setActivePrecedentModal(pr)}
+                      className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] hover:border-emerald-500/40 transition-all duration-200 flex flex-col justify-between space-y-3 cursor-pointer group shadow-sm"
+                    >
+                      <div className="space-y-3">
+                        {/* Top Precedent Header with Provenance Badges */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white font-mono text-xs px-2.5 py-0.5 rounded-lg bg-white/[0.06] border border-white/[0.08]">
+                              {scenarioId}
+                            </span>
+                            {formattedDate && (
+                              <span className="text-[11px] text-neutral-400 font-mono">
+                                {formattedDate}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {/* Outcome Provenance Badge */}
+                            {isObserved && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                OBSERVED
+                              </span>
+                            )}
+                            {isSimulated && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                SIMULATED
+                              </span>
+                            )}
+
+                            {/* Human Validation Badge */}
+                            {isHumanVal ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> Human Verified
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono text-neutral-400 bg-white/[0.03] border border-white/[0.05]">
+                                Unvalidated
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        {prHumanValidated ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> Human Verified
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] text-neutral-400 bg-white/[0.04] border border-white/[0.06]">
-                            Unvalidated Baseline
-                          </span>
+
+                        {/* Real Precedent Summary */}
+                        <p className="text-xs text-neutral-200 leading-relaxed font-sans line-clamp-3">
+                          {summaryText}
+                        </p>
+
+                        {/* Historical Action / Resolution (if available) */}
+                        {recommendationText && (
+                          <div className="p-3 rounded-xl bg-black/40 border border-white/[0.04] space-y-1 text-xs font-sans">
+                            <span className="text-[10px] font-mono uppercase text-neutral-400 font-semibold block">
+                              Historical Resolution:
+                            </span>
+                            <p className="text-neutral-300 text-xs leading-relaxed line-clamp-2">
+                              {recommendationText}
+                            </p>
+                          </div>
                         )}
                       </div>
 
-                      <p className="text-xs text-neutral-200 leading-relaxed font-sans">
-                        {prSummary}
-                      </p>
+                      {/* Bottom Metric & Metadata Bar */}
+                      <div className="pt-3 border-t border-white/[0.05] flex flex-wrap justify-between items-center text-xs font-mono text-neutral-400 gap-2">
+                        <div className="flex items-center gap-3">
+                          {relevanceScore !== null && (
+                            <span>
+                              Similarity: <strong className="text-emerald-400 font-bold">{(relevanceScore * 100).toFixed(1)}%</strong>
+                            </span>
+                          )}
+                          {confState && (
+                            <span>
+                              Original Conf: <strong className="text-white capitalize">{confState}</strong>
+                            </span>
+                          )}
+                        </div>
 
-                      <div className="pt-2 border-t border-white/[0.05] flex justify-between text-[11px] text-neutral-400 font-mono">
-                        <span>Similarity: <strong className="text-emerald-400">{(prSimilarity * 100).toFixed(0)}%</strong></span>
-                        <span>Confidence: <strong className="text-white">{prConfidence}</strong></span>
+                        <span className="text-emerald-400 group-hover:translate-x-0.5 transition-transform flex items-center font-sans font-medium text-xs">
+                          Inspect <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                        </span>
                       </div>
                     </div>
                   )
                 })}
               </div>
             ) : (
-              <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-1.5 text-center">
+              <div className="p-6 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-2 text-center">
                 <div className="text-xs font-semibold text-neutral-200">
                   No matching precedent was available within the current authorization scope.
                 </div>
                 <div className="text-[11px] text-neutral-400 max-w-xl mx-auto leading-relaxed">
-                  Historical precedent retrieval is constrained by the active entitlement boundary ({activePersonaScope.summary}). Precedent records outside this authorization scope are not accessible.
+                  Precedent retrieval is bounded by the active entitlement permissions for <strong className="text-white capitalize">{persona}</strong> ({activePersonaScope.summary}). Precedent records outside this authorization scope are not accessible.
                 </div>
               </div>
             )}
@@ -1468,6 +1554,77 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <div className="text-[10px] font-mono text-neutral-400 uppercase">Provenance Reference:</div>
                 <div className="p-2.5 rounded-lg bg-black/60 border border-white/[0.06] text-xs font-mono text-emerald-400/90 break-all">
                   {activeEvidenceModal.raw_ref}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── DETAIL MODAL: HISTORICAL PRECEDENT INSPECTION (E9) ────────────── */}
+      {activePrecedentModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setActivePrecedentModal(null)}>
+          <div className="max-w-2xl w-full bg-[#13141E] border border-white/[0.12] rounded-3xl p-6 space-y-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xs font-mono font-bold text-emerald-400 px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/25">
+                  {activePrecedentModal.scenario_id}
+                </span>
+                <span className="text-xs text-neutral-300 font-medium">Historical Precedent Record</span>
+              </div>
+              <button onClick={() => setActivePrecedentModal(null)} className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[11px] font-semibold uppercase text-neutral-400">Precedent Incident Summary</div>
+              <p className="text-xs text-neutral-100 leading-relaxed font-sans p-4 rounded-2xl bg-black/40 border border-white/[0.04]">
+                {activePrecedentModal.summary || "Precedent summary unavailable"}
+              </p>
+            </div>
+
+            {activePrecedentModal.recommendation && (
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-semibold uppercase text-emerald-400">Historical Resolution / Prescribed Action</div>
+                <p className="text-xs text-neutral-200 leading-relaxed font-sans p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20">
+                  {activePrecedentModal.recommendation}
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06]">
+                <div className="text-neutral-400 text-[10px]">SIMILARITY</div>
+                <div className="text-emerald-400 font-bold text-sm mt-0.5">
+                  {typeof activePrecedentModal.relevance === "number" ? `${(activePrecedentModal.relevance * 100).toFixed(1)}%` : "N/A"}
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06]">
+                <div className="text-neutral-400 text-[10px]">ORIGINAL CONFIDENCE</div>
+                <div className="text-white font-bold text-sm mt-0.5 capitalize">
+                  {activePrecedentModal.confidence_state || activePrecedentModal.original_confidence_state || "N/A"}
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06]">
+                <div className="text-neutral-400 text-[10px]">PROVENANCE</div>
+                <div className="text-blue-400 font-bold text-sm mt-0.5 uppercase">
+                  {activePrecedentModal.outcome_type || "OBSERVED"}
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06]">
+                <div className="text-neutral-400 text-[10px]">VALIDATION</div>
+                <div className={`font-bold text-sm mt-0.5 ${activePrecedentModal.human_validated ? "text-emerald-400" : "text-neutral-400"}`}>
+                  {activePrecedentModal.human_validated ? "Verified" : "Unvalidated"}
+                </div>
+              </div>
+            </div>
+
+            {activePrecedentModal.evidence_ids && (
+              <div className="space-y-1">
+                <div className="text-[10px] font-mono text-neutral-400 uppercase">Supporting Evidence Reference IDs:</div>
+                <div className="p-2.5 rounded-lg bg-black/60 border border-white/[0.06] text-xs font-mono text-emerald-400/90 break-all">
+                  {activePrecedentModal.evidence_ids}
                 </div>
               </div>
             )}

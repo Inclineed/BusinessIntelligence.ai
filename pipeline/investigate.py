@@ -747,7 +747,7 @@ def investigate(
         scored=scored_hypotheses,
         decision=decision,
         outcome=outcome,
-        precedents=[p.get("scenario_id", "") for p in precedents],
+        precedents=precedents,
         telemetry=telemetry_svc.get_telemetry(),  # interim snapshot; updated below
         method_ownership=method_ownership,
     )

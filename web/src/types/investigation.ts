@@ -78,18 +78,22 @@ export interface OutcomeProjection {
 
 export interface PrecedentItem {
   scenario_id: string
-  similarity?: number
+  summary?: string
   relevance?: number
-  original_confidence_state?: string
+  retrieval_score?: number
+  retrieval_weight?: number
   confidence_state?: string
+  original_confidence_state?: string
   outcome_type?: string
+  winning_hypothesis?: string
+  recommendation?: string
+  timestamp?: string
+  created_at?: string
+  evidence_ids?: string
   human_validated?: boolean
   validated_at?: string
-  created_at?: string
-  timestamp?: string
-  summary?: string
-  recommendation?: string
-  evidence_ids?: string
+  method?: string
+  similarity?: number
 }
 
 export interface TelemetryData {
