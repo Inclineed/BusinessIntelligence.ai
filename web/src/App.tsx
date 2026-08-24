@@ -8,12 +8,14 @@ export const App: React.FC = () => {
   const [result, setResult] = useState<InvestigationResult>(DEFAULT_INC_001)
   const [isLiveLoading, setIsLiveLoading] = useState(false)
 
-  const handleRunLive = async (scenarioId: string, persona: PersonaType) => {
-    // If switching scenario, update immediate preview
+  const handleScenarioSelect = (scenarioId: string, persona: PersonaType) => {
+    // Single source of truth: immediately update active result with complete scenario data
     if (SCENARIO_PREVIEWS[scenarioId]) {
       setResult({ ...SCENARIO_PREVIEWS[scenarioId], persona })
     }
+  }
 
+  const handleRunLive = async (scenarioId: string, persona: PersonaType) => {
     setIsLiveLoading(true)
     try {
       const liveRes = await runInvestigation(scenarioId, persona, "all")
@@ -28,6 +30,7 @@ export const App: React.FC = () => {
   return (
     <InvestigationOverview 
       result={result} 
+      onScenarioSelect={handleScenarioSelect}
       onRunLive={handleRunLive}
       isLiveLoading={isLiveLoading}
     />
