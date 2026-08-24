@@ -5,6 +5,7 @@ import { SCENARIO_CATALOG } from "../../lib/defaultData"
 import { formatMetricValue, formatDelta, formatZScore } from "../../lib/utils"
 import { ScenarioSelector, PersonaSelector, RegionSelector } from "./ScenarioSelector"
 import { SystemHealthModal } from "./SystemHealthModal"
+import { SystemPerformanceDrawer } from "./SystemPerformanceDrawer"
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -48,7 +49,8 @@ import {
   ThumbsDown,
   HelpCircle,
   AlertCircle,
-  Send
+  Send,
+  Zap
 } from "lucide-react"
 
 interface AnalysisConfig {
@@ -403,6 +405,12 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     }
   }
 
+  // System Performance Summary helper for header & status bar
+  const perfTotalMs = Object.values(telemetry?.latency_ms_by_engine || {}).reduce((acc, v) => acc + (Number(v) || 0), 0)
+  const perfProvider = telemetry?.llm_provider || (telemetry?.external_cost_usd && telemetry.external_cost_usd > 0 ? "groq" : "ollama")
+  const perfTotalTokens = (telemetry?.llm_tokens_in || 0) + (telemetry?.llm_tokens_out || 0)
+  const perfSecFmt = perfTotalMs > 0 ? `${(perfTotalMs / 1000).toFixed(1)}s` : "<0.1s"
+
   return (
     <div className="min-h-screen bg-[#08090C] text-white font-sans selection:bg-emerald-500/20 antialiased relative">
       
@@ -425,10 +433,13 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               <Activity className="w-3.5 h-3.5 text-emerald-400" />
               <span>System Health & Drift</span>
             </button>
-            <span onClick={() => setShowTelemetryDrawer(true)} className="hover:text-white cursor-pointer transition-colors pb-4 pt-4 flex items-center gap-1.5">
-              <Cpu className="w-3.5 h-3.5 text-neutral-400" />
+            <button 
+              onClick={() => setShowTelemetryDrawer(true)} 
+              className="hover:text-white cursor-pointer transition-colors pb-4 pt-4 flex items-center gap-1.5 text-xs text-neutral-400 font-medium"
+            >
+              <Cpu className="w-3.5 h-3.5 text-emerald-400" />
               <span>Audit & Telemetry</span>
-            </span>
+            </button>
           </div>
         </div>
 
@@ -463,6 +474,23 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               <span className={`px-2 py-0.5 rounded-full font-medium text-[11px] border ${statusBadge.color}`}>
                 {statusBadge.label}
               </span>
+              <span className="text-neutral-600">•</span>
+              <button
+                onClick={() => setShowTelemetryDrawer(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-neutral-300 hover:text-white border border-white/[0.08] text-[11px] font-mono transition-all cursor-pointer shadow-sm group"
+                title="Click to view System Performance & LLM Runtime trace"
+              >
+                <Zap className="w-3 h-3 text-amber-400 group-hover:scale-110 transition-transform" />
+                <span>{perfSecFmt}</span>
+                <span className="text-neutral-600">/</span>
+                <span className="text-emerald-400 font-semibold">{perfProvider.toUpperCase()}</span>
+                {perfTotalTokens > 0 && (
+                  <>
+                    <span className="text-neutral-600">/</span>
+                    <span>{perfTotalTokens.toLocaleString()} tok</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <h1 className="text-lg lg:text-xl font-bold tracking-tight text-white">
@@ -1933,44 +1961,14 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
         </div>
       )}
 
-      {/* ── TELEMETRY & AUDIT DRAWER ─────────────────────────────────────── */}
-      {showTelemetryDrawer && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end" onClick={() => setShowTelemetryDrawer(false)}>
-          <div className="w-full max-w-lg bg-[#11121A] border-l border-white/[0.1] p-6 overflow-y-auto space-y-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
-              <div className="flex items-center gap-2">
-                <Cpu className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-base font-bold text-white">System Audit & Telemetry Trace</h3>
-              </div>
-              <button onClick={() => setShowTelemetryDrawer(false)} className="text-neutral-400 hover:text-white cursor-pointer">✕</button>
-            </div>
-
-            <div className="space-y-3 font-mono text-xs">
-              <div className="text-xs uppercase font-bold text-neutral-400">ENGINE LATENCY WATERFALL (MS):</div>
-              <div className="space-y-2">
-                {Object.entries(telemetry?.latency_ms_by_engine || {}).map(([eng, ms]) => (
-                  <div key={eng} className="p-2.5 rounded-xl bg-black/40 border border-white/[0.04] flex justify-between">
-                    <span className="text-neutral-300 uppercase">{eng}</span>
-                    <span className="text-emerald-400 font-bold">{Number(ms || 0).toFixed(1)} ms</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-3 font-mono text-xs">
-              <div className="text-xs uppercase font-bold text-neutral-400">METHOD OWNERSHIP PROVENANCE:</div>
-              <div className="space-y-2">
-                {Object.entries(method_ownership || {}).map(([eng, tag]) => (
-                  <div key={eng} className="p-2.5 rounded-xl bg-black/40 border border-white/[0.04] flex justify-between">
-                    <span className="text-white uppercase">{eng}</span>
-                    <span className="text-emerald-400 font-semibold">{Array.isArray(tag) ? tag.join(", ") : String(tag)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── System Performance & Runtime Telemetry Drawer ──────────── */}
+      <SystemPerformanceDrawer
+        isOpen={showTelemetryDrawer}
+        onClose={() => setShowTelemetryDrawer(false)}
+        telemetry={telemetry}
+        methodOwnership={method_ownership}
+        scenarioId={scenario_id}
+      />
 
       {/* ── System Health & Drift Monitoring Modal ─────────────────── */}
       <SystemHealthModal isOpen={showHealthModal} onClose={() => setShowHealthModal(false)} />

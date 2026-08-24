@@ -280,6 +280,8 @@ def test_telemetry_service_groq_call():
     assert telemetry.llm_calls == 1
     assert telemetry.llm_tokens_in == 2000
     assert telemetry.llm_tokens_out == 500
+    assert telemetry.llm_provider == "groq"
+    assert telemetry.llm_model == "llama-3.3-70b-versatile"
     assert telemetry.external_cost_usd > 0.0
     assert telemetry.equivalent_cloud_cost_usd is not None
 
@@ -296,6 +298,10 @@ def test_telemetry_service_ollama_call():
     telemetry = svc.get_telemetry()
 
     assert telemetry.llm_calls == 1
+    assert telemetry.llm_tokens_in == 2000
+    assert telemetry.llm_tokens_out == 500
+    assert telemetry.llm_provider == "ollama"
+    assert telemetry.llm_model == "qwen3:8b"
     assert telemetry.external_cost_usd == 0.0
     assert telemetry.equivalent_cloud_cost_usd is not None
 

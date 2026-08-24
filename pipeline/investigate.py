@@ -322,6 +322,9 @@ def investigate(
     method_violations: list[str] = []
 
     provider: LLMProvider = deps.llm_provider
+    p_name = getattr(provider, "provider_name", getattr(provider, "provider", "ollama"))
+    p_model = getattr(provider, "DEFAULT_MODEL", getattr(provider, "model", "qwen3:8b"))
+    telemetry_svc.set_provider_info(str(p_name), str(p_model))
 
     # Accumulators — populated in each stage; fallback to empty on failure
     kpi_values: list = []
@@ -767,7 +770,8 @@ def investigate(
             chroma_client=deps.chroma_client,
             llm_provider=provider,
         )
-        stored = memory_engine_store.store_precedent(investigation_result)
+        with telemetry_svc.measure_engine("memory"):
+            stored = memory_engine_store.store_precedent(investigation_result)
         if not stored:
             logger.warning(
                 "investigate [E9-post] store_precedent returned False for scenario=%s "

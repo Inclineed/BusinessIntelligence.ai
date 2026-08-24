@@ -380,6 +380,10 @@ class Telemetry:
     latency_ms_by_engine: dict[str, float] = field(default_factory=dict)
     external_cost_usd: float = 0.0
     equivalent_cloud_cost_usd: Optional[float] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    rate_limit_events: int = 0
+
 
 
 @dataclass

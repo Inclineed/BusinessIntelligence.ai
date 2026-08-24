@@ -129,6 +129,10 @@ class TelemetryService:
             self._telemetry.llm_calls += 1
             self._telemetry.llm_tokens_in += prompt_tokens
             self._telemetry.llm_tokens_out += completion_tokens
+            if provider:
+                self._telemetry.llm_provider = provider
+            if model:
+                self._telemetry.llm_model = model
 
             # Compute external cost for cloud providers or 0.0 for local Ollama
             from llm.cost_estimator import estimate_model_cost
@@ -160,6 +164,18 @@ class TelemetryService:
                 )
         except Exception as exc:  # noqa: BLE001
             self._metric_errors.append(f"record_llm_call: failed to record — {exc}")
+
+    def set_provider_info(self, provider: str, model: str) -> None:
+        """Set default provider and model metadata if not already recorded."""
+        if not self._telemetry.llm_provider:
+            self._telemetry.llm_provider = provider
+        if not self._telemetry.llm_model:
+            self._telemetry.llm_model = model
+
+    def record_rate_limit_event(self) -> None:
+        """Increment rate limit retry count."""
+        self._telemetry.rate_limit_events += 1
+
 
     # ------------------------------------------------------------------
     # Accessors

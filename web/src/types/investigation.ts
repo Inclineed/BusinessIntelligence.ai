@@ -104,6 +104,10 @@ export interface TelemetryData {
   llm_tokens_out: number
   external_cost_usd?: number
   equivalent_cloud_cost_usd?: number
+  llm_provider?: string
+  llm_model?: string
+  rate_limit_events?: number
+  retry_count?: number
 }
 
 export interface InvestigationResult {
