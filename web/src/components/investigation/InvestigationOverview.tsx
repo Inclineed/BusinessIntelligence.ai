@@ -2,7 +2,7 @@ import React, { useState } from "react"
 import { InvestigationResult, PersonaType, EvidenceItem } from "../../types/investigation"
 import { SCENARIO_CATALOG } from "../../lib/defaultData"
 import { formatMetricValue, formatDelta, formatZScore } from "../../lib/utils"
-import { ScenarioSelector, PersonaSelector } from "./ScenarioSelector"
+import { ScenarioSelector, PersonaSelector, RegionSelector } from "./ScenarioSelector"
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -28,28 +28,48 @@ import {
   Check, 
   X, 
   Cpu, 
-  Clock,
-  ShieldAlert,
-  HelpCircle,
-  Scale,
-  Ban,
+  Clock, 
+  ShieldAlert, 
+  Scale, 
+  Globe, 
+  Eye, 
+  Play, 
+  Lock,
   ArrowRight,
   Database,
   Layers
 } from "lucide-react"
 
+interface AnalysisConfig {
+  scenarioId: string
+  persona: PersonaType
+  region: string
+}
+
 interface InvestigationOverviewProps {
   result: InvestigationResult
-  onScenarioSelect?: (scenarioId: string, persona: PersonaType) => void
-  onRunLive?: (scenarioId: string, persona: PersonaType) => void
+  activeConfig: AnalysisConfig
+  evaluatedConfig: AnalysisConfig
+  isStale: boolean
+  isPreviousResultPinned: boolean
+  onConfigChange: (scenarioId: string, persona: PersonaType, region: string) => void
+  onRunLive: (scenarioId?: string, persona?: PersonaType, region?: string) => void
+  onKeepViewingPrevious: () => void
   isLiveLoading?: boolean
+  liveElapsedSeconds?: number
 }
 
 export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({ 
   result, 
-  onScenarioSelect,
+  activeConfig,
+  evaluatedConfig,
+  isStale,
+  isPreviousResultPinned,
+  onConfigChange,
   onRunLive,
-  isLiveLoading = false 
+  onKeepViewingPrevious,
+  isLiveLoading = false,
+  liveElapsedSeconds = 0,
 }) => {
   const [activeEvidenceModal, setActiveEvidenceModal] = useState<EvidenceItem | null>(null)
   const [showTelemetryDrawer, setShowTelemetryDrawer] = useState(false)
@@ -76,6 +96,25 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     domain: "Enterprise Infrastructure",
     description: "Autonomous root cause isolation and attribution analysis.",
     status: "live",
+  }
+
+  // Persona Scope Definitions
+  const personaScopes: Record<PersonaType, { label: string; sourcesCount: number; summary: string }> = {
+    analyst: {
+      label: "Analyst",
+      sourcesCount: 7,
+      summary: "Full access (orders, payment_gateway, inventory, marketing, deployment_log, support_tickets, release_notes)",
+    },
+    cfo: {
+      label: "CFO",
+      sourcesCount: 2,
+      summary: "Executive aggregate access (orders, inventory)",
+    },
+    manager: {
+      label: "Manager",
+      sourcesCount: 2,
+      summary: "Regional bounded access (orders, inventory)",
+    },
   }
 
   // 2. FUNDAMENTAL THREE-WAY STATE MODEL:
@@ -109,7 +148,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     { time: "14:30", baseline: base * 1.00, actual: observed },
   ]
 
-  // Scenario-specific milestone markers (Only for real temporal events)
+  // Scenario-specific milestone markers
   const scenarioMilestones: Record<string, { time: string; label: string; color: string }[]> = {
     INC_001: [
       { time: "14:15", label: "Deploy v4.3 Completed", color: "#38bdf8" },
@@ -131,7 +170,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
   // Hypothesis & Scoring Computations
   const sortedScores = [...scored].sort((a, b) => b.final_score - a.final_score)
-  const winnerId = decision.winning_hypothesis_id || (sortedScores[0]?.hypothesis_id)
+  const winnerId = decision.winning_hypothesis_id || sortedScores[0]?.hypothesis_id
   const winningHyp = hypotheses.find((h) => h.hypothesis_id === winnerId)
   const winningScored = scored.find((s) => s.hypothesis_id === winnerId) || sortedScores[0]
 
@@ -164,7 +203,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     guardCategory = "Statistical Invariance Verification"
   }
 
-  // Status Badge Logic (Derived directly from active result state model)
+  // Status Badge Logic
   let statusBadge = {
     label: `Completed (${confidenceState} ${winningScored?.final_score?.toFixed(2) || "0.90"})`,
     color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25",
@@ -199,19 +238,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     }
   }
 
-  // E8 Simulation Data
-  const recoveryPct = outcome.projected_recovery_pct || 88.0
-  const dropDelta = Math.abs(primarySignal.delta_pct || 40)
-  const simChartData = [
-    { period: "t-2 (Normal)", actual: 100, projected: null },
-    { period: "t-1 (Shock Start)", actual: 100 - dropDelta * 0.45, projected: null },
-    { period: "t0 (Current Shock)", actual: 100 - dropDelta, projected: 100 - dropDelta },
-    { period: "+2m (Action Executed)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100) * 0.45) },
-    { period: "+5m (Stabilizing)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100) * 0.88) },
-    { period: "+10m (Target Normal)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100)) },
-  ]
-
-  // Dynamic Causal Trail Steps for Successful Scenarios
+  // Dynamic Causal Trail Steps
   const causalTrailByScenario: Record<string, { step: string; title: string; subtitle: string; color: string }[]> = {
     INC_001: [
       { step: "01 · DEPLOY TRIGGER", title: "Checkout v4.3 Release", subtitle: "14:15 UTC [EV_v43_deployment]", color: "text-blue-400 border-blue-500/20" },
@@ -241,8 +268,20 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
   const activeCausalTrail = causalTrailByScenario[scenario_id] || []
 
+  // E8 Simulation Data
+  const recoveryPct = outcome.projected_recovery_pct || 88.0
+  const dropDelta = Math.abs(primarySignal.delta_pct || 40)
+  const simChartData = [
+    { period: "t-2 (Normal)", actual: 100, projected: null },
+    { period: "t-1 (Shock Start)", actual: 100 - dropDelta * 0.45, projected: null },
+    { period: "t0 (Current Shock)", actual: 100 - dropDelta, projected: 100 - dropDelta },
+    { period: "+2m (Action Executed)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100) * 0.45) },
+    { period: "+5m (Stabilizing)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100) * 0.88) },
+    { period: "+10m (Target Normal)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100)) },
+  ]
+
   return (
-    <div className="min-h-screen bg-[#08090C] text-white font-sans selection:bg-emerald-500/20 antialiased">
+    <div className="min-h-screen bg-[#08090C] text-white font-sans selection:bg-emerald-500/20 antialiased relative">
       
       {/* ── 1. Compact Top Navigation Bar ───────────────────────────────── */}
       <nav className="h-14 border-b border-white/[0.06] bg-[#0D0E14]/90 backdrop-blur-xl sticky top-0 z-40 flex items-center justify-between px-6 lg:px-10">
@@ -265,9 +304,9 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
         <div className="flex items-center gap-3.5">
           <button
-            onClick={() => onRunLive && onRunLive(scenario_id, persona)}
+            onClick={() => onRunLive()}
             disabled={isLiveLoading}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.25)] active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.25)] active:scale-95 disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLiveLoading ? "animate-spin" : ""}`} />
             <span>{isLiveLoading ? "Running Inference..." : "Run Investigation"}</span>
@@ -276,9 +315,9 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
       </nav>
 
       {/* ── Main Investigation Dashboard Canvas ─────────────────────────── */}
-      <main className="max-w-[1380px] mx-auto px-6 lg:px-10 py-6 space-y-7">
+      <main className="max-w-[1380px] mx-auto px-6 lg:px-10 py-6 space-y-6">
         
-        {/* ── 2. Header with Unified Custom Command Selectors ─────────────── */}
+        {/* ── 2. Header with Unified Custom Command Selectors & Scope Bar ─── */}
         <header className="p-4 rounded-2xl bg-[#0F1017] border border-white/[0.06] flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -288,7 +327,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               <span className="text-neutral-400">{currentMeta.domain}</span>
               <span className="text-neutral-600">•</span>
               <span className="text-neutral-300">
-                Scope: <strong className="text-white capitalize">{persona}</strong> (Global)
+                Evaluated: <strong className="text-white capitalize">{evaluatedConfig.persona}</strong> ({evaluatedConfig.region === "all" ? "Global" : evaluatedConfig.region})
               </span>
               <span className="text-neutral-600">•</span>
               <span className={`px-2 py-0.5 rounded-full font-medium text-[11px] border ${statusBadge.color}`}>
@@ -301,22 +340,97 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             </h1>
           </div>
 
-          {/* Custom Command-Style Scenario & Persona Selectors */}
-          <div className="flex items-center gap-2 self-start md:self-center">
+          {/* Custom Command-Style Scenario, Persona & Region Selectors */}
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-center">
             <ScenarioSelector
-              selectedScenarioId={scenario_id}
-              onSelectScenario={(newId) => onScenarioSelect && onScenarioSelect(newId, persona)}
+              selectedScenarioId={activeConfig.scenarioId}
+              onSelectScenario={(newId) => onConfigChange(newId, activeConfig.persona, activeConfig.region)}
               disabled={isLiveLoading}
             />
             <PersonaSelector
-              selectedPersona={persona}
-              onSelectPersona={(newPersona) => onScenarioSelect && onScenarioSelect(scenario_id, newPersona)}
+              selectedPersona={activeConfig.persona}
+              onSelectPersona={(newPersona) => onConfigChange(activeConfig.scenarioId, newPersona, activeConfig.region)}
+              disabled={isLiveLoading}
+            />
+            <RegionSelector
+              selectedRegion={activeConfig.region}
+              onSelectRegion={(newRegion) => onConfigChange(activeConfig.scenarioId, activeConfig.persona, newRegion)}
               disabled={isLiveLoading}
             />
           </div>
         </header>
 
-        {/* ── 3. GUARD BANNER (When Applicable) ────────────────────────────── */}
+        {/* ── 3. CONFIGURATION CHANGED / STALE RESULT BANNER ──────────────── */}
+        {isStale && !isPreviousResultPinned && (
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-950/30 via-[#12131D] to-[#12131D] border border-blue-500/35 shadow-xl space-y-3.5 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-blue-400 font-bold text-sm">
+                <AlertTriangle className="w-4 h-4 text-blue-400" />
+                <span>Configuration Changed — Active Result is Stale</span>
+              </div>
+              <span className="text-[11px] font-mono text-neutral-400">
+                Pipeline execution required for new configuration
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+              <div className="p-3 rounded-xl bg-black/40 border border-white/[0.06] space-y-1">
+                <span className="text-[10px] text-neutral-400 uppercase font-semibold">Evaluated Result Scope:</span>
+                <div className="text-white font-bold flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-white/[0.06]">{evaluatedConfig.scenarioId}</span>
+                  <span className="capitalize">{evaluatedConfig.persona}</span> · {evaluatedConfig.region === "all" ? "Global" : evaluatedConfig.region}
+                  <span className="text-neutral-400 text-[10px]">({personaScopes[evaluatedConfig.persona]?.sourcesCount} sources)</span>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-black/40 border border-blue-500/20 space-y-1">
+                <span className="text-[10px] text-blue-400 uppercase font-semibold">New Requested Configuration:</span>
+                <div className="text-blue-300 font-bold flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">{activeConfig.scenarioId}</span>
+                  <span className="capitalize">{activeConfig.persona}</span> · {activeConfig.region === "all" ? "Global" : activeConfig.region}
+                  <span className="text-neutral-400 text-[10px]">({personaScopes[activeConfig.persona]?.sourcesCount} sources)</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                onClick={() => onRunLive(activeConfig.scenarioId, activeConfig.persona, activeConfig.region)}
+                disabled={isLiveLoading}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs flex items-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Re-run Investigation for {activeConfig.persona.toUpperCase()} ({activeConfig.region === "all" ? "Global" : activeConfig.region})</span>
+              </button>
+
+              <button
+                onClick={onKeepViewingPrevious}
+                className="px-4 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-neutral-300 hover:text-white font-medium text-xs flex items-center gap-2 transition-all border border-white/[0.08] cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5 text-neutral-400" />
+                <span>Keep Viewing Previous Result ({evaluatedConfig.persona.toUpperCase()} scope)</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── 4. PINNED PREVIOUS RESULT NOTICE (When user explicitly chose to keep viewing) ── */}
+        {isStale && isPreviousResultPinned && (
+          <div className="px-4 py-2 rounded-xl bg-[#14151F] border border-white/[0.08] flex items-center justify-between text-xs text-neutral-300">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              <span>Viewing previous result · <strong>{evaluatedConfig.persona.toUpperCase()} scope ({evaluatedConfig.region})</strong>. Current configuration is <strong>{activeConfig.persona.toUpperCase()} ({activeConfig.region})</strong>.</span>
+            </div>
+            <button
+              onClick={() => onRunLive(activeConfig.scenarioId, activeConfig.persona, activeConfig.region)}
+              className="text-emerald-400 font-bold hover:underline cursor-pointer"
+            >
+              Re-run for {activeConfig.persona.toUpperCase()} →
+            </button>
+          </div>
+        )}
+
+        {/* ── 5. GUARD BANNER (When Applicable) ────────────────────────────── */}
         {isAbstained && decision.abstention_reason && (
           <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/25 via-[#13141C] to-[#13141C] border border-amber-500/30 shadow-md space-y-2">
             <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm">
@@ -334,7 +448,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           </div>
         )}
 
-        {/* ── 4. THE CAUSAL INVESTIGATION SPINE ──────────────────────────── */}
+        {/* ── 6. THE CAUSAL INVESTIGATION SPINE ──────────────────────────── */}
         <div className="relative pl-6 lg:pl-8 space-y-9 before:absolute before:left-2 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-emerald-500/40 before:via-blue-500/20 before:to-emerald-500/40">
 
           {/* ═════════════════════════════════════════════════════════════════ */}
@@ -497,7 +611,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </div>
                 </div>
 
-                {/* Timeline sequence chips (if real events exist) */}
+                {/* Timeline sequence chips */}
                 {milestones.length > 0 && (
                   <div className="p-2.5 rounded-xl bg-black/40 border border-white/[0.04] space-y-1.5">
                     <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 font-bold flex items-center gap-1.5">
@@ -554,7 +668,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 </div>
               </div>
 
-              {/* Dimensional Breakdown (5-Col) — Ranked Analytical Contribution List */}
+              {/* Dimensional Breakdown (5-Col) */}
               <div className="lg:col-span-5 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between space-y-3">
                 <div className="space-y-3">
                   <div>
@@ -653,7 +767,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           {/* STEP 3: DYNAMIC BRANCHING BASED ON STATE MODEL                    */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           {isGuardTriggered ? (
-            /* ── STATE A: GUARD STATE (Hypothesis generation was suppressed) ── */
+            /* ── STATE A: GUARD STATE ── */
             <section className="relative space-y-3">
               <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-amber-400 flex items-center justify-center text-xs font-bold text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]">
                 !
@@ -725,7 +839,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               </div>
             </section>
           ) : isAmbiguousAbstain ? (
-            /* ── STATE B: AMBIGUOUS ABSTAIN (Hypotheses evaluated but conflicting) ── */
+            /* ── STATE B: AMBIGUOUS ABSTAIN ── */
             <section className="relative space-y-3">
               <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-amber-400 flex items-center justify-center text-xs font-bold text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)]">
                 !
@@ -791,7 +905,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               </div>
             </section>
           ) : (
-            /* ── STATE C: SUCCESS STATE (Single confirmed root cause) ── */
+            /* ── STATE C: SUCCESS STATE ── */
             <section className="relative space-y-3">
               <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-emerald-400 flex items-center justify-center text-xs font-bold text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.6)]">
                 ●
@@ -862,7 +976,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 4: SUPPORTING EVIDENCE (Only if evidence exists)             */}
+          {/* STEP 4: SUPPORTING EVIDENCE                                       */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           {evidence.length > 0 && (
             <section className="relative space-y-3">
@@ -929,7 +1043,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 5: FALSIFICATION AUDIT (Only if hypotheses were scored)     */}
+          {/* STEP 5: FALSIFICATION AUDIT                                       */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           {scored.length > 0 && (
             <section className="relative space-y-3">
@@ -1117,18 +1231,26 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 7: HAVE WE SEEN THIS BEFORE? (E9 PRECEDENT MEMORY)           */}
+          {/* STEP 7: HAVE WE SEEN THIS BEFORE? (PERSONA-AWARE E9 MEMORY)       */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
               →
             </div>
 
-            <div>
-              <div className="text-xs font-medium text-neutral-400">07 · Institutional Precedent Memory (E9)</div>
-              <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
-                Have we seen this failure pattern before?
-              </h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-medium text-neutral-400">07 · Institutional Precedent Memory (E9)</div>
+                <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
+                  Have we seen this failure pattern before?
+                </h2>
+              </div>
+
+              {/* Explicit Persona Retrieval Scope Badge */}
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-black/40 border border-white/[0.06] text-[11px] font-mono text-neutral-400">
+                <Lock className="w-3 h-3 text-neutral-400" />
+                <span>Scope: <strong className="text-white capitalize">{persona}</strong> ({personaScopes[persona]?.sourcesCount || 7} authorized sources)</span>
+              </div>
             </div>
 
             {precedents.length > 0 ? (
@@ -1163,13 +1285,62 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 ))}
               </div>
             ) : (
-              <div className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] text-center text-xs text-neutral-400 font-mono">
-                No matching prior precedents found in vector memory for this pattern.
+              <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-1.5 text-center">
+                <div className="text-xs font-semibold text-neutral-200">
+                  No matching precedent was available within the current authorization scope.
+                </div>
+                <div className="text-[11px] text-neutral-400 max-w-xl mx-auto leading-relaxed">
+                  Historical precedent retrieval is constrained by the active entitlement boundary ({personaScopes[persona]?.summary || "active persona scope"}). Precedent records outside this authorization scope are not accessible.
+                </div>
               </div>
             )}
           </section>
         </div>
       </main>
+
+      {/* ── 7. TRUTHFUL LIVE INVESTIGATION EXECUTION PROGRESS OVERLAY ────── */}
+      {isLiveLoading && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="max-w-lg w-full bg-[#12131D] border border-emerald-500/30 rounded-3xl p-7 space-y-5 shadow-[0_0_50px_rgba(16,185,129,0.15)] text-center animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto">
+              <RefreshCw className="w-6 h-6 animate-spin" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-bold text-white tracking-tight">
+                INVESTIGATION IN PROGRESS
+              </h3>
+              <p className="text-xs text-neutral-400">
+                Executing 9-engine causal pipeline on FastAPI server (<code className="text-emerald-400 font-mono">:8080/investigate</code>)
+              </p>
+            </div>
+
+            {/* Execution Context & Truthful Timer */}
+            <div className="p-4 rounded-2xl bg-black/50 border border-white/[0.06] space-y-2 text-xs font-mono text-left">
+              <div className="flex justify-between items-center text-neutral-300">
+                <span className="text-neutral-400">Scenario Target:</span>
+                <span className="text-white font-bold">{activeConfig.scenarioId}</span>
+              </div>
+              <div className="flex justify-between items-center text-neutral-300">
+                <span className="text-neutral-400">Persona Scope:</span>
+                <span className="text-emerald-400 font-bold capitalize">{activeConfig.persona} ({activeConfig.region === "all" ? "Global" : activeConfig.region})</span>
+              </div>
+              <div className="flex justify-between items-center text-neutral-300 pt-1 border-t border-white/[0.06]">
+                <span className="text-neutral-400">Pipeline Mode:</span>
+                <span className="text-neutral-200 font-medium">Synchronous Multi-Engine</span>
+              </div>
+              <div className="flex justify-between items-center text-neutral-300">
+                <span className="text-neutral-400">Elapsed Time:</span>
+                <span className="text-emerald-400 font-bold text-sm">{liveElapsedSeconds.toFixed(1)}s</span>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-neutral-500 leading-relaxed font-sans">
+              Processing statistical anomaly isolation, server-side entitlement validation, deterministic challenge rules, and vector memory retrieval.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── DETAIL MODAL: EVIDENCE INSPECTION ────────────────────────────── */}
       {activeEvidenceModal && (
@@ -1182,7 +1353,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 </span>
                 <span className="text-xs text-neutral-400 uppercase font-medium">{activeEvidenceModal.source_id}</span>
               </div>
-              <button onClick={() => setActiveEvidenceModal(null)} className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5">
+              <button onClick={() => setActiveEvidenceModal(null)} className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1226,7 +1397,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <Cpu className="w-5 h-5 text-emerald-400" />
                 <h3 className="text-base font-bold text-white">System Audit & Telemetry Trace</h3>
               </div>
-              <button onClick={() => setShowTelemetryDrawer(false)} className="text-neutral-400 hover:text-white">✕</button>
+              <button onClick={() => setShowTelemetryDrawer(false)} className="text-neutral-400 hover:text-white cursor-pointer">✕</button>
             </div>
 
             <div className="space-y-3 font-mono text-xs">
