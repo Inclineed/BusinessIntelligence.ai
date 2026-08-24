@@ -339,6 +339,22 @@ class MemoryEngine:
 
             # 4. Upsert into ChromaDB
             collection = self._get_or_create_collection()
+
+            # Preserve authoritative Analyst precedent records against restricted persona overwrites
+            result_persona_str = result.persona.value if hasattr(result.persona, "value") else str(result.persona)
+            try:
+                existing = collection.get(ids=[scenario_id], include=["metadatas"])
+                if existing and existing.get("metadatas") and len(existing["metadatas"]) > 0:
+                    ex_meta = existing["metadatas"][0] or {}
+                    if ex_meta.get("persona") == "analyst" and result_persona_str != "analyst":
+                        logger.info(
+                            "store_precedent: preserving authoritative analyst precedent for %s; skipping overwrite by %s run",
+                            scenario_id, result_persona_str,
+                        )
+                        return True
+            except Exception:
+                pass
+
             collection.upsert(
                 ids=[scenario_id],
                 embeddings=[vector],
