@@ -134,3 +134,44 @@ export interface ScenarioMeta {
   type: string
   description: string
 }
+
+// ---------------------------------------------------------------------------
+// Round 2 — Structured Feedback Types
+// ---------------------------------------------------------------------------
+
+export type FeedbackVerdict = "CORRECT" | "INCORRECT" | "PARTIALLY_CORRECT" | "UNSURE"
+
+export interface StructuredFeedbackSubmission {
+  investigation_id: string
+  scenario_id: string
+  persona?: string
+  verdict: FeedbackVerdict
+  corrected_hypothesis_id?: string
+  corrected_confidence_state?: string
+  corrected_action?: string
+  evidence_grounding_correct?: boolean
+  analyst_notes?: string
+}
+
+export interface FeedbackResponse {
+  success: boolean
+  feedback_id?: number
+  validated_precedent?: boolean
+  error?: string
+}
+
+export interface FeedbackRecord {
+  feedback_id: number
+  investigation_id: string
+  scenario_id: string
+  persona: string
+  verdict: FeedbackVerdict
+  corrected_hypothesis_id?: string
+  corrected_confidence_state?: string
+  corrected_action?: string
+  evidence_grounding_correct?: boolean
+  analyst_notes?: string
+  validated_precedent: boolean
+  validation_precedent_id?: string
+  received_at: string
+}

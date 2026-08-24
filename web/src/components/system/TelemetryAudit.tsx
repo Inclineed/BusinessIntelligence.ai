@@ -211,7 +211,7 @@ export const TelemetryAudit: React.FC<TelemetryAuditProps> = ({
         </div>
       </div>
 
-      {/* Analyst Feedback Submission */}
+      {/* Analyst Feedback — Redirect to Inline Review */}
       <div className="p-5 rounded-lg bg-surface border border-hairline shadow-card space-y-3">
         <div className="flex justify-between items-center">
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-white">
@@ -222,36 +222,14 @@ export const TelemetryAudit: React.FC<TelemetryAuditProps> = ({
           </span>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Submitting resolution notes stamps the historical record with <b className="text-semantic-positive">human_validated=True</b> in ChromaDB, creating verified institutional memory.
+          Structured feedback (CORRECT / INCORRECT / PARTIALLY_CORRECT / UNSURE) is now available
+          in the <b className="text-white">Analyst Review & Verification</b> section above Stage 7.
+          Use the inline verdict bar to validate or correct this investigation's conclusions.
         </p>
-
-        <form onSubmit={handleSubmitFeedback} className="space-y-3 pt-2">
-          <textarea
-            rows={3}
-            value={feedbackText}
-            onChange={(e) => setFeedbackText(e.target.value)}
-            placeholder="Confirm operational cause, rollback effectiveness, or domain caveats..."
-            className="w-full bg-surface-raised border border-hairline hover:border-hairline-bright focus:border-semantic-neutral rounded-md p-3 text-xs text-white placeholder:text-muted-foreground outline-none transition-colors"
-          />
-
-          <div className="flex justify-between items-center">
-            {submitStatus && (
-              <span className={`text-xs font-mono ${submitStatus.success ? "text-semantic-positive" : "text-semantic-critical"}`}>
-                {submitStatus.message}
-              </span>
-            )}
-            {!submitStatus && <span></span>}
-
-            <button
-              type="submit"
-              disabled={isSubmitting || !feedbackText.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-semantic-neutral hover:bg-blue-600 disabled:opacity-50 text-xs font-semibold text-white transition-colors"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>{isSubmitting ? "Submitting..." : "Submit Analyst Feedback"}</span>
-            </button>
-          </div>
-        </form>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/[0.06] border border-blue-500/20 text-xs text-blue-300">
+          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+          <span>Submitting "Confirm Correct" stamps <b>human_validated=True</b> in E9 precedent memory with retrieval boost.</span>
+        </div>
       </div>
     </div>
   )

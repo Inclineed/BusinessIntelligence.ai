@@ -1,5 +1,6 @@
-import React, { useState } from "react"
-import { InvestigationResult, PersonaType, EvidenceItem, PrecedentItem } from "../../types/investigation"
+import React, { useState, useEffect, useCallback } from "react"
+import { InvestigationResult, PersonaType, EvidenceItem, PrecedentItem, FeedbackVerdict, FeedbackRecord } from "../../types/investigation"
+import { submitStructuredFeedback, getFeedbackForScenario } from "../../lib/api"
 import { SCENARIO_CATALOG } from "../../lib/defaultData"
 import { formatMetricValue, formatDelta, formatZScore } from "../../lib/utils"
 import { ScenarioSelector, PersonaSelector, RegionSelector } from "./ScenarioSelector"
@@ -40,7 +41,13 @@ import {
   Layers,
   History,
   FileText,
-  Tag
+  Tag,
+  MessageSquare,
+  ThumbsUp,
+  ThumbsDown,
+  HelpCircle,
+  AlertCircle,
+  Send
 } from "lucide-react"
 
 interface AnalysisConfig {
@@ -87,6 +94,68 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   const [activeEvidenceModal, setActiveEvidenceModal] = useState<EvidenceItem | null>(null)
   const [activePrecedentModal, setActivePrecedentModal] = useState<PrecedentItem | null>(null)
   const [showTelemetryDrawer, setShowTelemetryDrawer] = useState(false)
+
+  // ── Round 2 Feedback State ──────────────────────────────────────────
+  const [feedbackVerdict, setFeedbackVerdict] = useState<FeedbackVerdict | null>(null)
+  const [feedbackNotes, setFeedbackNotes] = useState("")
+  const [correctedHypothesis, setCorrectedHypothesis] = useState("")
+  const [correctedAction, setCorrectedAction] = useState("")
+  const [evidenceGroundingCorrect, setEvidenceGroundingCorrect] = useState(true)
+  const [isFeedbackSubmitting, setIsFeedbackSubmitting] = useState(false)
+  const [feedbackResult, setFeedbackResult] = useState<{ success: boolean; message: string; validated?: boolean } | null>(null)
+  const [existingFeedback, setExistingFeedback] = useState<FeedbackRecord[]>([])
+  const [showCorrectionForm, setShowCorrectionForm] = useState(false)
+
+  // Fetch existing feedback when scenario changes
+  const investigationId = (result as any)?.investigation_id
+  useEffect(() => {
+    if (result?.scenario_id) {
+      getFeedbackForScenario(result.scenario_id).then(data => {
+        setExistingFeedback(data.records || [])
+      }).catch(() => setExistingFeedback([]))
+    }
+    // Reset feedback UI on new result
+    setFeedbackVerdict(null)
+    setFeedbackResult(null)
+    setShowCorrectionForm(false)
+    setFeedbackNotes("")
+    setCorrectedHypothesis("")
+    setCorrectedAction("")
+  }, [result?.scenario_id, investigationId])
+
+  const handleFeedbackSubmit = useCallback(async () => {
+    if (!feedbackVerdict || !investigationId || !result?.scenario_id) return
+    setIsFeedbackSubmitting(true)
+    setFeedbackResult(null)
+    try {
+      const res = await submitStructuredFeedback({
+        investigation_id: investigationId,
+        scenario_id: result.scenario_id,
+        persona: evaluatedConfig.persona,
+        verdict: feedbackVerdict,
+        corrected_hypothesis_id: correctedHypothesis || undefined,
+        corrected_action: correctedAction || undefined,
+        evidence_grounding_correct: evidenceGroundingCorrect,
+        analyst_notes: feedbackNotes || undefined,
+      })
+      if (res.success) {
+        const msg = res.validated_precedent
+          ? `Institutional Precedent Verified (Feedback #${res.feedback_id})`
+          : `Feedback Recorded (Feedback #${res.feedback_id})`
+        setFeedbackResult({ success: true, message: msg, validated: res.validated_precedent })
+        // Refresh feedback list
+        getFeedbackForScenario(result.scenario_id).then(data => {
+          setExistingFeedback(data.records || [])
+        }).catch(() => {})
+      } else {
+        setFeedbackResult({ success: false, message: res.error || "Failed to submit feedback" })
+      }
+    } catch (err: any) {
+      setFeedbackResult({ success: false, message: err.message || "Network error" })
+    } finally {
+      setIsFeedbackSubmitting(false)
+    }
+  }, [feedbackVerdict, investigationId, result?.scenario_id, evaluatedConfig.persona, correctedHypothesis, correctedAction, evidenceGroundingCorrect, feedbackNotes])
 
   // 1. EXACT SOURCE OF TRUTH: Safe extraction from active `result`
   const { 
@@ -1317,6 +1386,169 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
               )}
             </div>
           </section>
+
+
+          {/* ═════════════════════════════════════════════════════════════════ */}
+          {/* ANALYST REVIEW & VERIFICATION BAR (Round 2 Feedback Loop)       */}
+          {/* ═════════════════════════════════════════════════════════════════ */}
+          {investigationId && isSuccess && (
+            <section className="relative space-y-3">
+              <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border-2 border-emerald-500/40 flex items-center justify-center text-[10px] text-emerald-400 font-bold">
+                ✓
+              </div>
+
+              <div>
+                <div className="text-xs font-medium text-neutral-400">Human Validation · Institutional Learning Loop</div>
+                <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
+                  Analyst Review & Verification
+                </h2>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-4">
+                {/* Previous feedback indicator */}
+                {existingFeedback.length > 0 && !feedbackResult && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/[0.08] border border-emerald-500/20 text-xs">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                    <span className="text-emerald-300">
+                      {existingFeedback[0].validated_precedent
+                        ? `Precedent verified by ${existingFeedback[0].persona} · ${existingFeedback[0].verdict}`
+                        : `${existingFeedback.length} feedback record(s) · Latest: ${existingFeedback[0].verdict}`
+                      }
+                    </span>
+                  </div>
+                )}
+
+                {/* Submission result */}
+                {feedbackResult && (
+                  <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-mono ${
+                    feedbackResult.success
+                      ? feedbackResult.validated
+                        ? "bg-emerald-500/[0.1] border-emerald-500/30 text-emerald-300"
+                        : "bg-blue-500/[0.1] border-blue-500/30 text-blue-300"
+                      : "bg-red-500/[0.1] border-red-500/30 text-red-300"
+                  }`}>
+                    {feedbackResult.success
+                      ? feedbackResult.validated
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        : <MessageSquare className="w-4 h-4 text-blue-400" />
+                      : <AlertCircle className="w-4 h-4 text-red-400" />
+                    }
+                    <span>{feedbackResult.message}</span>
+                  </div>
+                )}
+
+                {/* Verdict selection */}
+                {!feedbackResult && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400 block">Verdict</label>
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                        {([
+                          { verdict: "CORRECT" as FeedbackVerdict, label: "Confirm Correct", icon: ThumbsUp, color: "emerald" },
+                          { verdict: "PARTIALLY_CORRECT" as FeedbackVerdict, label: "Partially Correct", icon: AlertTriangle, color: "amber" },
+                          { verdict: "INCORRECT" as FeedbackVerdict, label: "Incorrect / Reject", icon: ThumbsDown, color: "rose" },
+                          { verdict: "UNSURE" as FeedbackVerdict, label: "Unsure / Escalate", icon: HelpCircle, color: "neutral" },
+                        ]).map(({ verdict, label, icon: Icon, color }) => (
+                          <button
+                            key={verdict}
+                            onClick={() => {
+                              setFeedbackVerdict(verdict)
+                              setShowCorrectionForm(verdict === "INCORRECT" || verdict === "PARTIALLY_CORRECT")
+                            }}
+                            className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all ${
+                              feedbackVerdict === verdict
+                                ? color === "emerald" ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300 ring-1 ring-emerald-500/30"
+                                : color === "amber" ? "bg-amber-500/20 border-amber-500/50 text-amber-300 ring-1 ring-amber-500/30"
+                                : color === "rose" ? "bg-rose-500/20 border-rose-500/50 text-rose-300 ring-1 ring-rose-500/30"
+                                : "bg-neutral-500/20 border-neutral-500/50 text-neutral-300 ring-1 ring-neutral-500/30"
+                              : "bg-white/[0.03] border-white/[0.08] text-neutral-400 hover:bg-white/[0.06] hover:border-white/[0.12]"
+                            }`}
+                          >
+                            <Icon className="w-3.5 h-3.5" />
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Correction drawer — shown for INCORRECT / PARTIALLY_CORRECT */}
+                    {showCorrectionForm && (
+                      <div className="space-y-3 p-4 rounded-xl bg-black/40 border border-white/[0.06]">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">Human Correction</div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-neutral-400 font-medium">Corrected Root Cause Hypothesis</label>
+                            <select
+                              value={correctedHypothesis}
+                              onChange={(e) => setCorrectedHypothesis(e.target.value)}
+                              className="w-full bg-surface-raised border border-hairline rounded-md p-2 text-xs text-white outline-none"
+                            >
+                              <option value="">— Select hypothesis —</option>
+                              {(scored || []).map((h: any, i: number) => (
+                                <option key={h.hypothesis_id || i} value={h.hypothesis_id || `H${i+1}`}>
+                                  {h.hypothesis_id || `H${i+1}`}: {(h.title || h.hypothesis || "").slice(0, 80)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-neutral-400 font-medium">Corrected Action</label>
+                            <input
+                              type="text"
+                              value={correctedAction}
+                              onChange={(e) => setCorrectedAction(e.target.value)}
+                              placeholder="What should have been recommended?"
+                              className="w-full bg-surface-raised border border-hairline rounded-md p-2 text-xs text-white placeholder:text-neutral-500 outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <label className="flex items-center gap-2 text-xs text-neutral-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={evidenceGroundingCorrect}
+                            onChange={(e) => setEvidenceGroundingCorrect(e.target.checked)}
+                            className="rounded border-neutral-600"
+                          />
+                          Evidence cited was relevant and grounded
+                        </label>
+                      </div>
+                    )}
+
+                    {/* Analyst notes */}
+                    {feedbackVerdict && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-neutral-400 font-medium">Analyst Notes (optional)</label>
+                        <textarea
+                          rows={2}
+                          value={feedbackNotes}
+                          onChange={(e) => setFeedbackNotes(e.target.value)}
+                          placeholder="Additional context, domain rationale, or operational observations..."
+                          className="w-full bg-surface-raised border border-hairline hover:border-hairline-bright focus:border-semantic-neutral rounded-md p-2.5 text-xs text-white placeholder:text-neutral-500 outline-none transition-colors"
+                        />
+                      </div>
+                    )}
+
+                    {/* Submit */}
+                    {feedbackVerdict && (
+                      <div className="flex justify-end">
+                        <button
+                          onClick={handleFeedbackSubmit}
+                          disabled={isFeedbackSubmitting}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-semantic-neutral hover:bg-blue-600 disabled:opacity-50 text-xs font-semibold text-white transition-colors"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{isFeedbackSubmitting ? "Submitting..." : `Submit ${feedbackVerdict.replace("_", " ")} Verdict`}</span>
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
+          )}
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
