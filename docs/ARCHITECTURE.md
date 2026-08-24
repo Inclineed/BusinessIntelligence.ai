@@ -153,6 +153,7 @@ A Streamlit dashboard providing:
 8. **Deterministic Abstention**: If top hypothesis confidence is `ABSTAIN` or the score gap between top hypotheses is `< 0.15`, the decision engine is suppressed and produces zero recommended actions.
 9. **Single Ground Truth Chokepoint**: `_GROUND_TRUTH_LOAD_ALLOWED = True` is declared exclusively in `evaluation/evaluator.py`. No engine code imports ground truth.
 10. **Dynamic Evaluator Extensibility**: The evaluation framework contains zero hardcoded scenario dispatching; all validation dimensions are dynamically discovered.
+11. **Shared Institutional Precedents & Authoritative Preservation**: Engine E9 maintains a single shared institutional precedent record per incident scenario (`scenario_id`). Precedents represent full ground-truth operational history evaluated under the Analyst cross-domain scope. Restricted role runs (CFO/Manager) do not create separate persona-siloed precedents or overwrite/degrade existing authoritative Analyst precedents. Entitlement isolation is enforced at query retrieval time ($\text{source\_ids} \subseteq \text{authorized\_sources}$).
 
 ---
 

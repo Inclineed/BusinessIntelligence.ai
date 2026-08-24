@@ -41,23 +41,31 @@ Every precedent record upserted into ChromaDB contains the following metadata at
 {
   "scenario_id": "INC_001",
   "persona": "analyst",
+  "source_ids": "inventory,payment_gateway,support_tickets",
   "winning_hypothesis": "H1",
-  "recommendation": "Roll back checkout-service v4.3.1 to v4.2.3 immediately...",
+  "recommendation": "Roll back release v4.3 to restore payment gateway connection pool and mitigate customer payment failures.",
   "confidence_state": "HIGH",
   "original_confidence_state": "HIGH",
   "outcome_type": "observed",
-  "created_at": "2024-01-15T12:30:00+00:00",
-  "timestamp": "2024-01-15T12:30:00+00:00",
-  "evidence_ids": "ev_sql_pay_01,ev_chroma_dep_01",
-  "summary": "Investigation INC_001 for analyst. Winning hypothesis: H1. Confidence: HIGH...",
-  "human_validated": false,
-  "validated_at": ""
+  "created_at": "2026-08-24T12:00:00+00:00",
+  "timestamp": "2026-08-24T12:00:00+00:00",
+  "evidence_ids": "3f76b0b41747a6a4,132f62a8fde1f82a,477ae5b90f7c4de0",
+  "summary": "Payment failure rate of 2.2% with 99 payment support tickets following v4.3 release. Inventory was unaffected.",
+  "human_validated": true,
+  "validated_at": "2026-08-24T12:05:00+00:00"
 }
 ```
 
 ---
 
 ## 3. Storage Invariants & State Preservation
+
+### Shared Institutional Precedent Model
+The memory engine maintains **one shared institutional precedent record per incident scenario** (`scenario_id`), rather than separate persona-siloed records:
+- **Authoritative Ground Truth**: Precedents represent institutional operational history evaluated under the full Analyst cross-domain scope, capturing all contributing evidence sources.
+- **Authoritative Record Preservation**: When an investigation is executed by a restricted persona (e.g. CFO or Manager), their run proceeds under scoped entitlements with partial evidence. `MemoryEngine.store_precedent()` checks whether an authoritative Analyst precedent already exists for that scenario and **preserves the authoritative Analyst record**, skipping overwrite by the restricted run. A restricted persona investigation does *not* create an independent degraded precedent.
+- **Retrieval-Time Entitlement Bounding**: Role-based access control is enforced at retrieval time. A shared precedent is visible to a querying persona if and only if all contributing evidence sources lie within that persona's authorized entitlement scope:
+  $$\text{Precedent is returned} \iff \text{Precedent.source\_ids} \subseteq \text{Persona.authorized\_sources}$$
 
 ### Why All Confidence States Are Stored
 The memory engine stores precedents across **all** confidence states:
