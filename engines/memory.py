@@ -460,12 +460,14 @@ class MemoryEngine:
         self,
         scenario_id: str,
         validated_at: Optional[datetime] = None,
+        validation_feedback_id: Optional[int] = None,
     ) -> bool:
         """
         Mark an existing precedent as human-validated.
 
-        Updates the ChromaDB record's metadata to set human_validated=True
-        and validated_at to the given (or current UTC) ISO timestamp.
+        Updates the ChromaDB record's metadata to set human_validated=True,
+        validated_at to the given (or current UTC) ISO timestamp, and
+        optionally links the validation to the originating feedback_id.
 
         Does NOT alter confidence_state or original_confidence_state.
 
@@ -486,15 +488,18 @@ class MemoryEngine:
             ts = (validated_at or datetime.now(tz=timezone.utc)).isoformat()
             meta["human_validated"] = True
             meta["validated_at"] = ts
+            if validation_feedback_id is not None:
+                meta["validation_feedback_id"] = validation_feedback_id
 
             collection.update(
                 ids=[scenario_id],
                 metadatas=[meta],
             )
             logger.info(
-                "mark_validated: scenario=%s marked as human-validated at %s.",
+                "mark_validated: scenario=%s marked as human-validated at %s (feedback_id=%s).",
                 scenario_id,
                 ts,
+                validation_feedback_id,
             )
             return True
 

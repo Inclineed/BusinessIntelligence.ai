@@ -207,13 +207,25 @@ class InvestigateRequest(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
+    """Structured feedback submission — backward-compatible with legacy {investigation_id, content} payloads."""
     investigation_id: str
-    content: str   # 1 to 5000 characters
+    # Legacy field (kept for backward compat — mapped to analyst_notes if no verdict)
+    content: Optional[str] = None
+    # Structured fields (Round 2)
+    scenario_id: Optional[str] = None
+    persona: Optional[str] = "analyst"
+    verdict: Optional[str] = "CORRECT"  # CORRECT | INCORRECT | PARTIALLY_CORRECT | UNSURE
+    corrected_hypothesis_id: Optional[str] = None
+    corrected_confidence_state: Optional[str] = None
+    corrected_action: Optional[str] = None
+    evidence_grounding_correct: Optional[bool] = None
+    analyst_notes: Optional[str] = None
 
 
 class FeedbackResponse(BaseModel):
     success: bool
     feedback_id: Optional[int] = None
+    validated_precedent: bool = False
     error: Optional[str] = None
 
 
@@ -414,8 +426,10 @@ async def investigate_endpoint(
 
 
 # ---------------------------------------------------------------------------
-# POST /feedback
+# POST /feedback — Structured Feedback with E9 Validation (Round 2)
 # ---------------------------------------------------------------------------
+
+_VALID_VERDICTS = frozenset({"CORRECT", "INCORRECT", "PARTIALLY_CORRECT", "UNSURE"})
 
 
 @app.post("/feedback", response_model=FeedbackResponse)
@@ -424,35 +438,50 @@ async def feedback_endpoint(
     request: Request,
 ) -> JSONResponse:
     """
-    Persist analyst feedback on an investigation result.
+    Persist structured analyst feedback on an investigation result.
 
-    Validation rules (Requirements 17.1 â€“ 17.5):
-    1. content length must be 1â€“5000 chars   â†’ HTTP 422 on failure
-    2. investigation_id must exist in DB     â†’ HTTP 404 if not found
-    3. INSERT into feedback table            â†’ HTTP 200 with feedback_id
-    4. On DB failure: no partial entry       â†’ HTTP 500
-    5. No DB connection available            â†’ HTTP 500
+    Round 2 behavior:
+    1. Accept structured verdict (CORRECT/INCORRECT/PARTIALLY_CORRECT/UNSURE)
+       or legacy {investigation_id, content} payloads for backward compat.
+    2. Verify investigation_id exists and optionally validate scenario_id match.
+    3. INSERT structured feedback record into PostgreSQL.
+    4. If verdict == CORRECT and investigation was analyst-scoped:
+       Call MemoryEngine.mark_validated() to set human_validated=True in ChromaDB.
+       First-wins policy: subsequent CORRECT verdicts record feedback but do not
+       re-stamp an already-validated precedent.
+    5. On DB failure: no partial entry — rollback ensures atomicity.
     """
     state = request.app.state
 
     # ------------------------------------------------------------------
-    # 1. Validate content length (Requirement 17.3)
+    # 0. Normalize: legacy compat — if no verdict/scenario_id, treat as
+    #    legacy payload where content is the analyst_notes
     # ------------------------------------------------------------------
-    content_len = len(body.content)
-    if content_len < 1 or content_len > 5000:
+    verdict_str = (body.verdict or "CORRECT").upper().strip()
+    analyst_notes = body.analyst_notes or body.content or None
+    scenario_id = body.scenario_id  # may be None for legacy calls
+
+    if verdict_str not in _VALID_VERDICTS:
         return JSONResponse(
             status_code=422,
             content=FeedbackResponse(
                 success=False,
-                error=(
-                    f"Feedback content must be between 1 and 5000 characters "
-                    f"(got {content_len})."
-                ),
+                error=f"Invalid verdict: {body.verdict!r}. Valid: {', '.join(sorted(_VALID_VERDICTS))}",
+            ).model_dump(),
+        )
+
+    # Validate analyst_notes / content length (backward compat)
+    if analyst_notes and (len(analyst_notes) < 1 or len(analyst_notes) > 5000):
+        return JSONResponse(
+            status_code=422,
+            content=FeedbackResponse(
+                success=False,
+                error=f"Analyst notes / content must be 1–5000 chars (got {len(analyst_notes)}).",
             ).model_dump(),
         )
 
     # ------------------------------------------------------------------
-    # 2. Require a live DB connection
+    # 1. Require a live DB connection
     # ------------------------------------------------------------------
     if state.db_conn is None:
         logger.error("/feedback: no database connection available.")
@@ -465,12 +494,14 @@ async def feedback_endpoint(
         )
 
     # ------------------------------------------------------------------
-    # 3. Verify investigation_id exists (Requirement 17.4)
+    # 2. Verify investigation_id exists and resolve scenario_id/persona
     # ------------------------------------------------------------------
+    inv_scenario_id: Optional[str] = None
+    inv_persona: Optional[str] = None
     try:
         with state.db_conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM investigations WHERE investigation_id = %s",
+                "SELECT scenario_id, persona FROM investigations WHERE investigation_id = %s",
                 (body.investigation_id,),
             )
             row = cur.fetchone()
@@ -482,10 +513,7 @@ async def feedback_endpoint(
             pass
         return JSONResponse(
             status_code=500,
-            content=FeedbackResponse(
-                success=False,
-                error="feedback could not be saved",
-            ).model_dump(),
+            content=FeedbackResponse(success=False, error="feedback could not be saved").model_dump(),
         )
 
     if row is None:
@@ -497,29 +525,123 @@ async def feedback_endpoint(
             ).model_dump(),
         )
 
+    inv_scenario_id, inv_persona = row[0], row[1]
+
+    # Use investigation's scenario_id if not provided in request
+    if scenario_id is None:
+        scenario_id = inv_scenario_id
+
+    # Validate scenario_id match if explicitly provided
+    if body.scenario_id and body.scenario_id != inv_scenario_id:
+        return JSONResponse(
+            status_code=422,
+            content=FeedbackResponse(
+                success=False,
+                error=(
+                    f"scenario_id mismatch: request={body.scenario_id!r} "
+                    f"but investigation belongs to {inv_scenario_id!r}."
+                ),
+            ).model_dump(),
+        )
+
     # ------------------------------------------------------------------
-    # 4. Insert feedback (Requirements 17.1, 17.2, 17.5)
+    # 3. Insert structured feedback record
     # ------------------------------------------------------------------
+    validated_precedent = False
+    feedback_id: int = 0
+
     try:
         with state.db_conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO feedback (investigation_id, content, received_at)
-                VALUES (%s, %s, now())
+                INSERT INTO feedback (
+                    investigation_id, scenario_id, persona, verdict,
+                    corrected_hypothesis_id, corrected_confidence_state,
+                    corrected_action, evidence_grounding_correct,
+                    analyst_notes, content, received_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 RETURNING feedback_id
                 """,
-                (body.investigation_id, body.content),
+                (
+                    body.investigation_id,
+                    scenario_id,
+                    body.persona or inv_persona or "analyst",
+                    verdict_str,
+                    body.corrected_hypothesis_id,
+                    body.corrected_confidence_state,
+                    body.corrected_action,
+                    body.evidence_grounding_correct,
+                    analyst_notes,
+                    body.content,  # preserve legacy content column
+                ),
             )
-            feedback_id: int = cur.fetchone()[0]
+            feedback_id = cur.fetchone()[0]
+
+        # ------------------------------------------------------------------
+        # 4. E9 Validation — CORRECT + analyst-scoped + first-wins policy
+        # ------------------------------------------------------------------
+        if verdict_str == "CORRECT" and inv_persona == "analyst" and scenario_id:
+            try:
+                from engines.memory import MemoryEngine
+                memory = MemoryEngine(chroma_client=state.chroma_client)
+
+                # First-wins check: only validate if not already validated
+                collection = memory._get_or_create_collection()
+                existing = collection.get(ids=[scenario_id], include=["metadatas"])
+                already_validated = False
+                if existing and existing.get("metadatas") and len(existing["metadatas"]) > 0:
+                    meta = existing["metadatas"][0] or {}
+                    hv = meta.get("human_validated", False)
+                    if isinstance(hv, str):
+                        hv = hv.lower() in ("true", "1")
+                    already_validated = bool(hv)
+
+                if not already_validated:
+                    ok = memory.mark_validated(
+                        scenario_id=scenario_id,
+                        validation_feedback_id=feedback_id,
+                    )
+                    if ok:
+                        validated_precedent = True
+                        # Update the feedback record with validation linkage
+                        with state.db_conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                UPDATE feedback
+                                SET validated_precedent = TRUE,
+                                    validation_precedent_id = %s
+                                WHERE feedback_id = %s
+                                """,
+                                (scenario_id, feedback_id),
+                            )
+                        logger.info(
+                            "/feedback: E9 precedent %s validated by feedback_id=%d (first-wins)",
+                            scenario_id, feedback_id,
+                        )
+                else:
+                    logger.info(
+                        "/feedback: precedent %s already validated; recording feedback_id=%d without re-stamping",
+                        scenario_id, feedback_id,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "/feedback: E9 validation failed for %s (feedback_id=%d): %s — feedback still saved",
+                    scenario_id, feedback_id, exc,
+                )
+
         state.db_conn.commit()
         logger.info(
-            "/feedback: persisted feedback_id=%d for investigation_id=%s",
-            feedback_id,
-            body.investigation_id,
+            "/feedback: persisted feedback_id=%d verdict=%s for investigation=%s scenario=%s",
+            feedback_id, verdict_str, body.investigation_id, scenario_id,
         )
         return JSONResponse(
             status_code=200,
-            content=FeedbackResponse(success=True, feedback_id=feedback_id).model_dump(),
+            content=FeedbackResponse(
+                success=True,
+                feedback_id=feedback_id,
+                validated_precedent=validated_precedent,
+            ).model_dump(),
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("/feedback: DB error inserting feedback: %s", exc)
@@ -527,12 +649,131 @@ async def feedback_endpoint(
             state.db_conn.rollback()
         except Exception:  # noqa: BLE001
             pass
-        # Requirement 17.5 â€” no partial entry; rollback ensures atomicity
         return JSONResponse(
             status_code=500,
-            content=FeedbackResponse(
-                success=False,
-                error="feedback could not be saved",
-            ).model_dump(),
+            content=FeedbackResponse(success=False, error="feedback could not be saved").model_dump(),
         )
 
+
+# ---------------------------------------------------------------------------
+# GET /feedback/metrics — Feedback Quality Metrics
+# ---------------------------------------------------------------------------
+
+
+@app.get("/feedback/metrics")
+async def feedback_metrics(request: Request) -> JSONResponse:
+    """
+    Return aggregate feedback quality metrics across all scenarios.
+    """
+    state = request.app.state
+    if state.db_conn is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with state.db_conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    COUNT(*) AS feedback_count,
+                    COUNT(DISTINCT scenario_id) AS scenarios_with_feedback,
+                    COUNT(*) FILTER (WHERE verdict = 'CORRECT') AS human_confirmed,
+                    COUNT(*) FILTER (WHERE verdict = 'INCORRECT') AS human_rejected,
+                    COUNT(*) FILTER (WHERE verdict = 'PARTIALLY_CORRECT') AS partial_corrections,
+                    COUNT(*) FILTER (WHERE verdict = 'UNSURE') AS unsure_count,
+                    COUNT(*) FILTER (WHERE validated_precedent = TRUE) AS validated_precedents
+                FROM feedback
+            """)
+            row = cur.fetchone()
+
+        feedback_count = row[0] or 0
+        decisive = (row[2] or 0) + (row[3] or 0)  # CORRECT + INCORRECT
+        agreement_rate = round((row[2] or 0) / decisive, 4) if decisive > 0 else None
+
+        # Total scenarios for coverage calculation
+        with state.db_conn.cursor() as cur:
+            cur.execute("SELECT COUNT(DISTINCT scenario_id) FROM investigations")
+            total_scenarios = (cur.fetchone()[0] or 0)
+
+        coverage = round((row[1] or 0) / total_scenarios, 4) if total_scenarios > 0 else 0.0
+
+        return JSONResponse(content={
+            "feedback_count": feedback_count,
+            "feedback_coverage": coverage,
+            "scenarios_with_feedback": row[1] or 0,
+            "total_scenarios": total_scenarios,
+            "human_confirmed_count": row[2] or 0,
+            "human_rejected_count": row[3] or 0,
+            "partial_correction_count": row[4] or 0,
+            "unsure_count": row[5] or 0,
+            "validated_precedent_count": row[6] or 0,
+            "human_agreement_rate": agreement_rate,
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/feedback/metrics: DB error: %s", exc)
+        try:
+            state.db_conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        raise HTTPException(status_code=500, detail="Failed to compute feedback metrics")
+
+
+# ---------------------------------------------------------------------------
+# GET /feedback/{scenario_id} — Retrieve Feedback for a Scenario
+# ---------------------------------------------------------------------------
+
+
+@app.get("/feedback/{scenario_id}")
+async def get_feedback_for_scenario(scenario_id: str, request: Request) -> JSONResponse:
+    """
+    Retrieve all feedback records for a given scenario_id.
+    """
+    state = request.app.state
+    if state.db_conn is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        with state.db_conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT feedback_id, investigation_id, scenario_id, persona,
+                       verdict, corrected_hypothesis_id, corrected_confidence_state,
+                       corrected_action, evidence_grounding_correct,
+                       analyst_notes, validated_precedent, validation_precedent_id,
+                       received_at
+                FROM feedback
+                WHERE scenario_id = %s
+                ORDER BY received_at DESC
+                """,
+                (scenario_id,),
+            )
+            rows = cur.fetchall()
+
+        records = []
+        for r in rows:
+            records.append({
+                "feedback_id": r[0],
+                "investigation_id": r[1],
+                "scenario_id": r[2],
+                "persona": r[3],
+                "verdict": r[4],
+                "corrected_hypothesis_id": r[5],
+                "corrected_confidence_state": r[6],
+                "corrected_action": r[7],
+                "evidence_grounding_correct": r[8],
+                "analyst_notes": r[9],
+                "validated_precedent": r[10],
+                "validation_precedent_id": r[11],
+                "received_at": r[12].isoformat() if r[12] else None,
+            })
+
+        return JSONResponse(content={
+            "scenario_id": scenario_id,
+            "count": len(records),
+            "records": records,
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/feedback/%s: DB error: %s", scenario_id, exc)
+        try:
+            state.db_conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        raise HTTPException(status_code=500, detail="Failed to retrieve feedback")
