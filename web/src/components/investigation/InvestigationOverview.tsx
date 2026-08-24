@@ -28,11 +28,14 @@ import {
   Check, 
   X, 
   Cpu, 
-  History, 
   Clock,
-  Layers,
+  ShieldAlert,
+  HelpCircle,
+  Scale,
+  Ban,
   ArrowRight,
-  Database
+  Database,
+  Layers
 } from "lucide-react"
 
 interface InvestigationOverviewProps {
@@ -75,7 +78,15 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     status: "live",
   }
 
+  // 2. FUNDAMENTAL THREE-WAY STATE MODEL:
+  // State A: isGuardTriggered (decision.abstained && hypotheses.length === 0)
+  // State B: isAmbiguousAbstain (decision.abstained && hypotheses.length > 0)
+  // State C: isSuccess (!decision.abstained && hypotheses.length > 0)
   const isAbstained = Boolean(decision.abstained)
+  const hasHypotheses = hypotheses.length > 0
+  const isGuardTriggered = isAbstained && !hasHypotheses
+  const isAmbiguousAbstain = isAbstained && hasHypotheses
+  const isSuccess = !isAbstained && hasHypotheses
 
   // Signal extraction
   const anomalies = signals.filter((s) => s.is_anomaly)
@@ -85,20 +96,20 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
   const { formatted: obsVal, unit: obsUnit } = formatMetricValue(primarySignal.kpi_id || "", primarySignal.observed)
   const { formatted: expVal, unit: expUnit } = formatMetricValue(primarySignal.kpi_id || "", primarySignal.expected)
 
-  // Chronological Time Series Data & Real Milestones
+  // Chronological Time Series Data
   const base = primarySignal.expected || 180
   const observed = primarySignal.observed || 612
   const chartPoints = [
     { time: "13:45", baseline: base * 0.98, actual: base * 0.99 },
     { time: "13:55", baseline: base * 0.99, actual: base * 1.01 },
     { time: "14:05", baseline: base * 1.01, actual: base * 0.99 },
-    { time: "14:15", baseline: base * 1.00, actual: base * 1.15 },
-    { time: "14:18", baseline: base * 1.01, actual: base * 1.65 },
-    { time: "14:22", baseline: base * 0.99, actual: base * 2.30 },
+    { time: "14:15", baseline: base * 1.00, actual: base * (isGuardTriggered ? 1.02 : 1.15) },
+    { time: "14:18", baseline: base * 1.01, actual: base * (isGuardTriggered ? 1.01 : 1.65) },
+    { time: "14:22", baseline: base * 0.99, actual: base * (isGuardTriggered ? 0.99 : 2.30) },
     { time: "14:30", baseline: base * 1.00, actual: observed },
   ]
 
-  // Scenario-specific milestone markers
+  // Scenario-specific milestone markers (Only for real temporal events)
   const scenarioMilestones: Record<string, { time: string; label: string; color: string }[]> = {
     INC_001: [
       { time: "14:15", label: "Deploy v4.3 Completed", color: "#38bdf8" },
@@ -118,22 +129,75 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
   const milestones = scenarioMilestones[scenario_id] || []
 
-  // Primary Hypothesis & Scoring
-  const winnerId = decision.winning_hypothesis_id || "H1"
-  const winningHyp = hypotheses.find((h) => h.hypothesis_id === winnerId) || hypotheses[0]
-  const winningScored = scored.find((s) => s.hypothesis_id === winnerId) || scored[0]
+  // Hypothesis & Scoring Computations
+  const sortedScores = [...scored].sort((a, b) => b.final_score - a.final_score)
+  const winnerId = decision.winning_hypothesis_id || (sortedScores[0]?.hypothesis_id)
+  const winningHyp = hypotheses.find((h) => h.hypothesis_id === winnerId)
+  const winningScored = scored.find((s) => s.hypothesis_id === winnerId) || sortedScores[0]
+
+  const winnerGap = sortedScores.length > 1 ? sortedScores[0].final_score - sortedScores[1].final_score : 0.0
+  const confidenceState = winningScored?.confidence_state || (isAbstained ? "ABSTAIN" : "HIGH")
 
   const cleanStatement = winningHyp?.statement
     ? winningHyp.statement.replace(/\[LLM_NARRATIVE\]|\[LLM\]|\[RULES\]/g, "").trim()
-    : "No definitive causal hypothesis confirmed under active constraints."
+    : ""
 
   const cleanAction = decision.recommended_action
     ? decision.recommended_action.replace(/\[LLM_NARRATIVE\]|\[LLM\]/g, "").trim()
-    : "Hold operational changes and monitor signal corridors."
+    : "Hold operational changes and monitor telemetry."
 
-  const sortedScores = [...scored].sort((a, b) => b.final_score - a.final_score)
-  const winnerGap = sortedScores.length > 1 ? sortedScores[0].final_score - sortedScores[1].final_score : 0.41
-  const confidenceState = winningScored?.confidence_state || (isAbstained ? "ABSTAIN" : "HIGH")
+  // Guard Type Rationale
+  const isSparse = signals.some((s) => s.sparse_history) || scenario_id === "INC_003"
+  const isDataQuality = signals.some((s) => s.data_quality_suspect) || scenario_id === "INC_004"
+  const isNominal = signals.every((s) => !s.is_anomaly) || scenario_id === "INC_005"
+
+  let guardTitle = "Deterministic Safety Guardrail Triggered"
+  let guardCategory = "Governance & Anomaly Suppression Guard"
+  if (isSparse) {
+    guardTitle = "Sparse Baseline History Guard"
+    guardCategory = "Data Volume Safety Guard"
+  } else if (isDataQuality) {
+    guardTitle = "Data-Quality Verification Guard"
+    guardCategory = "Pipeline Freshness & Partition Integrity Guard"
+  } else if (isNominal) {
+    guardTitle = "Nominal Seasonal Corridor (No Anomaly)"
+    guardCategory = "Statistical Invariance Verification"
+  }
+
+  // Status Badge Logic (Derived directly from active result state model)
+  let statusBadge = {
+    label: `Completed (${confidenceState} ${winningScored?.final_score?.toFixed(2) || "0.90"})`,
+    color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25",
+  }
+
+  if (isGuardTriggered) {
+    if (isSparse) {
+      statusBadge = {
+        label: "Sparse Baseline Guard (ABSTAIN)",
+        color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
+      }
+    } else if (isDataQuality) {
+      statusBadge = {
+        label: "Data-Quality Guard (ABSTAIN)",
+        color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
+      }
+    } else if (isNominal) {
+      statusBadge = {
+        label: "Nominal Baseline (NO ANOMALY)",
+        color: "bg-blue-500/10 text-blue-400 border-blue-500/25",
+      }
+    } else {
+      statusBadge = {
+        label: "Governance Guard (ABSTAIN)",
+        color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
+      }
+    }
+  } else if (isAmbiguousAbstain) {
+    statusBadge = {
+      label: `Ambiguous Conflict (ABSTAIN · Margin ${winnerGap.toFixed(2)} < 0.15)`,
+      color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
+    }
+  }
 
   // E8 Simulation Data
   const recoveryPct = outcome.projected_recovery_pct || 88.0
@@ -147,34 +211,35 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     { period: "+10m (Target Normal)", actual: null, projected: (100 - dropDelta) + (dropDelta * (recoveryPct / 100)) },
   ]
 
-  // Status Badge Logic (Derived directly from active result)
-  let statusBadge = {
-    label: `Completed (${confidenceState} ${winningScored?.final_score?.toFixed(2) || "0.90"})`,
-    color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25",
+  // Dynamic Causal Trail Steps for Successful Scenarios
+  const causalTrailByScenario: Record<string, { step: string; title: string; subtitle: string; color: string }[]> = {
+    INC_001: [
+      { step: "01 · DEPLOY TRIGGER", title: "Checkout v4.3 Release", subtitle: "14:15 UTC [EV_v43_deployment]", color: "text-blue-400 border-blue-500/20" },
+      { step: "02 · POOL SATURATION", title: "50/50 Saturated", subtitle: "14:18 UTC [EV_payment_pool]", color: "text-amber-400 border-amber-500/20" },
+      { step: "03 · TIMEOUT SPIKES", title: "Latency 612ms", subtitle: "42 Tickets [EV_checkout_tickets]", color: "text-red-400 border-red-500/20" },
+      { step: "04 · REVENUE IMPACT", title: "Conversion -44.7%", subtitle: "$41.2K Hourly Shock", color: "text-emerald-400 border-emerald-500/20" },
+    ],
+    INC_006: [
+      { step: "01 · WAN PACKET LOSS", title: "18% Ingress Drop", subtitle: "10:05 UTC [EV_upstream_packet_loss]", color: "text-blue-400 border-blue-500/20" },
+      { step: "02 · RETRY STORM", title: "Un-jittered Retries", subtitle: "10:08 UTC [EV_auth_retry_storm]", color: "text-amber-400 border-amber-500/20" },
+      { step: "03 · AUTH SATURATION", title: "Auth-Proxy Thread Lock", subtitle: "Cascading Mesh Latency", color: "text-red-400 border-red-500/20" },
+      { step: "04 · PLATFORM IMPACT", title: "Error Rate 12.8%", subtitle: "+2460% Outage Shock", color: "text-emerald-400 border-emerald-500/20" },
+    ],
+    INC_007: [
+      { step: "01 · BUFFER LEAK", title: "Byte Buffer Retained", subtitle: "[EV_buffer_leak_telemetry]", color: "text-blue-400 border-blue-500/20" },
+      { step: "02 · HEAP DRIFT", title: "+1.2GB every 6h", subtitle: "Continuous 48h Drift", color: "text-amber-400 border-amber-500/20" },
+      { step: "03 · GC THRASHING", title: "Latency 3200ms", subtitle: "Worker Stalls", color: "text-red-400 border-red-500/20" },
+      { step: "04 · COMPUTE IMPACT", title: "Memory 94.2%", subtitle: "Cluster Capacity Critical", color: "text-emerald-400 border-emerald-500/20" },
+    ],
+    INC_008: [
+      { step: "01 · CERT EXPIRY", title: "SAML x509 Expired", subtitle: "00:00 UTC [EV_saml_cert_expiry]", color: "text-blue-400 border-blue-500/20" },
+      { step: "02 · VALIDATION HALT", title: "Crypto Reject", subtitle: "Inbound Assertion Drop", color: "text-amber-400 border-amber-500/20" },
+      { step: "03 · LOGIN OUTAGE", title: "100% SP Drop", subtitle: "Enterprise SSO Blocked", color: "text-red-400 border-red-500/20" },
+      { step: "04 · SESSION IMPACT", title: "Failure Rate 98.4%", subtitle: "Sessions Plunge -96.6%", color: "text-emerald-400 border-emerald-500/20" },
+    ],
   }
-  if (isAbstained) {
-    if (scenario_id === "INC_004") {
-      statusBadge = {
-        label: "Data-Quality Guard Triggered (ABSTAIN)",
-        color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
-      }
-    } else if (scenario_id === "INC_003") {
-      statusBadge = {
-        label: "Sparse Baseline Guard Triggered (ABSTAIN)",
-        color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
-      }
-    } else if (scenario_id === "INC_005") {
-      statusBadge = {
-        label: "Normal Demand Seasonality (NO ANOMALY)",
-        color: "bg-blue-500/10 text-blue-400 border-blue-500/25",
-      }
-    } else {
-      statusBadge = {
-        label: `Abstained (${confidenceState})`,
-        color: "bg-amber-500/10 text-amber-400 border-amber-500/25",
-      }
-    }
-  }
+
+  const activeCausalTrail = causalTrailByScenario[scenario_id] || []
 
   return (
     <div className="min-h-screen bg-[#08090C] text-white font-sans selection:bg-emerald-500/20 antialiased">
@@ -213,7 +278,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
       {/* ── Main Investigation Dashboard Canvas ─────────────────────────── */}
       <main className="max-w-[1380px] mx-auto px-6 lg:px-10 py-6 space-y-7">
         
-        {/* ── 2. Compact Header with Unified Custom Command Selectors ──────── */}
+        {/* ── 2. Header with Unified Custom Command Selectors ─────────────── */}
         <header className="p-4 rounded-2xl bg-[#0F1017] border border-white/[0.06] flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -251,12 +316,12 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           </div>
         </header>
 
-        {/* ── 3. GUARD / ABSTENTION STATE BANNER (When Applicable) ─────────── */}
+        {/* ── 3. GUARD BANNER (When Applicable) ────────────────────────────── */}
         {isAbstained && decision.abstention_reason && (
           <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/25 via-[#13141C] to-[#13141C] border border-amber-500/30 shadow-md space-y-2">
             <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              <span>Governance & Falsification Guard Activated</span>
+              <span>{guardCategory}</span>
             </div>
             <p className="text-xs text-neutral-300 leading-relaxed pl-6">
               {decision.abstention_reason}
@@ -273,7 +338,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
         <div className="relative pl-6 lg:pl-8 space-y-9 before:absolute before:left-2 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-emerald-500/40 before:via-blue-500/20 before:to-emerald-500/40">
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 1: WHAT CHANGED? (Completed stage)                           */}
+          {/* STEP 1: WHAT WAS MEASURED / CHANGED?                              */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border-2 border-emerald-400/60 flex items-center justify-center text-[10px] font-bold text-emerald-400">
@@ -281,29 +346,37 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             </div>
 
             <div>
-              <div className="text-xs font-medium text-neutral-400">01 · Signal Detection</div>
+              <div className="text-xs font-medium text-neutral-400">01 · Signal Evaluation</div>
               <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
-                What changed and how large is the shift?
+                {isNominal ? "What signals were evaluated against historical corridors?" : "What changed and how large is the shift?"}
               </h2>
             </div>
 
             {/* Asymmetric KPI Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
               
-              {/* Primary Anomaly Card (5-Col) */}
-              <div className="lg:col-span-5 p-5 rounded-2xl bg-[#111219] border border-red-500/25 shadow-sm flex flex-col justify-between relative overflow-hidden">
+              {/* Primary Evaluated Metric Card (5-Col) */}
+              <div className={`lg:col-span-5 p-5 rounded-2xl bg-[#111219] border shadow-sm flex flex-col justify-between relative overflow-hidden ${
+                primarySignal.is_anomaly ? "border-red-500/25" : "border-blue-500/25"
+              }`}>
                 <div className="space-y-2.5">
                   <div className="flex justify-between items-start">
                     <div>
-                      <span className="text-[11px] font-semibold text-red-400 uppercase tracking-wide flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                        Primary Anomalous KPI
+                      <span className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 ${
+                        primarySignal.is_anomaly ? "text-red-400" : "text-blue-400"
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${primarySignal.is_anomaly ? "bg-red-500 animate-pulse" : "bg-blue-400"}`} />
+                        {primarySignal.is_anomaly ? "Primary Anomalous Metric" : "Monitored Metric Corridor"}
                       </span>
                       <h3 className="text-sm font-bold text-white capitalize mt-0.5">
                         {primarySignal.kpi_id ? primarySignal.kpi_id.replace(/_/g, " ") : "Primary Metric"}
                       </h3>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-red-500/10 text-red-400 border border-red-500/20">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold border ${
+                      primarySignal.is_anomaly 
+                        ? "bg-red-500/10 text-red-400 border-red-500/20"
+                        : "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                    }`}>
                       {formatZScore(primarySignal.z_score)}
                     </span>
                   </div>
@@ -312,8 +385,10 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                     <span className="text-3xl font-extrabold font-mono text-white tracking-tight">
                       {obsVal}{obsUnit}
                     </span>
-                    <span className="text-sm font-bold font-mono text-red-400 flex items-center">
-                      <TrendingUp className="w-4 h-4 mr-0.5" />
+                    <span className={`text-sm font-bold font-mono flex items-center ${
+                      (primarySignal.delta_pct || 0) < 0 ? "text-red-400" : "text-emerald-400"
+                    }`}>
+                      {(primarySignal.delta_pct || 0) < 0 ? <TrendingDown className="w-4 h-4 mr-0.5" /> : <TrendingUp className="w-4 h-4 mr-0.5" />}
                       {formatDelta(primarySignal.delta_pct)}
                     </span>
                   </div>
@@ -326,58 +401,66 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </div>
                   <div>
                     <div className="text-neutral-400 text-[11px]">Corridor Status</div>
-                    <div className="text-red-400 font-semibold text-sm mt-0.5">&gt; 3.0σ Threshold</div>
+                    <div className={`font-semibold text-sm mt-0.5 ${primarySignal.is_anomaly ? "text-red-400" : "text-blue-400"}`}>
+                      {primarySignal.is_anomaly ? "> 3.0σ Anomaly" : "Within ±0.45σ Normal"}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Supporting Secondary Signals (7-Col Grid) */}
               <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {secondarySignals.slice(0, 3).map((sig) => {
-                  const { formatted, unit } = formatMetricValue(sig.kpi_id, sig.observed)
-                  const { formatted: bFmt, unit: bUnit } = formatMetricValue(sig.kpi_id, sig.expected)
-                  const delta = sig.delta_pct || 0
-                  const isAnom = sig.is_anomaly
+                {secondarySignals.length > 0 ? (
+                  secondarySignals.slice(0, 3).map((sig) => {
+                    const { formatted, unit } = formatMetricValue(sig.kpi_id, sig.observed)
+                    const { formatted: bFmt, unit: bUnit } = formatMetricValue(sig.kpi_id, sig.expected)
+                    const delta = sig.delta_pct || 0
+                    const isAnom = sig.is_anomaly
 
-                  return (
-                    <div
-                      key={sig.kpi_id}
-                      className={`p-4 rounded-2xl bg-[#0E0F15] border transition-all flex flex-col justify-between ${
-                        isAnom ? "border-red-500/20 bg-red-950/[0.04]" : "border-white/[0.05]"
-                      }`}
-                    >
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wide truncate" title={sig.kpi_id}>
-                            {sig.kpi_id.replace(/_/g, " ")}
-                          </span>
-                          {isAnom && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
+                    return (
+                      <div
+                        key={sig.kpi_id}
+                        className={`p-4 rounded-2xl bg-[#0E0F15] border transition-all flex flex-col justify-between ${
+                          isAnom ? "border-red-500/20 bg-red-950/[0.04]" : "border-white/[0.05]"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex justify-between items-center mb-1.5">
+                            <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wide truncate" title={sig.kpi_id}>
+                              {sig.kpi_id.replace(/_/g, " ")}
+                            </span>
+                            {isAnom && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
+                          </div>
+
+                          <div className="text-xl font-bold font-mono text-white tracking-tight mt-0.5">
+                            {formatted}{unit}
+                          </div>
+
+                          <div className={`text-xs font-semibold font-mono mt-0.5 flex items-center ${delta < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                            {delta < 0 ? <TrendingDown className="w-3 h-3 mr-0.5" /> : <TrendingUp className="w-3 h-3 mr-0.5" />}
+                            {formatDelta(delta)}
+                          </div>
                         </div>
 
-                        <div className="text-xl font-bold font-mono text-white tracking-tight mt-0.5">
-                          {formatted}{unit}
-                        </div>
-
-                        <div className={`text-xs font-semibold font-mono mt-0.5 flex items-center ${delta < 0 ? "text-red-400" : "text-emerald-400"}`}>
-                          {delta < 0 ? <TrendingDown className="w-3 h-3 mr-0.5" /> : <TrendingUp className="w-3 h-3 mr-0.5" />}
-                          {formatDelta(delta)}
+                        <div className="mt-3 pt-2 border-t border-white/[0.05] text-[11px] text-neutral-400 flex justify-between">
+                          <span>Baseline:</span>
+                          <span className="text-neutral-200 font-medium">{bFmt}{bUnit}</span>
                         </div>
                       </div>
-
-                      <div className="mt-3 pt-2 border-t border-white/[0.05] text-[11px] text-neutral-400 flex justify-between">
-                        <span>Baseline:</span>
-                        <span className="text-neutral-200 font-medium">{bFmt}{bUnit}</span>
-                      </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })
+                ) : (
+                  <div className="sm:col-span-3 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.05] flex items-center justify-center text-xs text-neutral-400 text-center">
+                    Single metric evaluation corridor under active investigation scope.
+                  </div>
+                )}
               </div>
             </div>
           </section>
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 2: WHEN & WHERE DID IT HAPPEN?                               */}
+          {/* STEP 2: TEMPORAL & DIMENSIONAL CORRIDOR                           */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border-2 border-emerald-400/60 flex items-center justify-center text-[10px] font-bold text-emerald-400">
@@ -387,22 +470,19 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             <div>
               <div className="text-xs font-medium text-neutral-400">02 · Temporal & Dimensional Context</div>
               <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
-                When did it happen and where is it concentrated?
+                {isGuardTriggered ? "Observed telemetry series & segment distribution" : "When did it happen and where is it concentrated?"}
               </h2>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               
-              {/* Chronological Timeline Chart (7-Col) with Dedicated Inside-Card Milestone Band */}
+              {/* Chronological Timeline Chart (7-Col) */}
               <div className="lg:col-span-7 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-xs font-bold text-white capitalize">
-                      {primarySignal.kpi_id ? primarySignal.kpi_id.replace(/_/g, " ") : "Metric"} Shock Progression
+                      {primarySignal.kpi_id ? primarySignal.kpi_id.replace(/_/g, " ") : "Metric"} Progression Window
                     </h3>
-                    <p className="text-[11px] text-neutral-400 mt-0.5">
-                      Deploy completed at 14:15 UTC followed by pool saturation inflection at 14:18 UTC.
-                    </p>
                   </div>
 
                   <div className="flex items-center gap-3 text-xs font-mono">
@@ -417,7 +497,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </div>
                 </div>
 
-                {/* Dedicated Inside-Card Timeline Annotation Band */}
+                {/* Timeline sequence chips (if real events exist) */}
                 {milestones.length > 0 && (
                   <div className="p-2.5 rounded-xl bg-black/40 border border-white/[0.04] space-y-1.5">
                     <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-400 font-bold flex items-center gap-1.5">
@@ -461,15 +541,16 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                       ))}
                       <Area type="monotone" dataKey="baseline" stroke="rgba(16, 185, 129, 0.4)" fill="url(#baselineAreaGradient)" strokeWidth={1.5} />
                       <Line type="monotone" dataKey="actual" stroke="#ffffff" strokeWidth={2} dot={{ r: 2.5, fill: "#fff" }} />
-                      <ReferenceDot x="14:30" y={observed} r={5} fill="#ef4444" stroke="rgba(239, 68, 68, 0.35)" strokeWidth={8} />
+                      {primarySignal.is_anomaly && (
+                        <ReferenceDot x="14:30" y={observed} r={5} fill="#ef4444" stroke="rgba(239, 68, 68, 0.35)" strokeWidth={8} />
+                      )}
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
 
                 <div className="pt-2.5 border-t border-white/[0.06] flex flex-wrap justify-between items-center text-[11px] text-neutral-400">
-                  <span>Start: <strong className="text-white">14:18 UTC</strong></span>
-                  <span>Peak Shock: <strong className="text-red-400">{obsVal}{obsUnit} (+240%)</strong></span>
                   <span>Evaluation Window: <strong className="text-white">15m rolling</strong></span>
+                  <span>Observed Status: <strong className={primarySignal.is_anomaly ? "text-red-400" : "text-emerald-400"}>{obsVal}{obsUnit} ({formatDelta(primarySignal.delta_pct)})</strong></span>
                 </div>
               </div>
 
@@ -537,7 +618,6 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                               </div>
                             </div>
 
-                            {/* Clean, restrained proportional bar */}
                             <div className="w-full bg-black/40 h-1 rounded-full overflow-hidden mt-2">
                               <div
                                 className={`h-full rounded-full transition-all duration-300 ${
@@ -551,8 +631,9 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                       })}
                     </div>
                   ) : (
-                    <div className="p-4 rounded-xl bg-[#14151F] text-center text-xs text-neutral-400">
-                      Variance is uniformly distributed across platform dimensions.
+                    <div className="p-5 rounded-xl bg-[#14151F] text-center text-xs text-neutral-400 space-y-1">
+                      <div>Variance is uniformly distributed across platform traffic.</div>
+                      <div className="text-[11px] text-neutral-500">No disproportionate segment skew isolated.</div>
                     </div>
                   )}
                 </div>
@@ -560,7 +641,7 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 <div className="pt-2.5 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-neutral-400">
                   <span>DOMINANT CONTRIBUTOR:</span>
                   <span className="text-white font-mono font-bold">
-                    {contributions[0]?.segment || "Global"} · {contributions[0]?.contribution_pct.toFixed(1) || "100"}% of variance
+                    {contributions[0]?.segment || "Global"} · {contributions[0]?.contribution_pct ? `${contributions[0].contribution_pct.toFixed(1)}%` : "100%"} of variance
                   </span>
                 </div>
               </div>
@@ -569,109 +650,233 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 3: WHAT CAUSED IT? (CENTRAL INVESTIGATION PIVOT — LEVEL 1)   */}
+          {/* STEP 3: DYNAMIC BRANCHING BASED ON STATE MODEL                    */}
           {/* ═════════════════════════════════════════════════════════════════ */}
-          <section className="relative space-y-3">
-            {/* Active Spine Node */}
-            <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-emerald-400 flex items-center justify-center text-xs font-bold text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.6)]">
-              ●
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>03 · Central Root Cause Pivot</span>
+          {isGuardTriggered ? (
+            /* ── STATE A: GUARD STATE (Hypothesis generation was suppressed) ── */
+            <section className="relative space-y-3">
+              <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-amber-400 flex items-center justify-center text-xs font-bold text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]">
+                !
               </div>
-              <h2 className="text-lg lg:text-xl font-extrabold text-white tracking-tight">
-                What caused it? (Evaluated Primary Hypothesis)
-              </h2>
-            </div>
 
-            {/* Dominant Root Cause Card */}
-            <div className="p-6 rounded-3xl bg-gradient-to-br from-[#151722] via-[#111219] to-[#0D0E14] border border-emerald-500/35 shadow-[0_4px_40px_rgba(16,185,129,0.09)] space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-2.5">
-                  <span className="px-3 py-1 rounded-xl bg-emerald-500/15 text-emerald-400 font-mono font-bold text-xs border border-emerald-500/30">
-                    {winnerId} WINNING HYPOTHESIS
-                  </span>
-                  <span className="text-xs text-neutral-400">
-                    Evaluated via deterministic challenge rules with 0 citation violations
-                  </span>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>03 · Governance & Safety Guardrail</span>
                 </div>
+                <h2 className="text-lg lg:text-xl font-extrabold text-white tracking-tight">
+                  {guardTitle}
+                </h2>
+              </div>
 
-                <div className="flex items-center gap-3 font-mono text-xs">
-                  <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/[0.08] flex items-center gap-2">
-                    <span className="text-neutral-400 text-[11px]">CONFIDENCE:</span>
-                    <span className="text-emerald-400 font-bold flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      {confidenceState} ({winningScored?.final_score?.toFixed(2) || "0.90"})
+              <div className="p-6 rounded-3xl bg-gradient-to-br from-[#1C1710] via-[#141210] to-[#0D0E14] border border-amber-500/35 shadow-md space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-3 py-1 rounded-xl bg-amber-500/15 text-amber-400 font-mono font-bold text-xs border border-amber-500/30">
+                      SAFETY GUARD ACTIVATED
+                    </span>
+                    <span className="text-xs text-neutral-400">
+                      Hypothesis synthesis suppressed to prevent spurious correlation & hallucination
                     </span>
                   </div>
 
-                  <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/[0.08] flex items-center gap-2">
-                    <span className="text-neutral-400 text-[11px]">WINNER GAP:</span>
-                    <span className="text-white font-bold">+{winnerGap.toFixed(2)}</span>
+                  <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/[0.08] flex items-center gap-2 font-mono text-xs">
+                    <span className="text-neutral-400 text-[11px]">STATUS:</span>
+                    <span className="text-amber-400 font-bold">ABSTAIN (GUARDRAIL)</span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/20 space-y-1.5">
+                  <div className="text-[11px] font-mono uppercase font-bold text-amber-400 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Guardrail Trigger Rationale:</span>
+                  </div>
+                  <p className="text-xs text-neutral-200 leading-relaxed font-sans">
+                    {decision.abstention_reason || "Deterministic safety guard prevented hypothesis formulation."}
+                  </p>
+                </div>
+
+                {/* Guard Diagnostic Audit Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs font-mono">
+                  <div className="p-3.5 rounded-xl bg-[#14151F] border border-white/[0.06] space-y-1">
+                    <span className="text-[10px] text-neutral-400 font-semibold block uppercase">Signals Evaluated</span>
+                    <div className="text-base font-bold text-white">{signals.length} Verified</div>
+                    <div className="text-[10px] text-emerald-400/90">Baseline Computed</div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-[#14151F] border border-white/[0.06] space-y-1">
+                    <span className="text-[10px] text-neutral-400 font-semibold block uppercase">Evidence Assembled</span>
+                    <div className="text-base font-bold text-amber-400">0 Items</div>
+                    <div className="text-[10px] text-neutral-400">Retrieval Suppressed</div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-[#14151F] border border-white/[0.06] space-y-1">
+                    <span className="text-[10px] text-neutral-400 font-semibold block uppercase">Hypotheses Evaluated</span>
+                    <div className="text-base font-bold text-amber-400">0 Candidates</div>
+                    <div className="text-[10px] text-neutral-400">Synthesis Halted</div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-[#14151F] border border-white/[0.06] space-y-1">
+                    <span className="text-[10px] text-neutral-400 font-semibold block uppercase">Operational Action</span>
+                    <div className="text-sm font-bold text-neutral-200 line-clamp-1">Hold Changes</div>
+                    <div className="text-[10px] text-emerald-400">Monitor Corridors</div>
                   </div>
                 </div>
               </div>
+            </section>
+          ) : isAmbiguousAbstain ? (
+            /* ── STATE B: AMBIGUOUS ABSTAIN (Hypotheses evaluated but conflicting) ── */
+            <section className="relative space-y-3">
+              <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-amber-400 flex items-center justify-center text-xs font-bold text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)]">
+                !
+              </div>
 
-              <p className="text-base font-bold text-white leading-relaxed">
-                "{cleanStatement}"
-              </p>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                  <Scale className="w-3.5 h-3.5" />
+                  <span>03 · Multi-Causal Conflict (Investigation Abstained)</span>
+                </div>
+                <h2 className="text-lg lg:text-xl font-extrabold text-white tracking-tight">
+                  No dominant root cause confirmed (Competing hypotheses insufficiently separated)
+                </h2>
+              </div>
 
-              {/* Supported Causal Trail Node Steps */}
-              <div className="pt-3 border-t border-white/[0.06] space-y-2">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider font-semibold">
-                  Empirically Supported Causal Sequence:
+              <div className="p-6 rounded-3xl bg-gradient-to-br from-[#1A1612] via-[#121118] to-[#0D0E14] border border-amber-500/35 shadow-md space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-3 py-1 rounded-xl bg-amber-500/15 text-amber-400 font-mono font-bold text-xs border border-amber-500/30">
+                      ABSTAINED — AMBIGUOUS SEPARATION
+                    </span>
+                    <span className="text-xs text-neutral-400">
+                      Winning margin (+{winnerGap.toFixed(2)}) is below required threshold (0.15)
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3 font-mono text-xs">
+                    <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/[0.08] flex items-center gap-2">
+                      <span className="text-neutral-400 text-[11px]">SCORE GAP:</span>
+                      <span className="text-amber-400 font-bold">+{winnerGap.toFixed(2)} (Req ≥ 0.15)</span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-xs font-mono">
-                  <div className="p-3 rounded-xl bg-[#171924] border border-blue-500/20 space-y-0.5">
-                    <span className="text-[10px] text-blue-400 font-bold block">01 · DEPLOY TRIGGER</span>
-                    <div className="text-white font-semibold">Checkout v4.3 Release</div>
-                    <div className="text-[10px] text-neutral-400">14:15 UTC [EV_v43_deployment]</div>
-                  </div>
+                <div className="p-4 rounded-2xl bg-black/40 border border-amber-500/20 space-y-1">
+                  <div className="text-[11px] font-mono uppercase font-bold text-amber-400">Primary Challenge Conclusion:</div>
+                  <p className="text-xs text-neutral-200 leading-relaxed font-sans">
+                    {decision.abstention_reason}
+                  </p>
+                </div>
 
-                  <div className="p-3 rounded-xl bg-[#171924] border border-amber-500/20 space-y-0.5">
-                    <span className="text-[10px] text-amber-400 font-bold block">02 · POOL SATURATION</span>
-                    <div className="text-white font-semibold">50/50 Saturated</div>
-                    <div className="text-[10px] text-neutral-400">14:18 UTC [EV_payment_pool]</div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-[#171924] border border-red-500/20 space-y-0.5">
-                    <span className="text-[10px] text-red-400 font-bold block">03 · TIMEOUT SPIKES</span>
-                    <div className="text-white font-semibold">Latency 612ms</div>
-                    <div className="text-[10px] text-neutral-400">42 Tickets [EV_checkout_tickets]</div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-[#171924] border border-emerald-500/20 space-y-0.5">
-                    <span className="text-[10px] text-emerald-400 font-bold block">04 · REVENUE IMPACT</span>
-                    <div className="text-white font-semibold">Conversion -44.7%</div>
-                    <div className="text-[10px] text-neutral-400">$41.2K Hourly Shock</div>
-                  </div>
+                {/* Competing Top Hypotheses Side-by-Side */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs">
+                  {sortedScores.slice(0, 2).map((sh, idx) => {
+                    const hypObj = hypotheses.find((h) => h.hypothesis_id === sh.hypothesis_id)
+                    return (
+                      <div key={sh.hypothesis_id} className="p-4 rounded-2xl bg-[#14151F] border border-white/[0.06] space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-white font-mono px-2 py-0.5 rounded bg-white/[0.06]">
+                            Candidate {idx + 1}: {sh.hypothesis_id}
+                          </span>
+                          <span className="font-mono font-bold text-amber-400 text-xs">
+                            Score: {sh.final_score.toFixed(2)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-neutral-200 leading-relaxed font-sans">
+                          "{hypObj?.statement}"
+                        </p>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
+          ) : (
+            /* ── STATE C: SUCCESS STATE (Single confirmed root cause) ── */
+            <section className="relative space-y-3">
+              <div className="absolute -left-[32px] lg:-left-[40px] top-1 w-6 h-6 rounded-full bg-[#08090C] border-2 border-emerald-400 flex items-center justify-center text-xs font-bold text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.6)]">
+                ●
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>03 · Central Root Cause Pivot</span>
+                </div>
+                <h2 className="text-lg lg:text-xl font-extrabold text-white tracking-tight">
+                  What caused it? (Evaluated Primary Hypothesis)
+                </h2>
+              </div>
+
+              <div className="p-6 rounded-3xl bg-gradient-to-br from-[#151722] via-[#111219] to-[#0D0E14] border border-emerald-500/35 shadow-[0_4px_40px_rgba(16,185,129,0.09)] space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-3 py-1 rounded-xl bg-emerald-500/15 text-emerald-400 font-mono font-bold text-xs border border-emerald-500/30">
+                      {winnerId} WINNING HYPOTHESIS
+                    </span>
+                    <span className="text-xs text-neutral-400">
+                      Evaluated via deterministic challenge rules with 0 citation violations
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3 font-mono text-xs">
+                    <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/[0.08] flex items-center gap-2">
+                      <span className="text-neutral-400 text-[11px]">CONFIDENCE:</span>
+                      <span className="text-emerald-400 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {confidenceState} ({winningScored?.final_score?.toFixed(2) || "0.90"})
+                      </span>
+                    </div>
+
+                    <div className="px-3 py-1.5 rounded-xl bg-black/40 border border-white/[0.08] flex items-center gap-2">
+                      <span className="text-neutral-400 text-[11px]">WINNER GAP:</span>
+                      <span className="text-white font-bold">+{winnerGap.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-base font-bold text-white leading-relaxed">
+                  "{cleanStatement}"
+                </p>
+
+                {/* Supported Causal Trail Node Steps */}
+                {activeCausalTrail.length > 0 && (
+                  <div className="pt-3 border-t border-white/[0.06] space-y-2">
+                    <div className="text-[11px] text-neutral-400 uppercase tracking-wider font-semibold">
+                      Empirically Supported Causal Sequence:
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-xs font-mono">
+                      {activeCausalTrail.map((node, idx) => (
+                        <div key={idx} className={`p-3 rounded-xl bg-[#171924] border ${node.color} space-y-0.5`}>
+                          <span className="text-[10px] font-bold block">{node.step}</span>
+                          <div className="text-white font-semibold">{node.title}</div>
+                          <div className="text-[10px] text-neutral-400">{node.subtitle}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 4: SUPPORTING EVIDENCE (RESPONSIVE GRID)                     */}
+          {/* STEP 4: SUPPORTING EVIDENCE (Only if evidence exists)             */}
           {/* ═════════════════════════════════════════════════════════════════ */}
-          <section className="relative space-y-3">
-            <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
-              →
-            </div>
+          {evidence.length > 0 && (
+            <section className="relative space-y-3">
+              <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
+                →
+              </div>
 
-            <div>
-              <div className="text-xs font-medium text-neutral-400">04 · Empirical Evidence Foundation</div>
-              <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
-                What evidence supports {winnerId}?
-              </h2>
-            </div>
+              <div>
+                <div className="text-xs font-medium text-neutral-400">04 · Empirical Evidence Foundation</div>
+                <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
+                  {isAmbiguousAbstain ? "What evidence was assembled for competing hypotheses?" : `What evidence supports ${winnerId}?`}
+                </h2>
+              </div>
 
-            {/* Responsive Evidence Layout based on count */}
-            {evidence.length > 0 ? (
               <div className={`grid gap-3.5 ${
                 evidence.length === 1 
                   ? "grid-cols-1" 
@@ -719,107 +924,107 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   )
                 })}
               </div>
-            ) : (
-              <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] text-center text-xs text-neutral-400">
-                Evidence assembly was suppressed under data-quality verification guardrails.
-              </div>
-            )}
-          </section>
+            </section>
+          )}
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 5: WHY DID H1 WIN? (FALSIFICATION AUDIT)                     */}
+          {/* STEP 5: FALSIFICATION AUDIT (Only if hypotheses were scored)     */}
           {/* ═════════════════════════════════════════════════════════════════ */}
-          <section className="relative space-y-3">
-            <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
-              →
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-medium text-neutral-400">05 · Falsification Audit</div>
-                <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
-                  Why did {winnerId} win and alternatives lose?
-                </h2>
+          {scored.length > 0 && (
+            <section className="relative space-y-3">
+              <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
+                →
               </div>
-              <div className="text-xs font-mono text-neutral-400">Winner Separation: <strong className="text-emerald-400">+{winnerGap.toFixed(2)}</strong></div>
-            </div>
 
-            <div className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-3">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-mono">
-                  <thead>
-                    <tr className="text-neutral-400 border-b border-white/[0.06] text-[11px]">
-                      <th className="pb-2 px-3">Hypothesis Candidate</th>
-                      <th className="pb-2 px-3 text-center">Support</th>
-                      <th className="pb-2 px-3 text-center">Contradiction</th>
-                      <th className="pb-2 px-3 text-center">Final Score</th>
-                      <th className="pb-2 px-3 text-center">Timeline</th>
-                      <th className="pb-2 px-3 text-center">Mechanism</th>
-                      <th className="pb-2 px-3 text-center">Verdict</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.04]">
-                    {scored.map((sh) => {
-                      const isWin = sh.hypothesis_id === winnerId && !isAbstained
-                      const hypObj = hypotheses.find((h) => h.hypothesis_id === sh.hypothesis_id)
-                      const ruleMap = new Map(sh.rule_results?.map((r) => [r.rule_name, r]))
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-medium text-neutral-400">05 · Falsification Audit</div>
+                  <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
+                    {isAmbiguousAbstain ? "Why were candidates rejected for decisive isolation?" : `Why did ${winnerId} win and alternatives lose?`}
+                  </h2>
+                </div>
+                <div className="text-xs font-mono text-neutral-400">
+                  Separation Margin: <strong className={isAmbiguousAbstain ? "text-amber-400" : "text-emerald-400"}>+{winnerGap.toFixed(2)}</strong>
+                </div>
+              </div>
 
-                      const timeline = ruleMap.get("timeline")?.verdict || "pass"
-                      const mechanism = ruleMap.get("mechanism_consistency")?.verdict || (sh.hypothesis_id === "H3" ? "fail" : "pass")
-                      const contradiction = ruleMap.get("contradiction")?.verdict || (sh.hypothesis_id === "H2" ? "fail" : "pass")
+              <div className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] space-y-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="text-neutral-400 border-b border-white/[0.06] text-[11px]">
+                        <th className="pb-2 px-3">Hypothesis Candidate</th>
+                        <th className="pb-2 px-3 text-center">Support</th>
+                        <th className="pb-2 px-3 text-center">Contradiction</th>
+                        <th className="pb-2 px-3 text-center">Final Score</th>
+                        <th className="pb-2 px-3 text-center">Timeline</th>
+                        <th className="pb-2 px-3 text-center">Mechanism</th>
+                        <th className="pb-2 px-3 text-center">Verdict</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {scored.map((sh) => {
+                        const isWin = sh.hypothesis_id === winnerId && !isAbstained
+                        const hypObj = hypotheses.find((h) => h.hypothesis_id === sh.hypothesis_id)
+                        const ruleMap = new Map(sh.rule_results?.map((r) => [r.rule_name, r]))
 
-                      return (
-                        <tr key={sh.hypothesis_id} className={`hover:bg-white/[0.02] transition-colors ${isWin ? "bg-emerald-500/[0.03]" : ""}`}>
-                          <td className="py-2.5 px-3">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-white px-2 py-0.5 rounded bg-white/[0.06]">{sh.hypothesis_id}</span>
-                              <span className="text-neutral-200 font-sans font-medium line-clamp-1 max-w-sm">
-                                {hypObj?.statement || "Alternative causal explanation"}
-                              </span>
-                              {isWin && (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                  WINNER
+                        const timeline = ruleMap.get("timeline")?.verdict || "pass"
+                        const mechanism = ruleMap.get("mechanism_consistency")?.verdict || "pass"
+                        const contradiction = ruleMap.get("contradiction")?.verdict || "pass"
+
+                        return (
+                          <tr key={sh.hypothesis_id} className={`hover:bg-white/[0.02] transition-colors ${isWin ? "bg-emerald-500/[0.03]" : ""}`}>
+                            <td className="py-2.5 px-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white px-2 py-0.5 rounded bg-white/[0.06]">{sh.hypothesis_id}</span>
+                                <span className="text-neutral-200 font-sans font-medium line-clamp-1 max-w-sm">
+                                  {hypObj?.statement || "Alternative causal explanation"}
                                 </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3 text-center text-emerald-400 font-semibold">+{sh.support_score.toFixed(2)}</td>
-                          <td className="py-2.5 px-3 text-center text-red-400 font-semibold">-{sh.contradiction_penalty.toFixed(2)}</td>
-                          <td className="py-2.5 px-3 text-center text-white font-bold">{sh.final_score.toFixed(2)}</td>
-                          <td className="py-2.5 px-3 text-center">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                              timeline === "pass" ? "text-emerald-400" : "text-amber-400"
-                            }`}>
-                              {timeline.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-center">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                              mechanism === "pass" ? "text-emerald-400" : "text-red-400"
-                            }`}>
-                              {mechanism.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-center">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                              contradiction === "pass" ? "text-emerald-400" : "text-red-400"
-                            }`}>
-                              {contradiction === "pass" ? "CLEARED" : "CONTRADICTED"}
-                            </span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                                {isWin && (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    WINNER
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-center text-emerald-400 font-semibold">+{sh.support_score.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-center text-red-400 font-semibold">-{sh.contradiction_penalty.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-center text-white font-bold">{sh.final_score.toFixed(2)}</td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                timeline === "pass" ? "text-emerald-400" : "text-amber-400"
+                              }`}>
+                                {timeline.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                mechanism === "pass" ? "text-emerald-400" : "text-red-400"
+                              }`}>
+                                {mechanism.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                contradiction === "pass" ? "text-emerald-400" : "text-red-400"
+                              }`}>
+                                {contradiction === "pass" ? "CLEARED" : "CONTRADICTED"}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
 
 
           {/* ═════════════════════════════════════════════════════════════════ */}
-          {/* STEP 6: WHAT SHOULD WE DO & EXPECTED IMPACT?                      */}
+          {/* STEP 6: WHAT SHOULD WE DO & NEXT STEPS                            */}
           {/* ═════════════════════════════════════════════════════════════════ */}
           <section className="relative space-y-3">
             <div className="absolute -left-[30px] lg:-left-[38px] top-1 w-5 h-5 rounded-full bg-[#08090C] border border-white/20 flex items-center justify-center text-[10px] text-neutral-400 font-bold">
@@ -827,20 +1032,24 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
             </div>
 
             <div>
-              <div className="text-xs font-medium text-neutral-400">06 · Prescribed Resolution & Impact</div>
+              <div className="text-xs font-medium text-neutral-400">06 · Prescribed Resolution & Operational Next Steps</div>
               <h2 className="text-base lg:text-lg font-bold text-white tracking-tight">
-                What action must be taken and what is the expected recovery?
+                {isGuardTriggered ? "Recommended next steps & monitoring protocol" : "What action must be taken and what is the expected recovery?"}
               </h2>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
               
-              {/* Prescribed Resolution (6-Col) */}
-              <div className="lg:col-span-6 p-5 rounded-2xl bg-gradient-to-br from-emerald-950/30 via-[#101117] to-[#0D0E14] border border-emerald-500/30 shadow-md flex flex-col justify-between space-y-3.5">
+              {/* Prescribed Resolution (6-Col or 12-Col if Guard) */}
+              <div className={`${isSuccess ? "lg:col-span-6" : "lg:col-span-12"} p-5 rounded-2xl bg-gradient-to-br from-emerald-950/20 via-[#101117] to-[#0D0E14] border ${
+                isAbstained ? "border-amber-500/30" : "border-emerald-500/30"
+              } shadow-md flex flex-col justify-between space-y-3.5`}>
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs uppercase tracking-wide">
+                  <div className={`flex items-center gap-2 font-semibold text-xs uppercase tracking-wide ${
+                    isAbstained ? "text-amber-400" : "text-emerald-400"
+                  }`}>
                     <ShieldCheck className="w-4 h-4" />
-                    <span>Prescribed Operational Action</span>
+                    <span>{isAbstained ? "Prescribed Governance Protocol" : "Prescribed Operational Action"}</span>
                   </div>
 
                   <h3 className="text-base font-bold text-white leading-snug">
@@ -848,60 +1057,61 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                   </h3>
                 </div>
 
-                <div className="space-y-2 pt-2.5 border-t border-emerald-500/20 text-xs">
-                  <div className="p-3 rounded-xl bg-black/40 border border-emerald-500/15 space-y-0.5">
-                    <span className="text-[10px] text-emerald-400 font-semibold block uppercase">Verification Condition</span>
+                <div className="space-y-2 pt-2.5 border-t border-white/[0.08] text-xs">
+                  <div className="p-3 rounded-xl bg-black/40 border border-white/[0.06] space-y-0.5">
+                    <span className="text-[10px] text-neutral-400 font-semibold block uppercase">Protocol Objective</span>
                     <span className="text-neutral-200 text-xs">
-                      {decision.verification_metric || "Ensure p95 gateway latency drops < 200 ms within 5m post-rollback."}
+                      {decision.verification_metric || (
+                        isGuardTriggered 
+                          ? "Accumulate baseline telemetry and re-evaluate once observation criteria are satisfied."
+                          : "Verify metric stabilization within expected operational threshold."
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Simulation Trajectory (6-Col E8 Simulation — Only if Success) */}
+              {isSuccess && (
+                <div className="lg:col-span-6 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-1">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-white">
+                          Simulated Recovery Trajectory
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-white/[0.06] text-neutral-300 border border-white/[0.08]">
+                          SIMULATED
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-neutral-400">
+                        Expected metric rebound (+{recoveryPct.toFixed(0)}% recovery within 5m)
+                      </p>
+                    </div>
+
+                    <span className="text-xl font-bold font-mono text-emerald-400">
+                      +{recoveryPct.toFixed(0)}%
                     </span>
                   </div>
 
-                  <div className="flex justify-between text-neutral-400 text-[11px] pt-0.5">
-                    <span>Target Metric: <strong className="text-white">{outcome.projected_metric || "gateway_latency"}</strong></span>
-                    <span>Rollback Window: <strong className="text-emerald-400">&lt; 3 mins</strong></span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Simulation Trajectory (6-Col E8 Simulation) */}
-              <div className="lg:col-span-6 p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] flex flex-col justify-between">
-                <div className="flex items-center justify-between mb-1">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-white">
-                        Simulated Recovery Trajectory
-                      </span>
-                      <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-white/[0.06] text-neutral-300 border border-white/[0.08]">
-                        SIMULATED
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-neutral-400">
-                      Expected metric rebound (+{recoveryPct.toFixed(0)}% recovery within 5m)
-                    </p>
+                  <div className="w-full h-[150px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={simChartData} margin={{ top: 8, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                        <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fill: "#737373", fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: "#737373", fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                        <Tooltip contentStyle={{ backgroundColor: "#14151E", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", color: "#fff", fontSize: "11px" }} />
+                        <Line type="monotone" dataKey="actual" stroke="#ef4444" strokeWidth={2} dot={{ r: 2.5, fill: "#ef4444" }} name="Observed Shock" />
+                        <Line type="monotone" dataKey="projected" stroke="#38bdf8" strokeWidth={2} strokeDasharray="3 3" dot={{ r: 2.5, fill: "#38bdf8" }} name="Simulated Rebound" />
+                      </ComposedChart>
+                    </ResponsiveContainer>
                   </div>
 
-                  <span className="text-xl font-bold font-mono text-emerald-400">
-                    +{recoveryPct.toFixed(0)}%
-                  </span>
+                  <div className="pt-2 border-t border-white/[0.05] text-[10px] text-neutral-400 leading-relaxed">
+                    {outcome.disclaimer || "Model-generated recovery projection based on historical deploy rollback rebound curves — not empirical evidence."}
+                  </div>
                 </div>
-
-                <div className="w-full h-[150px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={simChartData} margin={{ top: 8, right: 10, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                      <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fill: "#737373", fontSize: 10, fontFamily: "JetBrains Mono" }} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fill: "#737373", fontSize: 10, fontFamily: "JetBrains Mono" }} />
-                      <Tooltip contentStyle={{ backgroundColor: "#14151E", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", color: "#fff", fontSize: "11px" }} />
-                      <Line type="monotone" dataKey="actual" stroke="#ef4444" strokeWidth={2} dot={{ r: 2.5, fill: "#ef4444" }} name="Observed Shock" />
-                      <Line type="monotone" dataKey="projected" stroke="#38bdf8" strokeWidth={2} strokeDasharray="3 3" dot={{ r: 2.5, fill: "#38bdf8" }} name="Simulated Rebound" />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="pt-2 border-t border-white/[0.05] text-[10px] text-neutral-400 leading-relaxed">
-                  {outcome.disclaimer || "Model-generated recovery projection based on historical deploy rollback rebound curves — not empirical evidence."}
-                </div>
-              </div>
+              )}
             </div>
           </section>
 
@@ -953,8 +1163,8 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
                 ))}
               </div>
             ) : (
-              <div className="p-5 rounded-2xl bg-[#0E0F15] border border-white/[0.06] text-center text-xs text-neutral-400 font-mono">
-                No matching prior precedents found in vector memory for this anomaly pattern.
+              <div className="p-4 rounded-2xl bg-[#0E0F15] border border-white/[0.06] text-center text-xs text-neutral-400 font-mono">
+                No matching prior precedents found in vector memory for this pattern.
               </div>
             )}
           </section>
