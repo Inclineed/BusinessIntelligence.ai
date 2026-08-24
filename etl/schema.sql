@@ -147,17 +147,28 @@ CREATE INDEX IF NOT EXISTS idx_deployment_log_ts       ON deployment_log (ts);
 
 -- ---------------------------------------------------------------------------
 -- Feedback
--- Analyst / manager feedback on an investigation result (for memory / RLHF loop).
--- content clamped to 1–5000 chars.
+-- Analyst / manager feedback on an investigation result (for validation & learning loop).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS feedback (
-    feedback_id      SERIAL          PRIMARY KEY,
-    investigation_id VARCHAR(100)    NOT NULL,
-    content          TEXT            NOT NULL CHECK (length(content) BETWEEN 1 AND 5000),
-    received_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+    feedback_id                 SERIAL          PRIMARY KEY,
+    investigation_id            VARCHAR(100)    NOT NULL,
+    scenario_id                 VARCHAR(100),
+    persona                     VARCHAR(50)     DEFAULT 'analyst',
+    verdict                     VARCHAR(30)     NOT NULL DEFAULT 'CORRECT',
+    corrected_hypothesis_id     VARCHAR(50),
+    corrected_confidence_state  VARCHAR(30),
+    corrected_action            TEXT,
+    evidence_grounding_correct  BOOLEAN         DEFAULT TRUE,
+    analyst_notes               TEXT,
+    content                     TEXT            CHECK (content IS NULL OR length(content) BETWEEN 1 AND 5000),
+    validated_precedent         BOOLEAN         DEFAULT FALSE,
+    validation_precedent_id     VARCHAR(100),
+    received_at                 TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_feedback_investigation ON feedback (investigation_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_scenario      ON feedback (scenario_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_verdict       ON feedback (verdict);
 
 -- ---------------------------------------------------------------------------
 -- Investigations

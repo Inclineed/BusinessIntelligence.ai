@@ -402,3 +402,36 @@ class InvestigationResult:
     precedents: list[Any] = field(default_factory=list)
     telemetry: Telemetry = field(default_factory=Telemetry)
     method_ownership: dict[str, list[MethodTag]] = field(default_factory=dict)
+
+
+class FeedbackVerdict(str, Enum):
+    CORRECT = "CORRECT"                      # Root cause, confidence, and action fully verified
+    INCORRECT = "INCORRECT"                  # Root cause or mechanism is erroneous
+    PARTIALLY_CORRECT = "PARTIALLY_CORRECT"  # Mechanism plausible but action/confidence requires adjustment
+    UNSURE = "UNSURE"                        # Insufficient domain context to confirm or refute
+
+
+@dataclass
+class StructuredFeedbackSubmission:
+    """Input submission payload for analyst/user feedback on an investigation."""
+
+    investigation_id: str
+    scenario_id: str
+    verdict: FeedbackVerdict
+    persona: str = "analyst"
+    corrected_hypothesis_id: Optional[str] = None
+    corrected_confidence_state: Optional[str] = None
+    corrected_action: Optional[str] = None
+    evidence_grounding_correct: Optional[bool] = None
+    analyst_notes: Optional[str] = None
+
+
+@dataclass
+class StructuredFeedbackRecord(StructuredFeedbackSubmission):
+    """Persisted feedback record with database metadata and validation state."""
+
+    feedback_id: int = 0
+    received_at: str = ""
+    validated_precedent: bool = False
+    validation_precedent_id: Optional[str] = None
+
