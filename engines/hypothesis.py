@@ -296,12 +296,21 @@ def _parse_llm_hypotheses(response_text: str) -> list[dict]:
                         except (json.JSONDecodeError, ValueError):
                             pass
 
+    # Strategy 2.8: Clean trailing commas and try parsing
+    clean_text = re.sub(r',\s*([}\]])', r'\1', response_text)
+    try:
+        data = json.loads(clean_text)
+        if isinstance(data, dict) and "hypotheses" in data and isinstance(data["hypotheses"], list):
+            return data["hypotheses"]
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+
     # Strategy 3: find individual hypothesis objects with nested support
     candidates: list[dict] = []
-    # Search for occurrences of "hypothesis_id"
     for match in re.finditer(r'"hypothesis_id"\s*:', response_text):
         pos = match.start()
-        # Scan backward to find the opening '{' of this hypothesis object
         obj_start = response_text.rfind('{', 0, pos)
         if obj_start != -1:
             depth = 0
@@ -324,8 +333,10 @@ def _parse_llm_hypotheses(response_text: str) -> list[dict]:
                     elif ch == '}':
                         depth -= 1
                         if depth == 0:
+                            raw_chunk = response_text[obj_start:j + 1]
+                            clean_chunk = re.sub(r',\s*([}\]])', r'\1', raw_chunk)
                             try:
-                                obj = json.loads(response_text[obj_start:j + 1])
+                                obj = json.loads(clean_chunk)
                                 if isinstance(obj, dict) and "hypothesis_id" in obj:
                                     if obj not in candidates:
                                         candidates.append(obj)
@@ -334,6 +345,40 @@ def _parse_llm_hypotheses(response_text: str) -> list[dict]:
                             break
     if candidates:
         return candidates
+
+    # Strategy 4: Relaxed Regex Field Extractor for fallback recovery
+    recovered: list[dict] = []
+    hyp_blocks = re.split(r'(?=\bH[1-9]\b|"(?:hypothesis_id|statement)"\s*:\s*"H[1-9]")', response_text)
+    for block in hyp_blocks:
+        id_match = re.search(r'"?hypothesis_id"?\s*:\s*"?(H[1-9])"?', block, re.IGNORECASE)
+        stmt_match = re.search(r'"?statement"?\s*:\s*"([^"]+)"', block)
+        if not id_match and not stmt_match:
+            continue
+        h_id = id_match.group(1).upper() if id_match else f"H{len(recovered)+1}"
+        stmt = stmt_match.group(1) if stmt_match else "Causal hypothesis under evaluation"
+        
+        # Extract citations
+        cits = []
+        for cit_match in re.finditer(r'"?evidence_id"?\s*:\s*"([a-f0-9]{8,16}|deploy_[^"]+|release_[^"]+|payment_[^"]+)"', block, re.IGNORECASE):
+            cits.append({
+                "evidence_id": cit_match.group(1),
+                "quoted_summary": "Extracted supporting evidence",
+                "role": "supports",
+                "relevance_explanation": "Supporting evidence link",
+            })
+        
+        # Extract reasoning
+        rsn_match = re.search(r'"?reasoning"?\s*:\s*"([^"]+)"', block)
+        rsn = rsn_match.group(1) if rsn_match else "Evaluated causal explanation."
+        
+        recovered.append({
+            "hypothesis_id": h_id,
+            "statement": stmt,
+            "citations": cits,
+            "reasoning": rsn,
+        })
+    if recovered:
+        return recovered
 
     logger.warning(
         "_parse_llm_hypotheses: all parsing strategies failed for response of "

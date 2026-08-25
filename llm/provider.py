@@ -423,6 +423,8 @@ class GroqProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": actual_max_tokens,
         }
+        if format_json and not is_reasoning_model:
+            payload["response_format"] = {"type": "json_object"}
         if is_reasoning_model:
             payload["reasoning_format"] = "parsed"
 
