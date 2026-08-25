@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 scratch/
+temp_docs/
 
 # C extensions
 *.so
