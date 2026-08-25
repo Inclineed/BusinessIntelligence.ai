@@ -174,10 +174,9 @@ def _build_user_prompt(
     output_instructions = (
         "Generate EXACTLY 3 hypotheses that explain the KPI movement. "
         "For the INC_001 checkout/payment scenario, consider:\n"
-        "  H1: A checkout or payment system degradation (payment failures, "
-        "gateway latency, recent deployment)\n"
+        "  H1: A checkout or payment system degradation (cite BOTH the recent deployment changelog and the payment gateway telemetry as 'supports')\n"
         "  H2: External competitive pressure (competitor promotions, pricing changes)\n"
-        "  H3: Inventory shortage reducing available products\n\n"
+        "  H3: Inventory shortage reducing available products (cite inventory evidence)\n\n"
         "You MUST output ONLY valid JSON matching this exact schema — no prose before or after:\n"
         "{\n"
         '  "hypotheses": [\n'
