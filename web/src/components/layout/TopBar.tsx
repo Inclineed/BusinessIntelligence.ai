@@ -22,11 +22,14 @@ interface TopBarProps {
   isLiveLoading: boolean
   liveElapsedSeconds: number
   telemetry?: TelemetryData
+  confidenceScore?: number
+  isAbstained?: boolean
   onConfigChange: (scenarioId: string, persona: PersonaType, region: string) => void
   onSelectStageNum: (stageNum: number) => void
   onRunLive: () => void
   onOpenTelemetry: () => void
   onOpenHealth: () => void
+  onOpenActionDrawer?: () => void
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -38,11 +41,14 @@ export const TopBar: React.FC<TopBarProps> = ({
   isLiveLoading,
   liveElapsedSeconds,
   telemetry,
+  confidenceScore,
+  isAbstained,
   onConfigChange,
   onSelectStageNum,
   onRunLive,
   onOpenTelemetry,
   onOpenHealth,
+  onOpenActionDrawer,
 }) => {
   const [scenarioDropdownOpen, setScenarioDropdownOpen] = useState(false)
   const currentScenario = SCENARIO_CATALOG.find((s) => s.id === activeScenarioId) || SCENARIO_CATALOG[0]
@@ -138,69 +144,31 @@ export const TopBar: React.FC<TopBarProps> = ({
           ))}
         </nav>
 
-        {/* Right Controls: Persona, Telemetry, Health, Run */}
-        <div className="flex items-center gap-2">
-          
-          {/* Persona Segmented Switch */}
-          <div className="flex items-center p-0.5 rounded-lg bg-[#222222] border border-[#333333]">
-            {(["analyst", "cfo", "manager"] as PersonaType[]).map((p) => {
-              const isActive = activePersona === p
-              return (
-                <button
-                  key={p}
-                  onClick={() => onConfigChange(activeScenarioId, p, activeRegion)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-mono capitalize transition-all cursor-pointer ${
-                    isActive
-                      ? "bg-[#6B9BB0]/30 text-[#F4EEE0] font-bold border border-[#6B9BB0]/50"
-                      : "text-[#9E9788] hover:text-[#D1C9B8]"
-                  }`}
-                  aria-pressed={isActive}
-                >
-                  {p}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Region Input (Manager Scope) */}
-          {activePersona === "manager" && (
-            <div className="flex items-center gap-1 bg-[#222222] border border-[#333333] px-2 py-0.5 rounded-lg text-xs font-mono">
-              <Globe className="w-3 h-3 text-[#9E9788]" />
-              <input
-                type="text"
-                value={activeRegion === "all" ? "us-east" : activeRegion}
-                onChange={(e) => onConfigChange(activeScenarioId, activePersona, e.target.value)}
-                placeholder="region"
-                className="w-14 bg-transparent text-[#F4EEE0] focus:outline-none text-[11px]"
-              />
-            </div>
+        {/* Right Controls: Action Directive & Run Investigation */}
+        <div className="flex items-center gap-2.5">
+          {/* Action Directive & Assessment Drawer Trigger */}
+          {onOpenActionDrawer && (
+            <button
+              onClick={onOpenActionDrawer}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all border cursor-pointer ${
+                isAbstained
+                  ? "bg-[#D8453A]/20 hover:bg-[#D8453A]/30 text-[#E56B62] border-[#D8453A]/40"
+                  : "bg-[#6B9BB0]/20 hover:bg-[#6B9BB0]/30 text-[#F4EEE0] border-[#6B9BB0]/40"
+              }`}
+              title="Open System Assessment & Action Directive Drawer"
+            >
+              <Zap className="w-3.5 h-3.5 text-[#6B9BB0]" />
+              <span>
+                {isAbstained ? "ABSTAIN" : `${confidenceScore ?? 85}% ACTION`}
+              </span>
+            </button>
           )}
-
-          {/* Runtime Telemetry Chip */}
-          <button
-            onClick={onOpenTelemetry}
-            className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[#222222] hover:bg-[#2A2A2A] border border-[#333333] text-[11px] font-mono text-[#D1C9B8] transition-all cursor-pointer"
-            title="Open System Performance & Cost Drawer"
-          >
-            <Cpu className="w-3 h-3 text-[#6B9BB0]" />
-            <span>{formatLatency(totalEngineLatency)}</span>
-          </button>
-
-          {/* System Health Button */}
-          <button
-            onClick={onOpenHealth}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[#222222] hover:bg-[#2A2A2A] border border-[#333333] text-[11px] font-mono text-[#4E8569] transition-all cursor-pointer"
-            title="Open Continuous Drift & Reliability Modal"
-          >
-            <Activity className="w-3 h-3" />
-            <span className="hidden lg:inline">HEALTH</span>
-          </button>
 
           {/* Primary Action Button */}
           <button
             onClick={onRunLive}
             disabled={isLiveLoading}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold font-mono transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold font-mono transition-all cursor-pointer ${
               isLiveLoading
                 ? "bg-[#252525] border border-[#444444] text-[#D1C9B8] cursor-wait"
                 : isStale
@@ -208,10 +176,9 @@ export const TopBar: React.FC<TopBarProps> = ({
                 : "bg-[#6B9BB0]/20 hover:bg-[#6B9BB0]/35 text-[#F4EEE0] border border-[#6B9BB0]/40"
             }`}
           >
-            <Play className={`w-3 h-3 ${isLiveLoading ? 'animate-spin' : ''}`} />
+            <Play className={`w-3.5 h-3.5 ${isLiveLoading ? 'animate-spin' : ''}`} />
             <span>{isLiveLoading ? `${liveElapsedSeconds.toFixed(1)}s` : isStale ? "UPDATE" : "RUN"}</span>
           </button>
-
         </div>
       </div>
     </header>

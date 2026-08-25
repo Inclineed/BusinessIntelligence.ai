@@ -59,6 +59,9 @@ coverage.xml
 *.env
 *.pem
 *.key
+.agents/mcp_config.json
+.mcp.json
+web/.mcp.json
 
 # Virtual Environments
 venv/
