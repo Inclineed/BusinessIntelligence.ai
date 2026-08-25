@@ -69,7 +69,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     { label: "Investigate", targetStage: 4, activeIf: currentStageNum === 4 || currentStageNum === 5 },
     { label: "Validate", targetStage: 6, activeIf: currentStageNum === 6 || currentStageNum === 7 },
     { label: "Project", targetStage: 8, activeIf: currentStageNum === 8 },
-    { label: "Resolution / Act", targetStage: 9, activeIf: currentStageNum === 9 },
+    { label: "Resolve", targetStage: 9, activeIf: currentStageNum === 9 },
   ]
 
   return (

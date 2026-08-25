@@ -231,23 +231,14 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
   return (
     <aside className="w-72 lg:w-80 bg-[#181818] flex flex-col border-r border-[#2E2E2E] shrink-0 z-30 overflow-y-auto custom-scrollbar transition-all duration-300">
       {/* Sticky Header with Collapse Toggle */}
-      <div className="p-4 border-b border-[#2E2E2E] flex justify-between items-center sticky top-0 bg-[#181818]/95 backdrop-blur-md z-10">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[11px] font-bold text-[#9E9788] uppercase tracking-wider">
-            OBSERVE &amp; DETECT
-          </span>
-          <div className="flex items-center gap-1.5 ml-1">
-            <span className="w-2 h-2 rounded-full bg-[#6B9BB0] shadow-[0_0_6px_rgba(107,155,176,0.6)]" />
-            <span className="text-[10px] font-mono text-[#6B9BB0] font-bold">ACTIVE</span>
-          </div>
-        </div>
-
+      <div className="px-4 py-2.5 border-b border-[#2E2E2E] flex justify-end items-center sticky top-0 bg-[#181818]/95 backdrop-blur-md z-10">
         <button
           onClick={onToggleCollapse}
           title="Collapse Sidebar (~56px Rail)"
-          className="p-1 rounded-lg hover:bg-[#2A2A2A] text-[#9E9788] hover:text-[#F4EEE0] transition-colors cursor-pointer"
+          className="p-1 rounded-lg hover:bg-[#2A2A2A] text-[#9E9788] hover:text-[#F4EEE0] transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-mono"
         >
           <ChevronLeft className="w-4 h-4" />
+          <span>Collapse</span>
         </button>
       </div>
 

@@ -18,7 +18,7 @@ export const ENGINE_STAGES: EngineStageMeta[] = [
   { id: "e6", num: 6, label: "E6", name: "Rule Challenge", method: "RULES", tabCategory: "Validate" },
   { id: "e7", num: 7, label: "E7", name: "Decision Formulation", method: "LLM", tabCategory: "Validate" },
   { id: "e8", num: 8, label: "E8", name: "Projected Outcome", method: "SIMULATED", tabCategory: "Project" },
-  { id: "e9", num: 9, label: "E9", name: "Institutional Memory", method: "RETRIEVAL", tabCategory: "Resolution / Act" },
+  { id: "e9", num: 9, label: "E9", name: "Institutional Memory", method: "RETRIEVAL", tabCategory: "Resolve" },
 ]
 
 interface EngineSpineProps {

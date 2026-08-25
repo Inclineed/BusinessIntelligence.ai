@@ -25,7 +25,6 @@ describe("LeftObservePanel", () => {
       />
     )
 
-    expect(screen.getByText("OBSERVE & DETECT")).toBeInTheDocument()
     expect(screen.getByText("INC_001")).toBeInTheDocument()
     expect(screen.getByTitle("Collapse Sidebar (~56px Rail)")).toBeInTheDocument()
 
