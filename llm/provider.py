@@ -215,7 +215,7 @@ class OllamaProvider(LLMProvider):
         payload: dict = {"model": model, "input": texts}
 
         try:
-            response = httpx.post(url, json=payload, timeout=0.5)
+            response = httpx.post(url, json=payload, timeout=5.0)
             response.raise_for_status()
             data = response.json()
             return data["embeddings"]
