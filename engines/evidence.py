@@ -491,45 +491,43 @@ def _assemble_unstructured(
     else:
         where_filter = {"source": {"$in": auth_list}}
 
-    # Embed the query with Ollama bge-m3 so the vector dimension (1024) matches
-    # the collection. Passing query_texts would make ChromaDB embed with its
-    # default 384-dim model, causing a dimension mismatch.
+    # Embed the query with bge-m3 so the vector dimension (1024) matches the collection.
+    query_embedding = None
     try:
-        from llm.provider import OllamaProvider
-        _base = getattr(provider, "_base_url", "http://localhost:11434") if provider else "http://localhost:11434"
-        _embedder = OllamaProvider(base_url=_base)
-        query_embedding = _embedder.embed([query_text], model="bge-m3")[0]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("_assemble_unstructured: query embedding failed: %s", exc)
-        return items, dropped
-
-    try:
-        count = collection.count()
-        if isinstance(count, int):
-            if count == 0:
-                return items, dropped
-            n_results = min(5, count)
+        if hasattr(provider, "embed"):
+            query_embedding = provider.embed([query_text], model="bge-m3")[0]
         else:
-            n_results = 5
-    except Exception:
-        n_results = 5
+            from llm.provider import OllamaProvider
+            _embedder = OllamaProvider(base_url="http://localhost:11434")
+            query_embedding = _embedder.embed([query_text], model="bge-m3")[0]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("_assemble_unstructured: query embedding failed (%s) — falling back to metadata get.", exc)
+        query_embedding = None
 
     results = None
-    for k in range(n_results, 0, -1):
+    if query_embedding is not None:
         try:
-            results = collection.query(
-                query_embeddings=[query_embedding],
-                n_results=k,
-                where=where_filter,
-                include=["documents", "metadatas", "distances"],
-            )
-            break
-        except Exception:
-            continue
+            count = collection.count()
+            if isinstance(count, int) and count == 0:
+                return items, dropped
+            n_results = min(5, count) if isinstance(count, int) else 5
+            for k in range(n_results, 0, -1):
+                try:
+                    results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=k,
+                        where=where_filter,
+                        include=["documents", "metadatas", "distances"],
+                    )
+                    break
+                except Exception:
+                    continue
+        except Exception as exc:
+            logger.warning("_assemble_unstructured: vector query failed: %s", exc)
 
-    if results is None:
+    if results is None or not results.get("ids") or not results["ids"][0]:
         try:
-            get_res = collection.get(where=where_filter, limit=n_results, include=["documents", "metadatas"])
+            get_res = collection.get(where=where_filter, limit=5, include=["documents", "metadatas"])
             if get_res and get_res.get("ids"):
                 results = {
                     "ids": [get_res["ids"]],
@@ -540,7 +538,7 @@ def _assemble_unstructured(
         except Exception as exc:  # noqa: BLE001
             logger.warning("_assemble_unstructured: ChromaDB query fallback failed: %s", exc)
 
-    if not results:
+    if not results or not results.get("ids") or not results["ids"][0]:
         return items, dropped
 
     documents = results.get("documents", [[]])[0]

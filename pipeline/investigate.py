@@ -55,6 +55,18 @@ from llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+def safe_print(*args, **kwargs):
+    try:
+        import sys
+        msg = " ".join(str(a) for a in args)
+        if sys.platform == "win32":
+            # Sanitize Unicode special dashes/quotes into standard ASCII
+            msg = msg.replace("\u2011", "-").replace("\u2013", "-").replace("\u2014", "--").replace("\u2022", "*")
+            msg = msg.encode("ascii", errors="replace").decode("ascii")
+        print(msg, **kwargs)
+    except Exception:
+        pass
+
 # ---------------------------------------------------------------------------
 # Supported personas
 # ---------------------------------------------------------------------------
@@ -322,8 +334,8 @@ def investigate(
     method_violations: list[str] = []
 
     provider: LLMProvider = deps.llm_provider
-    p_name = getattr(provider, "provider_name", getattr(provider, "provider", "ollama"))
-    p_model = getattr(provider, "DEFAULT_MODEL", getattr(provider, "model", "qwen3:8b"))
+    p_name = getattr(provider, "provider_name", "groq" if "groq" in type(provider).__name__.lower() else "ollama")
+    p_model = getattr(provider, "model", getattr(provider, "_model", getattr(provider, "DEFAULT_MODEL", "qwen3:8b")))
     telemetry_svc.set_provider_info(str(p_name), str(p_model))
 
     # Accumulators — populated in each stage; fallback to empty on failure
@@ -399,14 +411,14 @@ def investigate(
                 window_end=window_end,
             )
         kpi_values = kpi_result.kpi_values
+        safe_print(f"\033[94m[E1 KPI STORE]\033[0m Loaded {len(kpi_values)} KPI values for scenario '{scenario_id}' (DB: {'ONLINE' if deps.db_conn else 'OFFLINE'})")
         if kpi_result.errors:
             for err in kpi_result.errors:
-                logger.warning("investigate [E1] error: %s", err)
+                safe_print(f"\033[93m[E1 WARNING]\033[0m {err}")
         if kpi_result.access_denied:
-            logger.info(
-                "investigate [E1] access denied for kpi_ids: %s", kpi_result.access_denied
-            )
+            safe_print(f"\033[93m[E1 ACCESS DENIED]\033[0m KPIs: {kpi_result.access_denied}")
     except Exception as exc:  # noqa: BLE001
+        safe_print(f"\033[91m[E1 ERROR]\033[0m KPI Store failed: {exc}")
         logger.error("investigate [E1] KPI Store failed: %s", exc, exc_info=True)
         kpi_values = []
 
@@ -444,7 +456,14 @@ def investigate(
             signals = detect_signals(kpi_values, history)
             kpi_periods = _build_kpi_periods(signals, kpi_values)
             signals = assert_corroboration(signals, kpi_periods)
+        
+        anom_count = sum(1 for s in signals if s.is_anomaly)
+        safe_print(f"\033[93m[E2 SIGNAL]\033[0m Detected {len(signals)} signal(s) | {anom_count} confirmed anomaly/anomalies")
+        for s in signals:
+            if s.is_anomaly:
+                safe_print(f"   * Anomaly: {s.kpi_id} (z-score={s.z_score:+.2f}, delta={s.delta_pct:+.1%})")
     except Exception as exc:  # noqa: BLE001
+        safe_print(f"\033[91m[E2 ERROR]\033[0m Signal Engine failed: {exc}")
         logger.error("investigate [E2] Signal Engine failed: %s", exc, exc_info=True)
         signals = []
 
@@ -480,16 +499,15 @@ def investigate(
                     window_end=window_end,
                 )
                 contributions = diagnostic_result.contributions
+                safe_print(f"\033[95m[E3 DIAGNOSTIC]\033[0m Decomposed primary anomaly '{primary_sig.kpi_id}' into {len(contributions)} segment(s)")
                 if diagnostic_result.errors:
                     for err in diagnostic_result.errors:
                         logger.warning("investigate [E3] error: %s", err)
             else:
-                logger.info(
-                    "investigate [E3]: no anomalous signal to decompose (expected for "
-                    "sparse-history / data-quality / no-incident scenarios)."
-                )
+                safe_print(f"\033[95m[E3 DIAGNOSTIC]\033[0m No anomalous signal to decompose (sparse or normal scenario)")
                 contributions = []
     except Exception as exc:  # noqa: BLE001
+        safe_print(f"\033[91m[E3 ERROR]\033[0m Diagnostic Engine failed: {exc}")
         logger.error("investigate [E3] Diagnostic Engine failed: %s", exc, exc_info=True)
         contributions = []
 
@@ -511,7 +529,7 @@ def investigate(
     # E4 — Evidence [SQL+RETRIEVAL]
     # Requirement: 6.1–6.7, 7.3–7.5
     # ------------------------------------------------------------------
-    logger.info("investigate: [E4] Evidence Engine (constrained by authorized_sources=%s before assembly)", scope.authorized_sources)
+    logger.info("investigate: [E4] Evidence Engine")
     try:
         with telemetry_svc.measure_engine("evidence"):
             evidence_result = assemble_evidence(
@@ -528,10 +546,12 @@ def investigate(
                 allowed_collections=frozenset({f"evidence_{scenario_id}"}),
             )
         evidence_items = evidence_result.evidence
+        safe_print(f"\033[96m[E4 EVIDENCE]\033[0m Assembled {len(evidence_items)} grounded evidence records from authorized sources: {sorted(list(scope.authorized_sources))}")
         if evidence_result.reliability_notes:
             for note in evidence_result.reliability_notes:
                 logger.debug("investigate [E4] reliability note: %s", note)
     except Exception as exc:  # noqa: BLE001
+        safe_print(f"\033[91m[E4 ERROR]\033[0m Evidence Engine failed: {exc}")
         logger.error("investigate [E4] Evidence Engine failed: %s", exc, exc_info=True)
         evidence_items = []
 
@@ -544,11 +564,8 @@ def investigate(
     ]
     if unauthorized_items:
         for item in unauthorized_items:
-            msg = (
-                f"[security] evidence '{item.evidence_id}' source '{item.source_id}' "
-                f"not in authorized scope for persona '{persona_str}' — dropped before LLM."
-            )
-            logger.error(msg)
+            msg = f"[security] evidence '{item.evidence_id}' source '{item.source_id}' not authorized for '{persona_str}'"
+            safe_print(f"\033[91m[SECURITY VIOLATION]\033[0m {msg}")
             method_violations.append(msg)
         evidence_items = [
             e for e in evidence_items if e not in unauthorized_items
@@ -560,23 +577,6 @@ def investigate(
     # ------------------------------------------------------------------
     logger.info("investigate: [E5] Hypothesis Engine")
 
-    # ------------------------------------------------------------------
-    # Guard — hypothesis generation requires a CONFIRMED anomaly.
-    #
-    # When E2's sparse-history (Req 3.2) or data-quality (Req 3.3) guard
-    # suppressed the anomaly, there is no established event to explain.
-    # Calling E5 anyway hands the model a prompt that literally invites
-    # speculation ("No anomalies currently flagged; investigate potential
-    # leading indicators"), which manufactures a cause for something that
-    # never happened — the exact failure mode this system exists to prevent.
-    #
-    # Suppressing here keeps the pipeline aligned with the documented design
-    # intent for INC_003/INC_004 ("No hypotheses should be generated",
-    # etl/generate_scenarios.py), with data/ground_truth.json
-    # (expected_winning_hypothesis: null), and with the evaluator's
-    # hypothesis-suppression dimension. E6 then scores an empty set and E7
-    # abstains via its existing empty-hypothesis path.
-    # ------------------------------------------------------------------
     _anomalous_signals = [s for s in signals if s.is_anomaly]
     if not _anomalous_signals:
         if any(getattr(s, "data_quality_suspect", False) for s in signals):
@@ -584,18 +584,12 @@ def investigate(
         elif any(getattr(s, "sparse_history", False) for s in signals):
             _suppression = "sparse-history guard (Req 3.2)"
         else:
-            _suppression = "no KPI exceeded the anomaly thresholds (Req 3.5)"
-        logger.info(
-            "investigate [E5]: suppressed — no confirmed anomaly: %s. "
-            "Skipping hypothesis generation by design; the pipeline will abstain.",
-            _suppression,
-        )
+            _suppression = "no KPI exceeded anomaly threshold"
+        safe_print(f"\033[93m[E5 HYPOTHESIS]\033[0m Skipped by design ({_suppression}) — 0 LLM calls made.")
         hypotheses = []
     else:
         try:
-            # Pass the LIVE telemetry reference (not a deepcopy) so that
-            # record_llm_call() inside the engine accumulates into the service's
-            # own state and shows up in the final get_telemetry() snapshot.
+            safe_print(f"\033[92m[E5 HYPOTHESIS]\033[0m Calling LLM to formulate causal hypotheses...")
             with telemetry_svc.measure_engine("hypothesis"):
                 hyp_result = generate_hypotheses(
                     signals=signals,
@@ -606,6 +600,9 @@ def investigate(
                     telemetry=telemetry_svc.live_telemetry,
                 )
             hypotheses = hyp_result.hypotheses
+            safe_print(f"\033[92m[E5 HYPOTHESIS]\033[0m Formulated {len(hypotheses)} candidate hypotheses (Rejected: {hyp_result.rejected_count})")
+            for h in hypotheses:
+                safe_print(f"   * [{h.hypothesis_id}] {h.statement[:80]}...")
             if hyp_result.rejected_count > 0:
                 logger.warning(
                     "investigate [E5] %d hypothesis(es) rejected: %s",
@@ -613,6 +610,7 @@ def investigate(
                     hyp_result.rejection_reasons,
                 )
         except Exception as exc:  # noqa: BLE001
+            safe_print(f"\033[91m[E5 ERROR]\033[0m Hypothesis Engine failed: {exc}")
             logger.error("investigate [E5] Hypothesis Engine failed: %s", exc, exc_info=True)
             hypotheses = []
 
@@ -628,9 +626,7 @@ def investigate(
     logger.info("investigate: [E6] Challenge Engine")
     try:
         evidence_by_id: dict[str, Evidence] = {e.evidence_id: e for e in evidence_items}
-        thresholds = deps.challenge_thresholds
-        if thresholds is None:
-            thresholds = ChallengeThresholds()
+        thresholds = deps.challenge_thresholds or ChallengeThresholds()
 
         with telemetry_svc.measure_engine("challenge"):
             challenge_result = challenge(
@@ -643,10 +639,12 @@ def investigate(
                 telemetry=telemetry_svc.live_telemetry,
             )
         scored_hypotheses = challenge_result.scored_hypotheses
+        safe_print(f"\033[93m[E6 CHALLENGE]\033[0m Scored {len(scored_hypotheses)} hypothesis/hypotheses across 5 verification rules")
+        safe_print(f"   * Confidence: {challenge_result.overall_confidence.value.upper()} | Winner: {challenge_result.winning_hypothesis_id} | Abstained: {challenge_result.abstained}")
     except Exception as exc:  # noqa: BLE001
+        safe_print(f"\033[91m[E6 ERROR]\033[0m Challenge Engine failed: {exc}")
         logger.error("investigate [E6] Challenge Engine failed: %s", exc, exc_info=True)
         scored_hypotheses = []
-        # Build a synthetic abstain result so E7 can still run
         from engines.challenge import ChallengeResult
         challenge_result = ChallengeResult(
             scored_hypotheses=[],
@@ -670,11 +668,7 @@ def investigate(
     # E7 — Decision [LLM]
     # Requirement: 10.1–10.6
     # ------------------------------------------------------------------
-    logger.info(
-        "investigate: [E7] Decision Engine — confidence=%s abstained=%s",
-        challenge_result.overall_confidence.value,
-        challenge_result.abstained,
-    )
+    logger.info("investigate: [E7] Decision Engine")
     try:
         evidence_summaries = [e.summary for e in evidence_items[:5]]
         with telemetry_svc.measure_engine("decision"):
@@ -685,9 +679,14 @@ def investigate(
                 evidence_summaries=evidence_summaries,
                 telemetry=telemetry_svc.live_telemetry,
             )
+        safe_print(f"\033[92m[E7 DECISION]\033[0m Formulated action directive. Abstained: {decision.abstained}")
+        if decision.recommended_action:
+            safe_print(f"   * Action: {decision.recommended_action[:90]}...")
+        elif decision.abstention_reason:
+            safe_print(f"   * Reason: {decision.abstention_reason}")
     except Exception as exc:  # noqa: BLE001
+        safe_print(f"\033[91m[E7 ERROR]\033[0m Decision Engine failed: {exc}")
         logger.error("investigate [E7] Decision Engine failed: %s", exc, exc_info=True)
-        # Fallback to an abstained Decision so InvestigationResult is always complete
         from models import Decision
         decision = Decision(
             abstained=True,

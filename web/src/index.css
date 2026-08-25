@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,23 +6,47 @@
 
 @layer base {
   body {
-    @apply bg-background text-white font-sans antialiased;
-    background-color: #0A0A0A;
+    @apply bg-[#141414] text-[#F4EEE0] font-sans antialiased selection:bg-[#6B9BB0]/25 selection:text-[#F4EEE0];
+    background-color: #141414;
   }
 }
 
-/* Custom minimal scrollbar */
+/* Atmospheric technical grid */
+.bg-tech-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(244, 238, 224, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(244, 238, 224, 0.03) 1px, transparent 1px);
+}
+
+/* Glass panel utilities with Sumi & Gofun borders */
+.glass-panel {
+  background: rgba(28, 28, 28, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(244, 238, 224, 0.08);
+}
+
+.glass-panel-elevated {
+  background: rgba(36, 36, 36, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(244, 238, 224, 0.12);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(244, 238, 224, 0.08);
+}
+
+/* Custom technical scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #141414;
 }
 ::-webkit-scrollbar-thumb {
-  background: #262626;
-  border-radius: 4px;
+  background: #333333;
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #404040;
+  background: #4D7689;
 }

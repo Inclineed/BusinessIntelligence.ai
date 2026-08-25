@@ -264,17 +264,74 @@ def _parse_llm_hypotheses(response_text: str) -> list[dict]:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # Strategy 3: find individual hypothesis objects
-    # Matches objects that contain a "hypothesis_id" key
-    object_pattern = re.compile(r'\{[^{}]*"hypothesis_id"[^{}]*\}', re.DOTALL)
+    # Strategy 2.5: Brace matching scan starting from first '{'
+    if start_idx != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start_idx, len(response_text)):
+            ch = response_text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == '\\':
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if not in_string:
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            candidate_str = response_text[start_idx:i + 1]
+                            data = json.loads(candidate_str)
+                            if isinstance(data, dict) and "hypotheses" in data:
+                                hyps = data["hypotheses"]
+                                if isinstance(hyps, list):
+                                    return hyps
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+
+    # Strategy 3: find individual hypothesis objects with nested support
     candidates: list[dict] = []
-    for m in object_pattern.finditer(response_text):
-        try:
-            obj = json.loads(m.group(0))
-            if isinstance(obj, dict) and "hypothesis_id" in obj:
-                candidates.append(obj)
-        except (json.JSONDecodeError, ValueError):
-            pass
+    # Search for occurrences of "hypothesis_id"
+    for match in re.finditer(r'"hypothesis_id"\s*:', response_text):
+        pos = match.start()
+        # Scan backward to find the opening '{' of this hypothesis object
+        obj_start = response_text.rfind('{', 0, pos)
+        if obj_start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+            for j in range(obj_start, len(response_text)):
+                ch = response_text[j]
+                if escape:
+                    escape = False
+                    continue
+                if ch == '\\':
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if not in_string:
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                obj = json.loads(response_text[obj_start:j + 1])
+                                if isinstance(obj, dict) and "hypothesis_id" in obj:
+                                    if obj not in candidates:
+                                        candidates.append(obj)
+                            except (json.JSONDecodeError, ValueError):
+                                pass
+                            break
     if candidates:
         return candidates
 
@@ -498,10 +555,10 @@ def generate_hypotheses(
     try:
         response = provider.complete(
             user_prompt,
-            model=getattr(provider, "DEFAULT_MODEL", "qwen3:8b"),
+            model=getattr(provider, "model", getattr(provider, "_model", None)),
             system=system_prompt,
             temperature=0.3,
-            max_tokens=1200,
+            max_tokens=3500,
             format_json=True,
         )
         llm_response_text = response.text

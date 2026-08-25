@@ -58,3 +58,24 @@ export function cleanLLMTags(text: string): string {
     .replace(/\[RULES\]/g, "")
     .trim()
 }
+
+/**
+ * Determines whether a metric change is adverse/unfavorable based on domain semantics:
+ * - Higher is better (revenue, conversion, fill_rate, orders, margin): delta < 0 is adverse.
+ * - Lower is better (latency, error_rate, failure_rate, churn, complaints): delta > 0 is adverse.
+ */
+export function isAdverseMetric(kpiId: string, deltaPct: number | undefined | null): boolean {
+  if (deltaPct === undefined || deltaPct === null || isNaN(deltaPct) || deltaPct === 0) {
+    return false
+  }
+  const lower = kpiId.toLowerCase()
+  const isLowerBetter =
+    lower.includes("latency") ||
+    lower.includes("error") ||
+    lower.includes("failure") ||
+    lower.includes("churn") ||
+    lower.includes("drop") ||
+    lower.includes("timeout")
+
+  return isLowerBetter ? deltaPct > 0 : deltaPct < 0
+}

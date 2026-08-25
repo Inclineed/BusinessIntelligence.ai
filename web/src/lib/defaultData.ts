@@ -254,9 +254,9 @@ export const DEFAULT_INC_001: InvestigationResult = {
     llm_calls: 3,
     llm_tokens_in: 1420,
     llm_tokens_out: 340,
-    external_cost_usd: 0.0,
-    llm_provider: "ollama",
-    llm_model: "qwen3:8b",
+    external_cost_usd: 0.00042,
+    llm_provider: "groq",
+    llm_model: "qwen/qwen3.6-27b",
   },
   method_ownership: {
     kpi_store: "SQL",

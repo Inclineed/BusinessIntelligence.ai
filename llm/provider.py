@@ -143,6 +143,8 @@ class OllamaProvider(LLMProvider):
     can record them into Telemetry without any extra instrumentation.
     """
 
+    provider_name: str = "ollama"
+    provider: str = "ollama"
     DEFAULT_MODEL: str = "qwen3:8b"
     FALLBACK_MODEL: str = "gemma3:12b"
     EMBED_MODEL: str = "bge-m3"
@@ -152,9 +154,12 @@ class OllamaProvider(LLMProvider):
         self,
         base_url: str = "http://localhost:11434",
         timeout: float = DEFAULT_TIMEOUT,
+        model: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self.model = model or os.getenv("LLM_MODEL", self.DEFAULT_MODEL)
+        self._model = self.model
 
     @property
     def provider_name(self) -> str:
@@ -204,16 +209,17 @@ class OllamaProvider(LLMProvider):
         POST to /api/embed and return a list of embedding vectors.
 
         Raises LLMUnavailableError on any HTTP or connection error.
+        Uses 0.5s connection timeout so offline Ollama fails immediately without blocking.
         """
         url = f"{self._base_url}/api/embed"
         payload: dict = {"model": model, "input": texts}
 
         try:
-            response = httpx.post(url, json=payload, timeout=self._timeout)
+            response = httpx.post(url, json=payload, timeout=0.5)
             response.raise_for_status()
             data = response.json()
             return data["embeddings"]
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as exc:
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError, Exception) as exc:
             raise LLMUnavailableError(
                 f"Embedding request to Ollama failed ({model!r}): {exc}"
             ) from exc
@@ -286,7 +292,9 @@ class GroqProvider(LLMProvider):
     Embeddings are delegated to local Ollama (bge-m3) to maintain ChromaDB consistency.
     """
 
-    DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+    provider_name: str = "groq"
+    provider: str = "groq"
+    DEFAULT_MODEL: str = "groq/compound-mini"
     DEFAULT_BASE_URL: str = "https://api.groq.com/openai/v1"
     DEFAULT_TIMEOUT: float = 45.0  # seconds
     DEFAULT_MAX_RETRIES: int = 5
@@ -301,9 +309,17 @@ class GroqProvider(LLMProvider):
         ollama_embed_host: str | None = None,
         credential_mode: str | None = None,
     ) -> None:
-        self._credential_mode = credential_mode or os.getenv("GROQ_CREDENTIAL_MODE", "single").lower()
+        env_vars = {}
+        try:
+            from dotenv import dotenv_values
+            from pathlib import Path
+            env_vars = dotenv_values(Path(__file__).resolve().parent.parent / ".env")
+        except Exception:
+            pass
 
-        raw_keys = api_key or os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
+        self._credential_mode = credential_mode or env_vars.get("GROQ_CREDENTIAL_MODE") or os.getenv("GROQ_CREDENTIAL_MODE", "pool").lower()
+
+        raw_keys = api_key or env_vars.get("GROQ_API_KEYS") or os.getenv("GROQ_API_KEYS") or env_vars.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
         if isinstance(raw_keys, list):
             parsed_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
         else:
@@ -315,7 +331,7 @@ class GroqProvider(LLMProvider):
                 "Set GROQ_API_KEY in your local environment or untracked .env file."
             )
 
-        # In production single mode, use strictly a single credential
+        # Use full pool when in pool mode or multiple keys provided
         if self._credential_mode == "single" and len(parsed_keys) > 1 and api_key is None:
             self._api_keys = [parsed_keys[0]]
         else:
@@ -323,13 +339,14 @@ class GroqProvider(LLMProvider):
 
         self._current_key_idx = 0
         self._api_key = self._api_keys[0]
-        self._model = model or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
+        self._model = model or env_vars.get("GROQ_MODEL") or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
+        self.model = self._model
         self.DEFAULT_MODEL = self._model
-        self._base_url = (base_url or os.getenv("GROQ_BASE_URL", self.DEFAULT_BASE_URL)).rstrip("/")
+        self._base_url = (base_url or env_vars.get("GROQ_BASE_URL") or os.getenv("GROQ_BASE_URL", self.DEFAULT_BASE_URL)).rstrip("/")
         self._timeout = timeout
         self._max_retries = max_retries
         self._ollama_embed_host = (
-            ollama_embed_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+            ollama_embed_host or env_vars.get("OLLAMA_HOST") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         )
         self._embedder = OllamaProvider(base_url=self._ollama_embed_host, timeout=self._timeout)
 
@@ -374,7 +391,7 @@ class GroqProvider(LLMProvider):
         5xx server errors, and network timeouts with exponential backoff up to max_retries.
         """
         # When engines pass generic default model or None, use instance's configured Groq model
-        if model is None or model in ("qwen3:8b", "default"):
+        if model is None or model in ("qwen3:8b", "default", "groq/compound-mini") or not model:
             target_model = self._model
         else:
             target_model = model
@@ -397,8 +414,8 @@ class GroqProvider(LLMProvider):
             user_content = prompt + "\n\nCRITICAL INSTRUCTION: Keep thinking process brief. Output ONLY valid JSON matching the schema immediately."
         messages.append({"role": "user", "content": user_content})
 
-        # For reasoning models, provide enough headroom for thinking chain + JSON output
-        actual_max_tokens = max(max_tokens, 6000) if is_reasoning_model else max_tokens
+        # Stay within Groq's 8000 TPM limit (1767 prompt + 4500 max_tokens = 6267 < 8000)
+        actual_max_tokens = 4500 if is_reasoning_model else min(max_tokens, 3500)
 
         payload: dict[str, Any] = {
             "model": target_model,
@@ -406,9 +423,8 @@ class GroqProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": actual_max_tokens,
         }
-        # Only attach response_format for non-reasoning models (reasoning models fail json_validate)
-        if format_json and not is_reasoning_model:
-            payload["response_format"] = {"type": "json_object"}
+        if is_reasoning_model:
+            payload["reasoning_format"] = "parsed"
 
         last_error: Exception | None = None
 
@@ -501,12 +517,20 @@ class GroqProvider(LLMProvider):
                     raise GroqAPIError(f"Malformed Groq response (no choices): {data}")
 
                 content = choices[0].get("message", {}).get("content", "") or ""
-                if "</think>" in content:
+                if "<think>" in content:
+                    if "</think>" in content:
+                        content = content.split("</think>", 1)[1].strip()
+                    else:
+                        first_brace = content.find("{")
+                        if first_brace != -1:
+                            content = content[first_brace:].strip()
+                        else:
+                            content = re.sub(r"^<think>.*", "", content, flags=re.DOTALL).strip()
+                elif "</think>" in content:
                     content = content.split("</think>", 1)[1].strip()
-                elif content.startswith("<think>"):
-                    content = re.sub(r"^<think>.*", "", content, flags=re.DOTALL).strip()
-                else:
-                    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+                if not content and choices[0].get("message", {}).get("reasoning"):
+                    content = choices[0]["message"]["reasoning"].strip()
 
                 if format_json:
                     fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
@@ -611,14 +635,24 @@ def get_llm_provider(provider_type: str | None = None) -> LLMProvider:
     Reads provider from *provider_type* argument or LLM_PROVIDER env variable.
     Default: 'ollama'.
     """
-    name = (provider_type or os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
+    env_vars = {}
+    try:
+        from dotenv import dotenv_values, load_dotenv
+        from pathlib import Path
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        load_dotenv(env_path, override=True)
+        env_vars = dotenv_values(env_path)
+    except Exception:
+        pass
 
-    if name == "ollama":
-        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        return OllamaProvider(base_url=ollama_host)
+    name = (provider_type or env_vars.get("LLM_PROVIDER") or os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
 
     if name == "groq":
         return GroqProvider()
+
+    if name == "ollama":
+        ollama_host = env_vars.get("OLLAMA_HOST") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        return OllamaProvider(base_url=ollama_host)
 
     raise ValueError(
         f"Unsupported LLM_PROVIDER: {name!r}. "

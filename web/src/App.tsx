@@ -59,7 +59,8 @@ export const App: React.FC = () => {
   const isStale =
     activeConfig.scenarioId !== evaluatedConfig.scenarioId ||
     activeConfig.persona !== evaluatedConfig.persona ||
-    activeConfig.region !== evaluatedConfig.region
+    (activeConfig.persona === "manager" &&
+      (activeConfig.region || "all") !== (evaluatedConfig.region || "all"))
 
   const handleConfigChange = (newScenarioId: string, newPersona: PersonaType, newRegion: string) => {
     setActiveConfig({

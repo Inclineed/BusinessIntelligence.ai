@@ -243,3 +243,20 @@ export async function getSystemHealth(): Promise<import("../types/investigation"
   return await res.json()
 }
 
+export async function getFeedbackMetrics(): Promise<any> {
+  const res = await fetch(`${API_BASE}/feedback/metrics`)
+  if (!res.ok) {
+    throw new Error(`Feedback metrics request failed (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+export async function getKpiContract(): Promise<any> {
+  const res = await fetch(`${API_BASE}/kpi-contract`)
+  if (!res.ok) {
+    throw new Error(`KPI contract request failed (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+

@@ -167,10 +167,7 @@ def _abstain_narrative(reason: str, verification_steps: list[str]) -> str:
             "Confidence in the winning hypothesis is insufficient to support "
             "a recommended action. Verification steps are provided instead."
         )
-    return (
-        f"{header}\n\n"
-        f"Suggested verification steps:\n{steps_text}"
-    )
+    return header
 
 
 def _build_decision_prompt(
@@ -393,7 +390,7 @@ def decide(
     try:
         response = provider.complete(
             user_prompt,
-            model=getattr(provider, "DEFAULT_MODEL", "qwen3:8b"),
+            model=getattr(provider, "model", getattr(provider, "_model", None)),
             system=system_prompt,
             temperature=0.0,
             max_tokens=600,

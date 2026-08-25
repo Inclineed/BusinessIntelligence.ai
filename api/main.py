@@ -35,6 +35,12 @@ from models import Persona
 from pipeline.investigate import Dependencies, investigate
 from security.entitlements import SecurityEngine
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -309,7 +315,14 @@ async def investigate_endpoint(
     # ------------------------------------------------------------------
     # 2. Resolve entitlements (Requirement 5.8)
     # ------------------------------------------------------------------
-    entitlements_config = state.entitlements_config
+    entitlements_config = getattr(state, "entitlements_config", None)
+    if entitlements_config is None:
+        try:
+            entitlements_config = load_entitlements(_CONFIG_DIR / "entitlements.yaml")
+            state.entitlements_config = entitlements_config
+        except Exception:
+            entitlements_config = None
+
     if entitlements_config is None:
         # entitlements.yaml failed to load at startup — fail closed (Req 5.8)
         logger.warning(
@@ -356,30 +369,102 @@ async def investigate_endpoint(
     # ------------------------------------------------------------------
     # 4. Build Dependencies and run the pipeline
     # ------------------------------------------------------------------
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_BASE_DIR / ".env", override=True)
+    except Exception:
+        pass
+
+    # Auto-reconnect to Postgres if container was started after server boot
+    db_conn = getattr(state, "db_conn", None)
+    if db_conn is None or getattr(db_conn, "closed", 0) != 0:
+        try:
+            db_conn = psycopg2.connect(DATABASE_URL)
+            state.db_conn = db_conn
+            print(f"\033[92m[DATABASE]\033[0m Successfully auto-connected to PostgreSQL at {DATABASE_URL}")
+        except Exception as db_err:
+            print(f"\033[91m[DATABASE ERROR]\033[0m PostgreSQL connection failed: {db_err}")
+            db_conn = None
+
+    # Auto-reconnect to ChromaDB if container was started after server boot
+    chroma_client = getattr(state, "chroma_client", None)
+    if chroma_client is None:
+        try:
+            chroma_client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+            state.chroma_client = chroma_client
+            print(f"\033[92m[CHROMADB]\033[0m Successfully auto-connected to ChromaDB at {CHROMA_HOST}:{CHROMA_PORT}")
+        except Exception as chroma_err:
+            print(f"\033[93m[CHROMADB NOTICE]\033[0m ChromaDB connection failed ({chroma_err}) — continuing with metadata fallback.")
+            chroma_client = None
+
+    active_provider = get_llm_provider()
+    p_name = str(getattr(active_provider, "provider_name", "unknown") or "unknown")
+    p_model = str(getattr(active_provider, "model", getattr(active_provider, "_model", "default")) or "default")
+    sc_id_str = str(body.scenario_id or "INC_001")
+    region_str = str(getattr(body, "region", "all") or "all")
+    print(f"\n\033[96m+------------------------------------------------------------------+\033[0m")
+    print(f"\033[96m| STARTING INVESTIGATION: {sc_id_str:<10} | Persona: {persona_str:<8} | Region: {region_str:<5} |\033[0m")
+    print(f"\033[96m| Provider: {p_name:<10} | Model: {p_model:<34} |\033[0m")
+    print(f"\033[96m+------------------------------------------------------------------+\033[0m")
+
+    kpi_contract = getattr(state, "kpi_contract", None)
+    if kpi_contract is None:
+        try:
+            kpi_contract = load_kpi_contract(_CONFIG_DIR / "kpi_contracts.yaml")
+            state.kpi_contract = kpi_contract
+        except Exception:
+            kpi_contract = None
+
+    sources_config = getattr(state, "sources_config", None)
+    if sources_config is None:
+        try:
+            sources_config = load_sources(_CONFIG_DIR / "sources.yaml")
+            state.sources_config = sources_config
+        except Exception:
+            sources_config = []
+
     deps = Dependencies(
-        db_conn=state.db_conn,
-        chroma_client=state.chroma_client,
-        llm_provider=state.llm_provider,
-        kpi_contract=entitlements_config if state.kpi_contract is None else state.kpi_contract,
+        db_conn=db_conn,
+        chroma_client=chroma_client,
+        llm_provider=active_provider,
+        kpi_contract=kpi_contract or entitlements_config,
         entitlements_config=entitlements_config,
-        sources_config=state.sources_config,
+        sources_config=sources_config,
         scenario_id=body.scenario_id,
         region=body.region,
     )
 
     try:
+        t_req_start = datetime.datetime.now()
         result = investigate(body.scenario_id, persona_str, deps)
+        elapsed_sec = (datetime.datetime.now() - t_req_start).total_seconds()
+        
+        d_abstained = getattr(result.decision, "abstained", False) if result.decision else True
+        d_winner = str(getattr(result.decision, "winning_hypothesis_id", "None") or "None")
+        tot_tok = 0
+        if result.telemetry:
+            tot_tok = (getattr(result.telemetry, "llm_tokens_in", 0) or 0) + (getattr(result.telemetry, "llm_tokens_out", 0) or 0)
+        d_tokens = str(tot_tok)
+        d_calls = str(getattr(result.telemetry, "llm_calls", 0) or 0 if result.telemetry else 0)
+        
+        status_color = "\033[91mABSTAINED\033[0m" if d_abstained else "\033[92mRESOLVED\033[0m"
+        print(f"\033[96m+------------------------------------------------------------------+\033[0m")
+        print(f"\033[96m| INVESTIGATION COMPLETE ({elapsed_sec:.2f}s) - Status: {status_color} |\033[0m")
+        print(f"\033[96m| Winner: {d_winner:<8} | LLM Calls: {d_calls:<3} | Total Tokens: {d_tokens:<8} |\033[0m")
+        print(f"\033[96m+------------------------------------------------------------------+\033[0m\n")
     except ValueError as exc:
         # e.g. unsupported persona surfaced from deep in the pipeline
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
         logger.exception(
             "/investigate: pipeline error for scenario=%s persona=%s: %s",
             body.scenario_id, persona_str, exc,
         )
         raise HTTPException(
             status_code=500,
-            detail="Internal pipeline error — see server logs for details.",
+            detail=f"Internal pipeline error: {exc}",
         ) from exc
 
     # ------------------------------------------------------------------

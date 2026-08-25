@@ -1122,7 +1122,7 @@ def generate_narrative(
     try:
         response = provider.complete(
             prompt,
-            model=getattr(provider, "DEFAULT_MODEL", "qwen3:8b"),
+            model=getattr(provider, "model", getattr(provider, "_model", None)),
             system=system_prompt,
             temperature=0.0,
             max_tokens=300,

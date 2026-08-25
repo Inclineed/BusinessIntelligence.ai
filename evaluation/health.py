@@ -209,12 +209,12 @@ def evaluate_e2e_latency(
     rel = delta / b_p95 if b_p95 > 0 else None
 
     # Check DEGRADED condition
-    if delta >= d_thresh or (rel is not None and rel >= d_rel):
+    if delta >= d_thresh and (rel is not None and rel >= d_rel):
         status = MetricHealthStatus.DEGRADED
         reason = f"p95 latency degraded (+{delta:.1f}ms / +{rel*100:.1f}% vs baseline {b_p95:.1f}ms)"
-    elif delta >= w_thresh or (rel is not None and rel >= w_rel):
+    elif delta >= w_thresh and (rel is not None and rel >= w_rel):
         status = MetricHealthStatus.WATCH
-        reason = f"p95 latency elevated (+{delta:.1f}ms vs baseline {b_p95:.1f}ms)"
+        reason = f"p95 latency elevated (+{delta:.1f}ms / +{rel*100:.1f}% vs baseline {b_p95:.1f}ms)"
     else:
         status = MetricHealthStatus.HEALTHY
         reason = f"p95 latency is stable ({r_p95:.1f}ms vs baseline {b_p95:.1f}ms)"
