@@ -1,17 +1,6 @@
-import React, { useState } from "react"
+import React from "react"
 import { PersonaType, TelemetryData } from "../../types/investigation"
-import { SCENARIO_CATALOG } from "../../lib/api"
-import { 
-  Play, 
-  Activity, 
-  User, 
-  ChevronDown, 
-  Cpu, 
-  Zap, 
-  Lock,
-  Globe,
-  Sliders
-} from "lucide-react"
+import { Play, Zap } from "lucide-react"
 
 interface TopBarProps {
   activeScenarioId: string
@@ -50,81 +39,37 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenHealth,
   onOpenActionDrawer,
 }) => {
-  const [scenarioDropdownOpen, setScenarioDropdownOpen] = useState(false)
-  const currentScenario = SCENARIO_CATALOG.find((s) => s.id === activeScenarioId) || SCENARIO_CATALOG[0]
-
-  const formatLatency = (ms?: number) => {
-    if (!ms || isNaN(ms)) return "—"
-    return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
-  }
-
-  const totalEngineLatency = telemetry?.latency_ms_by_engine
-    ? Object.values(telemetry.latency_ms_by_engine).reduce((a, b) => a + b, 0)
-    : undefined
-
   // Top Nav Category Tabs
   const NAV_TABS = [
     { label: "Signal", targetStage: 1, activeIf: currentStageNum === 1 },
-    { label: "Understand", targetStage: 2, activeIf: currentStageNum === 2 || currentStageNum === 3 },
-    { label: "Investigate", targetStage: 4, activeIf: currentStageNum === 4 || currentStageNum === 5 },
-    { label: "Validate", targetStage: 6, activeIf: currentStageNum === 6 || currentStageNum === 7 },
+    {
+      label: "Understand",
+      targetStage: 2,
+      activeIf: currentStageNum === 2 || currentStageNum === 3,
+    },
+    {
+      label: "Investigate",
+      targetStage: 4,
+      activeIf: currentStageNum === 4 || currentStageNum === 5,
+    },
+    {
+      label: "Validate",
+      targetStage: 6,
+      activeIf: currentStageNum === 6 || currentStageNum === 7,
+    },
     { label: "Project", targetStage: 8, activeIf: currentStageNum === 8 },
     { label: "Resolve", targetStage: 9, activeIf: currentStageNum === 9 },
   ]
 
   return (
-    <header className="sticky top-0 z-40 w-full bg-[#181818] border-b border-[#2E2E2E] px-4 py-2.5 shrink-0">
+    <header className="sticky top-0 z-40 w-full bg-[#181818] border-b border-[#2E2E2E] px-4 py-2.5 shrink-0 select-none">
       <div className="max-w-[1700px] mx-auto flex items-center justify-between gap-4">
-        
-        {/* Brand & Incident Selector */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#6B9BB0] shadow-[0_0_8px_rgba(107,155,176,0.5)]" />
-            <span className="font-bold text-sm tracking-tight text-[#F4EEE0] font-sans">
-              BusinessIntelligence<span className="text-[#6B9BB0]">.ai</span>
-            </span>
-          </div>
-
-          {/* Scenario Selector Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => setScenarioDropdownOpen(!scenarioDropdownOpen)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#222222] hover:bg-[#2A2A2A] border border-[#333333] text-xs font-mono text-[#D1C9B8] transition-all cursor-pointer"
-              aria-expanded={scenarioDropdownOpen}
-              aria-label="Select incident scenario"
-            >
-              <span className="text-[#6B9BB0] font-bold">{currentScenario.id}</span>
-              <span className="text-[#9E9788] max-w-[120px] lg:max-w-[160px] truncate">{currentScenario.title}</span>
-              <ChevronDown className="w-3 h-3 text-[#9E9788]" />
-            </button>
-
-            {scenarioDropdownOpen && (
-              <div className="absolute left-0 mt-1.5 w-80 max-h-96 overflow-y-auto bg-[#1C1C1C] rounded-xl border border-[#333333] p-1.5 shadow-2xl z-50">
-                <div className="px-2 py-1 text-[10px] font-mono text-[#9E9788] uppercase tracking-wider border-b border-[#2E2E2E] mb-1">
-                  Incident Catalog
-                </div>
-                {SCENARIO_CATALOG.map((sc) => (
-                  <button
-                    key={sc.id}
-                    onClick={() => {
-                      onConfigChange(sc.id, activePersona, activeRegion)
-                      setScenarioDropdownOpen(false)
-                    }}
-                    className={`w-full text-left p-2 rounded-lg text-xs transition-colors flex flex-col gap-0.5 cursor-pointer ${
-                      sc.id === activeScenarioId ? "bg-[#6B9BB0]/20 text-[#F4EEE0] border border-[#6B9BB0]/40" : "hover:bg-white/[0.04] text-[#D1C9B8]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between font-mono">
-                      <span className="font-bold text-[#6B9BB0]">{sc.id}</span>
-                      <span className="text-[10px] text-[#9E9788] px-1 rounded bg-black/40">{sc.domain}</span>
-                    </div>
-                    <div className="font-medium text-[#F4EEE0] truncate">{sc.title}</div>
-                    <div className="text-[11px] text-[#9E9788] truncate">{sc.description}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* Brand */}
+        <div className="flex items-center gap-2.5">
+          <div className="w-2.5 h-2.5 rounded-full bg-[#6B9BB0] shadow-[0_0_8px_rgba(107,155,176,0.5)]" />
+          <span className="font-bold text-sm tracking-tight text-[#F4EEE0] font-sans">
+            BusinessIntelligence<span className="text-[#6B9BB0]">.ai</span>
+          </span>
         </div>
 
         {/* Center Navigation Category Tabs */}
@@ -176,8 +121,14 @@ export const TopBar: React.FC<TopBarProps> = ({
                 : "bg-[#6B9BB0]/20 hover:bg-[#6B9BB0]/35 text-[#F4EEE0] border border-[#6B9BB0]/40"
             }`}
           >
-            <Play className={`w-3.5 h-3.5 ${isLiveLoading ? 'animate-spin' : ''}`} />
-            <span>{isLiveLoading ? `${liveElapsedSeconds.toFixed(1)}s` : isStale ? "UPDATE" : "RUN"}</span>
+            <Play className={`w-3.5 h-3.5 ${isLiveLoading ? "animate-spin" : ""}`} />
+            <span>
+              {isLiveLoading
+                ? `${liveElapsedSeconds.toFixed(1)}s`
+                : isStale
+                ? "UPDATE"
+                : "RUN"}
+            </span>
           </button>
         </div>
       </div>

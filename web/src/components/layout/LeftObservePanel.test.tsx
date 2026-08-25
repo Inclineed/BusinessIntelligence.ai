@@ -25,7 +25,7 @@ describe("LeftObservePanel", () => {
       />
     )
 
-    expect(screen.getByText("INC_001")).toBeInTheDocument()
+    expect(screen.getAllByText("INC_001").length).toBeGreaterThan(0)
     expect(screen.getByTitle("Collapse Sidebar (~56px Rail)")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTitle("Collapse Sidebar (~56px Rail)"))
@@ -52,8 +52,8 @@ describe("LeftObservePanel", () => {
       />
     )
 
-    expect(screen.getByTitle("Expand Observe & Detect Sidebar")).toBeInTheDocument()
-    fireEvent.click(screen.getByTitle("Expand Observe & Detect Sidebar"))
+    expect(screen.getByTitle("Expand Sidebar")).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle("Expand Sidebar"))
     expect(onToggle).toHaveBeenCalledTimes(1)
   })
 })

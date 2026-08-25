@@ -1,10 +1,11 @@
-import React from "react"
+import React, { useState } from "react"
 import { InvestigationResult, PersonaType, TelemetryData } from "../../types/investigation"
 import { SCENARIO_CATALOG } from "../../lib/api"
 import { formatMetricValue, formatDelta, isAdverseMetric } from "../../lib/utils"
 import {
   Activity,
   AlertTriangle,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Cpu,
@@ -43,6 +44,7 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
   onOpenTelemetry,
   onOpenHealth,
 }) => {
+  const [scenarioDropdownOpen, setScenarioDropdownOpen] = useState(false)
   const currentScenario =
     SCENARIO_CATALOG.find((s) => s.id === activeScenarioId) || SCENARIO_CATALOG[0]
   const primarySignal = result.signals?.[0]
@@ -68,14 +70,14 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
   if (isCollapsed) {
     return (
       <aside
-        className="w-14 bg-[#181818] flex flex-col items-center py-3 border-r border-[#2E2E2E] shrink-0 z-30 justify-between transition-all duration-300 select-none"
-        aria-label="Observe and Detect Rail"
+        className="w-14 bg-[#181818] flex flex-col items-center py-2.5 border-r border-[#2E2E2E] shrink-0 z-30 justify-between transition-all duration-300 select-none"
+        aria-label="Incident Context Rail"
       >
-        {/* Top Section: Expand Toggle, Scenario Indicator, Persona Switcher */}
-        <div className="flex flex-col items-center gap-3 w-full">
+        {/* Top Section: Expand Toggle, Scenario Selector Popover, Persona */}
+        <div className="flex flex-col items-center gap-2.5 w-full">
           <button
             onClick={onToggleCollapse}
-            title="Expand Observe & Detect Sidebar"
+            title="Expand Sidebar"
             className="w-8 h-8 rounded-lg bg-[#222222] hover:bg-[#2A2A2A] text-[#9E9788] hover:text-[#F4EEE0] flex items-center justify-center border border-[#333333] transition-colors cursor-pointer"
           >
             <ChevronRight className="w-4 h-4" />
@@ -83,36 +85,49 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
 
           <div className="w-8 h-px bg-[#2E2E2E] my-0.5" />
 
-          {/* Scenario Pulse Indicator */}
-          <div
-            className="relative group flex items-center justify-center"
-            title={`${currentScenario.id}: ${currentScenario.title}`}
-          >
-            <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+          {/* Scenario Indicator Icon + Interactive Selector Popover */}
+          <div className="relative">
+            <button
+              onClick={() => setScenarioDropdownOpen(!scenarioDropdownOpen)}
+              className={`w-9 h-9 rounded-xl flex items-center justify-center border cursor-pointer transition-all ${
                 isAnomaly
-                  ? "bg-[#D8453A]/20 border-[#D8453A]/50 text-[#E56B62]"
-                  : "bg-[#4E8569]/20 border-[#4E8569]/50 text-[#78AC91]"
+                  ? "bg-[#D8453A]/20 border-[#D8453A]/50 text-[#E56B62] hover:border-[#D8453A]"
+                  : "bg-[#4E8569]/20 border-[#4E8569]/50 text-[#78AC91] hover:border-[#4E8569]"
               }`}
+              title={`Active: ${currentScenario.id} (${currentScenario.title}) — Click to switch incident`}
             >
               <Radio className="w-4 h-4 animate-pulse" />
-            </div>
+            </button>
 
-            {/* Custom Tooltip */}
-            <div className="absolute left-12 top-0 z-50 hidden group-hover:flex flex-col w-56 p-2.5 rounded-lg bg-[#1C1C1C] border border-[#333333] shadow-xl text-xs text-[#F4EEE0] pointer-events-none">
-              <div className="font-mono font-bold flex justify-between items-center text-[10px] mb-1">
-                <span>{currentScenario.id}</span>
-                <span className={isAnomaly ? "text-[#E56B62]" : "text-[#78AC91]"}>
-                  {isAnomaly ? "ANOMALY" : "NOMINAL"}
-                </span>
+            {scenarioDropdownOpen && (
+              <div className="absolute left-12 top-0 z-50 w-72 max-h-96 overflow-y-auto bg-[#1C1C1C] rounded-xl border border-[#333333] p-1.5 shadow-2xl custom-scrollbar">
+                <div className="px-2 py-1 text-[10px] font-mono text-[#9E9788] uppercase tracking-wider border-b border-[#2E2E2E] mb-1">
+                  Switch Incident Scenario
+                </div>
+                {SCENARIO_CATALOG.map((sc) => (
+                  <button
+                    key={sc.id}
+                    onClick={() => {
+                      onConfigChange(sc.id, activePersona, activeRegion)
+                      setScenarioDropdownOpen(false)
+                    }}
+                    className={`w-full text-left p-2 rounded-lg text-xs transition-colors flex flex-col gap-0.5 cursor-pointer ${
+                      sc.id === activeScenarioId
+                        ? "bg-[#6B9BB0]/20 text-[#F4EEE0] border border-[#6B9BB0]/40"
+                        : "hover:bg-white/[0.04] text-[#D1C9B8]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-mono">
+                      <span className="font-bold text-[#6B9BB0]">{sc.id}</span>
+                      <span className="text-[10px] text-[#9E9788] px-1 rounded bg-black/40">
+                        {sc.domain}
+                      </span>
+                    </div>
+                    <div className="font-medium text-[#F4EEE0] truncate">{sc.title}</div>
+                  </button>
+                ))}
               </div>
-              <div className="font-sans font-medium text-[11px] leading-tight mb-1">
-                {currentScenario.title}
-              </div>
-              <div className="text-[10px] text-[#9E9788]">
-                Domain: {currentScenario.domain}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Persona Quick Switch Icon */}
@@ -230,22 +245,70 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
   // -------------------------------------------------------------------------
   return (
     <aside className="w-72 lg:w-80 bg-[#181818] flex flex-col border-r border-[#2E2E2E] shrink-0 z-30 overflow-y-auto custom-scrollbar transition-all duration-300">
-      {/* Sticky Header with Collapse Toggle */}
-      <div className="px-4 py-2.5 border-b border-[#2E2E2E] flex justify-end items-center sticky top-0 bg-[#181818]/95 backdrop-blur-md z-10">
+      {/* Top Header: Incident Context Selector & Collapse Button directly aligned */}
+      <div className="p-3 border-b border-[#2E2E2E] flex justify-between items-center sticky top-0 bg-[#181818]/95 backdrop-blur-md z-20 gap-2">
+        {/* Incident Catalog Selector Dropdown */}
+        <div className="relative flex-1 min-w-0">
+          <button
+            onClick={() => setScenarioDropdownOpen(!scenarioDropdownOpen)}
+            className="w-full flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#222222] hover:bg-[#2A2A2A] border border-[#333333] text-xs font-mono text-[#D1C9B8] transition-all cursor-pointer truncate"
+            aria-expanded={scenarioDropdownOpen}
+            aria-label="Select incident scenario"
+          >
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="text-[#6B9BB0] font-bold shrink-0">{currentScenario.id}</span>
+              <span className="text-[#F4EEE0] truncate text-[11px]">{currentScenario.title}</span>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-[#9E9788] shrink-0" />
+          </button>
+
+          {/* Catalog Dropdown Menu */}
+          {scenarioDropdownOpen && (
+            <div className="absolute left-0 mt-1.5 w-72 max-h-96 overflow-y-auto bg-[#1C1C1C] rounded-xl border border-[#333333] p-1.5 shadow-2xl z-50 custom-scrollbar">
+              <div className="px-2 py-1 text-[10px] font-mono text-[#9E9788] uppercase tracking-wider border-b border-[#2E2E2E] mb-1">
+                Incident Catalog
+              </div>
+              {SCENARIO_CATALOG.map((sc) => (
+                <button
+                  key={sc.id}
+                  onClick={() => {
+                    onConfigChange(sc.id, activePersona, activeRegion)
+                    setScenarioDropdownOpen(false)
+                  }}
+                  className={`w-full text-left p-2 rounded-lg text-xs transition-colors flex flex-col gap-0.5 cursor-pointer ${
+                    sc.id === activeScenarioId
+                      ? "bg-[#6B9BB0]/20 text-[#F4EEE0] border border-[#6B9BB0]/40"
+                      : "hover:bg-white/[0.04] text-[#D1C9B8]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="font-bold text-[#6B9BB0]">{sc.id}</span>
+                    <span className="text-[10px] text-[#9E9788] px-1 rounded bg-black/40">
+                      {sc.domain}
+                    </span>
+                  </div>
+                  <div className="font-medium text-[#F4EEE0] truncate">{sc.title}</div>
+                  <div className="text-[10px] text-[#9E9788] truncate">{sc.description}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Inline Collapse Button */}
         <button
           onClick={onToggleCollapse}
           title="Collapse Sidebar (~56px Rail)"
-          className="p-1 rounded-lg hover:bg-[#2A2A2A] text-[#9E9788] hover:text-[#F4EEE0] transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-mono"
+          className="p-1.5 rounded-lg bg-[#222222] hover:bg-[#2A2A2A] text-[#9E9788] hover:text-[#F4EEE0] border border-[#333333] transition-colors cursor-pointer shrink-0"
         >
           <ChevronLeft className="w-4 h-4" />
-          <span>Collapse</span>
         </button>
       </div>
 
-      <div className="p-4 flex flex-col gap-4 flex-1 justify-between">
-        <div className="space-y-4">
+      <div className="p-3.5 flex flex-col gap-3.5 flex-1 justify-between">
+        <div className="space-y-3.5">
           {/* Persona Switcher Section */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex justify-between items-center text-xs font-mono">
               <span className="text-[#9E9788] text-[10px] uppercase font-bold">
                 Persona Perspective
@@ -293,8 +356,8 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
             )}
           </div>
 
-          {/* Primary Scenario Anomaly Card */}
-          <div className="p-4 rounded-xl bg-[#222222] border border-[#333333] transition-colors relative overflow-hidden space-y-2">
+          {/* Primary Scenario Details Card */}
+          <div className="p-3.5 rounded-xl bg-[#222222] border border-[#333333] transition-colors relative overflow-hidden space-y-2">
             {/* Left indicator bar */}
             <div
               className={`absolute left-0 top-0 bottom-0 w-1 ${
@@ -340,7 +403,7 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
 
           {/* Supporting Signals & Observations */}
           {result.signals && result.signals.length > 1 && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <span className="text-[10px] font-mono uppercase text-[#9E9788] tracking-wider block">
                 Secondary Telemetry Feeds ({result.signals.length - 1})
               </span>
@@ -351,7 +414,7 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
                 return (
                   <div
                     key={sig.kpi_id}
-                    className="p-3 rounded-lg bg-[#222222] border border-[#333333] text-xs font-mono space-y-1"
+                    className="p-2.5 rounded-lg bg-[#222222] border border-[#333333] text-xs font-mono space-y-1"
                   >
                     <div className="flex justify-between items-center">
                       <span className="text-[#D1C9B8] font-bold uppercase truncate max-w-[150px]">
