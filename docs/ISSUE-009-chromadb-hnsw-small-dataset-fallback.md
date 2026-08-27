@@ -1,7 +1,7 @@
-# ISSUE-009: ChromaDB HNSW Index Contiguity on Small Datasets Mitigated via Fallback
+# ISSUE-009: ChromaDB HNSW Index Contiguity on Small Datasets Resolved
 
 **Severity**: 🟡 Medium — Operational Robustness & Vector Search Architecture  
-**Status**: Operationally Mitigated (Fallback Verified End-to-End; Source Root-Cause Pending)  
+**Status**: Resolved (Eliminated at Source via Small-Dataset Exact Cosine Branch)  
 **Affects**: [`engines/evidence.py`](file:///e:/accenture/engines/evidence.py) (E4), [`etl/load_to_chroma.py`](file:///e:/accenture/etl/load_to_chroma.py), ChromaDB / `hnswlib` configuration
 
 ---

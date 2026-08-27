@@ -9,8 +9,8 @@ This document serves as the central tracking register for all architectural issu
 | Metric | Count | Details |
 | :--- | :---: | :--- |
 | **Total Tracked Issues** | **9** | `ISSUE-001` through `ISSUE-009` |
-| **Resolved / Implemented** | **3** | `ISSUE-001`, `ISSUE-002`, `ISSUE-003` |
-| **Operationally Mitigated (Source Pending)** | **2** | `ISSUE-008`, `ISSUE-009` |
+| **Resolved / Implemented** | **4** | `ISSUE-001`, `ISSUE-002`, `ISSUE-003`, `ISSUE-009` |
+| **Operationally Mitigated (Source Pending)** | **1** | `ISSUE-008` |
 | **Open / Future Review** | **4** | `ISSUE-004`, `ISSUE-005`, `ISSUE-006`, `ISSUE-007` |
 
 ---
@@ -27,7 +27,7 @@ This document serves as the central tracking register for all architectural issu
 | **ISSUE-006** | **Confidence Calibration**<br>Transforming raw scores into empirical calibrated probabilities | 🔴 High | **Open** | `engines/challenge.py` (E6), `engines/decision.py` (E7), `web/src/` | [`ISSUE-006-confidence-calibration.md`](./ISSUE-006-confidence-calibration.md) |
 | **ISSUE-007** | **Scenario Coverage & Generalization**<br>Expanding synthetic benchmark matrix beyond initial seeds | 🔴 High | **Open** | `etl/generate_scenarios.py`, `data/ground_truth.json`, `benchmarks/` | [`ISSUE-007-scenario-coverage.md`](./ISSUE-007-scenario-coverage.md) |
 | **ISSUE-008** | **Simulated Outcome Contamination**<br>Preventing E8 scripted projections from becoming retrievable factual precedents in E9 | 🔴 High | **Mitigated** | `engines/outcome.py` (E8), `engines/memory.py` (E9), `models.py` | [`ISSUE-008-simulated-outcome-contamination.md`](./ISSUE-008-simulated-outcome-contamination.md) |
-| **ISSUE-009** | **ChromaDB HNSW Contiguity on Small Datasets**<br>Array contiguity runtime error on $N < 15$ docs mitigated via metadata get fallback | 🟡 Medium | **Mitigated** | `engines/evidence.py` (E4), `etl/load_to_chroma.py`, ChromaDB configuration | [`ISSUE-009-chromadb-hnsw-small-dataset-fallback.md`](./ISSUE-009-chromadb-hnsw-small-dataset-fallback.md) |
+| **ISSUE-009** | **ChromaDB HNSW Contiguity on Small Datasets**<br>Eliminated at source via small-dataset exact cosine branch | 🟡 Medium | **Resolved** | `engines/evidence.py` (E4), `etl/load_to_chroma.py`, ChromaDB configuration | [`ISSUE-009-chromadb-hnsw-small-dataset-fallback.md`](./ISSUE-009-chromadb-hnsw-small-dataset-fallback.md) |
 
 ---
 
