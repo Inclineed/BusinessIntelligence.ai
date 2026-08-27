@@ -184,27 +184,53 @@ def _build_user_prompt(
         
     output_instructions = (
         f"{prompt_context}"
-        "Generate EXACTLY 3 hypotheses that explain the KPI movement.\n\n"
+        "Generate EXACTLY 3 distinct, competing candidate hypotheses (H1, H2, and H3) that explain the observed KPI movement.\n\n"
         "You MUST output ONLY valid JSON matching this exact schema — no prose before or after:\n"
         "{\n"
         '  "hypotheses": [\n'
         "    {\n"
         '      "hypothesis_id": "H1",\n'
-        '      "statement": "<qualitative statement, NO numbers>",\n'
+        '      "statement": "<qualitative causal statement for H1, NO numbers>",\n'
         '      "citations": [\n'
         "        {\n"
-        '          "evidence_id": "<ev_id_from_list_above>",\n'
+        '          "evidence_id": "<exact_id_from_list_above>",\n'
         '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
         '          "role": "supports",\n'
-        '          "relevance_explanation": "<one sentence connecting this evidence to hypothesis>"\n'
+        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
         "        }\n"
         "      ],\n"
-        '      "reasoning": "<qualitative narrative prose, NO numbers, NO evidence IDs>"\n'
+        '      "reasoning": "<qualitative narrative prose for H1, NO numbers, NO evidence IDs>"\n'
         "    },\n"
-        "    ... (H2, H3)\n"
+        "    {\n"
+        '      "hypothesis_id": "H2",\n'
+        '      "statement": "<qualitative competing statement for H2, NO numbers>",\n'
+        '      "citations": [\n'
+        "        {\n"
+        '          "evidence_id": "<exact_id_from_list_above>",\n'
+        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
+        '          "role": "supports",\n'
+        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
+        "        }\n"
+        "      ],\n"
+        '      "reasoning": "<qualitative narrative prose for H2, NO numbers, NO evidence IDs>"\n'
+        "    },\n"
+        "    {\n"
+        '      "hypothesis_id": "H3",\n'
+        '      "statement": "<qualitative alternative statement for H3, NO numbers>",\n'
+        '      "citations": [\n'
+        "        {\n"
+        '          "evidence_id": "<exact_id_from_list_above>",\n'
+        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
+        '          "role": "supports",\n'
+        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
+        "        }\n"
+        "      ],\n"
+        '      "reasoning": "<qualitative narrative prose for H3, NO numbers, NO evidence IDs>"\n'
+        "    }\n"
         "  ]\n"
         "}\n\n"
         "CRITICAL REMINDER:\n"
+        "- Generate all 3 hypotheses: H1, H2, and H3.\n"
         "- Do NOT put any digits, percentages, ratios, probabilities, scores, "
         "counts, or rankings in 'statement' or 'reasoning'.\n"
         "- Only reference evidence IDs from the list above in citations.\n"

@@ -416,8 +416,8 @@ class GroqProvider(LLMProvider):
             user_content = prompt + "\n\nCRITICAL INSTRUCTION: Keep thinking process brief. Output ONLY valid JSON matching the schema immediately."
         messages.append({"role": "user", "content": user_content})
 
-        # Stay safely within Groq's 8000 TPM limit (e.g. ~3500 prompt + 1500 completion = 5000 < 8000)
-        actual_max_tokens = min(max_tokens, 1500)
+        # Stay safely within Groq's 8000 TPM limit (e.g. ~1100 prompt + 2500 completion = 3600 < 8000)
+        actual_max_tokens = min(max_tokens, 2500)
 
         payload: dict[str, Any] = {
             "model": target_model,

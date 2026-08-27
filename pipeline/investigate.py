@@ -223,6 +223,14 @@ def _primary_signal(
         ranked = [m for m in materiality if m.is_statistical_anomaly and m.priority_rank > 0]
         if ranked:
             ranked.sort(key=lambda m: m.priority_rank)
+            # If segmentable_kpi_ids is provided, prioritize the highest-ranked anomaly that HAS segmented data
+            if segmentable_kpi_ids:
+                seg_ranked = [m for m in ranked if m.kpi_id in segmentable_kpi_ids]
+                if seg_ranked:
+                    top_kpi_id = seg_ranked[0].kpi_id
+                    for s in signals:
+                        if s.kpi_id == top_kpi_id:
+                            return s
             top_kpi_id = ranked[0].kpi_id
             for s in signals:
                 if s.kpi_id == top_kpi_id:
