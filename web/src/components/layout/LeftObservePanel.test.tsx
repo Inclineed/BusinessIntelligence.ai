@@ -4,6 +4,22 @@ import React from "react"
 import { LeftObservePanel } from "./LeftObservePanel"
 import { DEFAULT_INC_001 } from "../../lib/defaultData"
 
+vi.mock("../../contexts/ScenariosContext", () => ({
+  useScenarios: () => ({
+    scenarios: [
+      {
+        id: "INC_001",
+        title: "Payment Gateway Latency Regression",
+        domain: "E-Commerce Checkout",
+        status: "live",
+        type: "Single Root Cause (HIGH)",
+        description: "Checkout v4.3 deploy caused connection pool exhaustion in payment gateway client.",
+      },
+    ],
+    loading: false,
+  }),
+}))
+
 describe("LeftObservePanel", () => {
   it("renders expanded sidebar with full details when isCollapsed is false", () => {
     const onToggle = vi.fn()

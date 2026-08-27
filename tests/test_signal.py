@@ -20,9 +20,17 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from models import FreshnessStatus, KPIValue, MethodTag
+from models import (
+    AnomalySignal,
+    BusinessMateriality,
+    FreshnessStatus,
+    KPIValue,
+    MaterialityAssessment,
+    MethodTag,
+)
 from engines.signal import (
     HistoryWindow,
+    assess_materiality,
     assert_corroboration,
     build_history_from_kpis,
     detect_signals,
@@ -622,3 +630,213 @@ class TestAggregateRowSelection:
         sig = signals[0]
         assert sig.observed == 50.0  # used the aggregate row
         assert sig.is_anomaly is True
+
+
+# ---------------------------------------------------------------------------
+# Business Materiality & Priority Ranking (P0 #1)
+# ---------------------------------------------------------------------------
+
+
+class TestBusinessMateriality:
+    """Verify statistical significance -> business impact -> priority rank."""
+
+    def _sample_contract(self):
+        return {
+            "domain": "Retail / Consumer Goods",
+            "kpis": [
+                {
+                    "id": "hourly_revenue",
+                    "materiality": {
+                        "impact_metric": "financial",
+                        "multiplier": 1.0,
+                        "critical_threshold": 25000.0,
+                        "high_threshold": 10000.0,
+                        "medium_threshold": 5000.0,
+                        "low_threshold": 1000.0,
+                    },
+                },
+                {
+                    "id": "hourly_conversion",
+                    "materiality": {
+                        "impact_metric": "financial",
+                        "multiplier": 20000.0,
+                        "critical_threshold": 25000.0,
+                        "high_threshold": 10000.0,
+                        "medium_threshold": 5000.0,
+                        "low_threshold": 1000.0,
+                    },
+                },
+                {
+                    "id": "gateway_latency_15min",
+                    "materiality": {
+                        "impact_metric": "volume",
+                        "multiplier": 10.0,
+                        "critical_threshold": 3000.0,
+                        "high_threshold": 1500.0,
+                        "medium_threshold": 500.0,
+                        "low_threshold": 100.0,
+                    },
+                },
+                {
+                    "id": "minor_latency",
+                    "materiality": {
+                        "impact_metric": "volume",
+                        "multiplier": 1.0,
+                        "critical_threshold": 1000.0,
+                        "high_threshold": 500.0,
+                        "medium_threshold": 100.0,
+                        "low_threshold": 20.0,
+                    },
+                },
+            ],
+        }
+
+    def test_materiality_tiers_and_impact_calculation(self):
+        """Financial and volume multipliers correctly translate delta into impact and tier."""
+        contract = self._sample_contract()
+        signals = [
+            AnomalySignal(
+                kpi_id="hourly_revenue",
+                observed=70000.0,
+                expected=100000.0,  # delta = 30000 * 1.0 = 30000 >= 25000 -> CRITICAL
+                delta_pct=-30.0,
+                z_score=-4.5,
+                is_anomaly=True,
+            ),
+            AnomalySignal(
+                kpi_id="hourly_conversion",
+                observed=0.045,
+                expected=0.050,  # delta = 0.005 * 20000 = 100 (below low 1000) -> NEGLIGIBLE
+                delta_pct=-10.0,
+                z_score=-3.5,
+                is_anomaly=True,
+            ),
+            AnomalySignal(
+                kpi_id="gateway_latency_15min",
+                observed=380.0,
+                expected=200.0,  # delta = 180 * 10 = 1800 (>= 1500 < 3000) -> HIGH
+                delta_pct=90.0,
+                z_score=5.0,
+                is_anomaly=True,
+            ),
+        ]
+
+        assessments = assess_materiality(signals, contract)
+        assert len(assessments) == 3
+
+        rev_mat = next(a for a in assessments if a.kpi_id == "hourly_revenue")
+        assert rev_mat.financial_impact == 30000.0
+        assert rev_mat.volume_impact is None
+        assert rev_mat.business_materiality == BusinessMateriality.CRITICAL
+        assert rev_mat.priority_rank == 1
+
+        lat_mat = next(a for a in assessments if a.kpi_id == "gateway_latency_15min")
+        assert lat_mat.financial_impact is None
+        assert lat_mat.volume_impact == 1800.0
+        assert lat_mat.business_materiality == BusinessMateriality.HIGH
+        assert lat_mat.priority_rank == 2
+
+        conv_mat = next(a for a in assessments if a.kpi_id == "hourly_conversion")
+        assert conv_mat.financial_impact == 100.0
+        assert conv_mat.business_materiality == BusinessMateriality.NEGLIGIBLE
+        assert conv_mat.priority_rank == 3
+
+    def test_non_anomalies_excluded_from_ranking(self):
+        """Non-anomalies default to NEGLIGIBLE and priority_rank = 0."""
+        contract = self._sample_contract()
+        signals = [
+            AnomalySignal(
+                kpi_id="hourly_revenue",
+                observed=100000.0,
+                expected=100000.0,
+                delta_pct=0.0,
+                z_score=0.0,
+                is_anomaly=False,
+            ),
+            AnomalySignal(
+                kpi_id="gateway_latency_15min",
+                observed=600.0,
+                expected=200.0,  # delta = 400 * 10 = 4000 >= 3000 -> CRITICAL
+                delta_pct=200.0,
+                z_score=6.0,
+                is_anomaly=True,
+            ),
+        ]
+
+        assessments = assess_materiality(signals, contract)
+        rev_mat = next(a for a in assessments if a.kpi_id == "hourly_revenue")
+        lat_mat = next(a for a in assessments if a.kpi_id == "gateway_latency_15min")
+
+        assert rev_mat.business_materiality == BusinessMateriality.NEGLIGIBLE
+        assert rev_mat.priority_rank == 0
+        assert rev_mat.financial_impact is None
+
+        assert lat_mat.business_materiality == BusinessMateriality.CRITICAL
+        assert lat_mat.priority_rank == 1
+
+    def test_deterministic_tie_breaking(self):
+        """Tie-breaking respects materiality tier -> impact magnitude -> segmentability -> kpi_id."""
+        contract = self._sample_contract()
+        # Both revenue and conversion are CRITICAL with same impact (30000), but revenue is segmentable
+        signals = [
+            AnomalySignal(
+                kpi_id="hourly_conversion",
+                observed=0.035,
+                expected=0.050,  # delta = 0.015 * 20000 = 300 -> wait, let's make multiplier 2,000,000 so delta 0.015 * 2,000,000 = 30,000
+                delta_pct=-30.0,
+                z_score=-4.0,
+                is_anomaly=True,
+            ),
+            AnomalySignal(
+                kpi_id="hourly_revenue",
+                observed=70000.0,
+                expected=100000.0,  # delta = 30000 * 1 = 30000
+                delta_pct=-30.0,
+                z_score=-4.0,
+                is_anomaly=True,
+            ),
+        ]
+        # Custom contract for exact tie
+        custom_contract = {
+            "kpis": [
+                {
+                    "id": "hourly_revenue",
+                    "materiality": {
+                        "impact_metric": "financial",
+                        "multiplier": 1.0,
+                        "critical_threshold": 25000.0,
+                        "high_threshold": 10000.0,
+                        "medium_threshold": 5000.0,
+                        "low_threshold": 1000.0,
+                    },
+                },
+                {
+                    "id": "hourly_conversion",
+                    "materiality": {
+                        "impact_metric": "financial",
+                        "multiplier": 2000000.0,
+                        "critical_threshold": 25000.0,
+                        "high_threshold": 10000.0,
+                        "medium_threshold": 5000.0,
+                        "low_threshold": 1000.0,
+                    },
+                },
+            ]
+        }
+        # hourly_conversion is segmentable
+        assessments = assess_materiality(
+            signals,
+            custom_contract,
+            segmentable_kpi_ids={"hourly_conversion"},
+        )
+        conv = next(a for a in assessments if a.kpi_id == "hourly_conversion")
+        rev = next(a for a in assessments if a.kpi_id == "hourly_revenue")
+
+        # Both are CRITICAL and both have financial_impact = 30000, but hourly_conversion is segmentable
+        assert conv.business_materiality == BusinessMateriality.CRITICAL
+        assert rev.business_materiality == BusinessMateriality.CRITICAL
+        assert conv.financial_impact == 30000.0
+        assert rev.financial_impact == 30000.0
+        assert conv.priority_rank == 1
+        assert rev.priority_rank == 2
+

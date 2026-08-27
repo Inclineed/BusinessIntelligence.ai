@@ -1,4 +1,4 @@
-﻿"""
+"""
 etl/load_scenario.py — Load an additional scenario (INC_002 / INC_004) into
 Postgres with SCENARIO-SCOPED primary keys so rows never collide with INC_001.
 

@@ -473,9 +473,11 @@ class TestHallucinatedIds:
 
 class TestRules:
     def setup_method(self):
+        from config.loader import load_domain_semantics
         self.evidence_by_id = make_evidence_set()
         self.signals = make_signals()
         self.contributions = make_contributions()
+        self.domain_semantics = load_domain_semantics("config/domain_semantics.yaml")
 
     def test_timeline_pass_with_deployment_evidence(self):
         h = make_hypotheses()[0]  # H1 references ev_deploy_001
@@ -508,13 +510,13 @@ class TestRules:
     def test_mechanism_consistency_fail_for_h3(self):
         """H3 (inventory shortage) is refuted by inventory-normal evidence."""
         h = make_hypotheses()[2]
-        result = evaluate_rule("mechanism_consistency", h, self.evidence_by_id, self.signals, self.contributions)
+        result = evaluate_rule("mechanism_consistency", h, self.evidence_by_id, self.signals, self.contributions, self.domain_semantics)
         assert result.verdict == RuleVerdict.FAIL
 
     def test_mechanism_consistency_pass_for_h1(self):
         """H1 has payment_gateway supporting evidence → mechanism confirmed."""
         h = make_hypotheses()[0]
-        result = evaluate_rule("mechanism_consistency", h, self.evidence_by_id, self.signals, self.contributions)
+        result = evaluate_rule("mechanism_consistency", h, self.evidence_by_id, self.signals, self.contributions, self.domain_semantics)
         assert result.verdict == RuleVerdict.PASS
 
     def test_all_rule_names_evaluated(self):

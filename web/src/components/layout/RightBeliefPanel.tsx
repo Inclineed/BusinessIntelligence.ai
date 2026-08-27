@@ -36,7 +36,6 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
   const confidenceScore = leadingScored?.final_score
     ? Math.round(leadingScored.final_score * 100)
     : 85
-  const recoveryPct = result.outcome?.projected_recovery_pct ?? 88.0
 
   // SVG Circular Dash math (r=48 => circumference ~ 301.59)
   const circumference = 301.59
@@ -201,18 +200,22 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
             )}
 
             {/* Projected Impact */}
-            {result.outcome && (
+            {result.outcome && result.outcome.projected_recovery_pct !== undefined && (
               <div className="p-3.5 rounded-xl bg-[#222222] border border-[#333333] space-y-1.5">
                 <div className="text-[#9E9788] uppercase text-[10px]">Projected Outcome</div>
                 <p className="text-[#D1C9B8] font-sans text-xs leading-relaxed">
-                  Executing mitigation is projected to recover{" "}
+                  Projected{" "}
                   <span className="text-[#4E8569] font-bold">
-                    {recoveryPct.toFixed(1)}%
+                    {result.outcome.projected_recovery_pct.toFixed(1)}%
                   </span>{" "}
-                  of lost conversion within standard SLA windows.
+                  recovery on {result.outcome.projected_metric || "primary metric"} · mean time to normalcy{" "}
+                  <span className="text-[#6B9BB0] font-bold">
+                    {result.outcome.mean_time_to_normalcy || "5 min"}
+                  </span>
+                  .
                 </p>
                 <div className="text-[10px] text-[#9E9788] border-t border-white/[0.04] pt-1">
-                  * Calibration simulation estimate
+                  * Simulation estimate based on scripted recovery patterns. Not causal proof.
                 </div>
               </div>
             )}

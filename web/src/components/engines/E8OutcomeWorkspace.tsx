@@ -9,7 +9,8 @@ interface E8OutcomeWorkspaceProps {
 
 export const E8OutcomeWorkspace: React.FC<E8OutcomeWorkspaceProps> = ({ result }) => {
   const outcome = result.outcome
-  const recoveryPct = outcome?.projected_recovery_pct ?? 88.0
+  const recoveryPct = outcome?.projected_recovery_pct
+  const meanTimeToNormalcy = outcome?.mean_time_to_normalcy || "N/A"
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -36,17 +37,17 @@ export const E8OutcomeWorkspace: React.FC<E8OutcomeWorkspaceProps> = ({ result }
         <div className="p-6 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] text-center space-y-2">
           <div className="text-[11px] text-[#9E9788] uppercase tracking-wider">Projected Recovery</div>
           <div className="text-4xl font-bold text-[#4E8569] tabular-nums">
-            {recoveryPct.toFixed(1)}%
+            {recoveryPct !== undefined ? `${recoveryPct.toFixed(1)}%` : "N/A"}
           </div>
-          <div className="text-xs text-[#9E9788]">Target metric: {outcome?.projected_metric || "order_conversion_rate"}</div>
+          <div className="text-xs text-[#9E9788]">Target metric: {outcome?.projected_metric || "N/A"}</div>
         </div>
 
         <div className="p-6 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] text-center space-y-2">
           <div className="text-[11px] text-[#9E9788] uppercase tracking-wider">Mean Time to Normalcy</div>
           <div className="text-4xl font-bold text-[#6B9BB0] tabular-nums">
-            5.0m
+            {meanTimeToNormalcy}
           </div>
-          <div className="text-xs text-[#9E9788]">Post-rollback reload &amp; latency stabilization</div>
+          <div className="text-xs text-[#9E9788]">Simulated stabilization estimate (non-SLA)</div>
         </div>
       </div>
 

@@ -263,23 +263,48 @@ def test_deterministic_reproducibility():
 
 def test_api_get_evaluation_health_endpoint():
     """14. Test FastAPI GET /evaluation/health endpoint contract."""
+    from unittest.mock import MagicMock, patch
     from fastapi.testclient import TestClient
     from api.main import app
+    from evaluation.health import MetricEvaluation, MetricHealthStatus
 
     with TestClient(app) as client:
-        res = client.get("/evaluation/health")
-        assert res.status_code == 200
-        payload = res.json()
-        assert "status" in payload
-        assert "sample_state" in payload
-        assert "total_investigations" in payload
-        assert "recent_window_size" in payload
-        assert "baseline_window_size" in payload
-        assert "metrics" in payload
-        assert "e2e_latency_p95_ms" in payload["metrics"]
-        assert "abstention_rate" in payload["metrics"]
-        assert "high_confidence_rate" in payload["metrics"]
-        assert "human_agreement_rate" in payload["metrics"]
-        assert "citation_violation_rate" in payload["metrics"]
-        assert "e9_retrieval_relevance" in payload["metrics"]
+        # Mock db_conn on app.state
+        mock_db = MagicMock()
+        app.state.db_conn = mock_db
+
+        inv_tuples = [(f"inv_{i}", _make_mock_investigation()) for i in range(100)]
+        dummy_metric = MetricEvaluation(
+            name="human_agreement_rate",
+            recent_value=0.85,
+            baseline_value=0.85,
+            delta=0.0,
+            relative_change=0.0,
+            status=MetricHealthStatus.HEALTHY,
+            watch_threshold=-0.15,
+            degraded_threshold=-0.30,
+            reason="Stable",
+        )
+
+        with patch.object(HealthMonitorService, "fetch_investigation_windows", return_value=(SampleState.FULL_COMPARISON, inv_tuples[:50], inv_tuples[50:])):
+            with patch("evaluation.health.evaluate_human_agreement", return_value=dummy_metric):
+                res = client.get("/evaluation/health")
+                assert res.status_code == 200
+                payload = res.json()
+                assert "status" in payload
+                assert "sample_state" in payload
+                assert "total_investigations" in payload
+                assert "recent_window_size" in payload
+                assert "baseline_window_size" in payload
+                assert "metrics" in payload
+                assert "e2e_latency_p95_ms" in payload["metrics"]
+                assert "abstention_rate" in payload["metrics"]
+                assert "high_confidence_rate" in payload["metrics"]
+                assert "human_agreement_rate" in payload["metrics"]
+                assert "citation_violation_rate" in payload["metrics"]
+                assert "e9_retrieval_relevance" in payload["metrics"]
+
+
+
+
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react"
-import { SCENARIO_CATALOG } from "../../lib/defaultData"
+import { useScenarios } from "../../contexts/ScenariosContext"
 import { ChevronDown, Check, ShieldCheck, Globe } from "lucide-react"
 import { PersonaType } from "../../types/investigation"
 
@@ -17,8 +17,10 @@ export const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
+  const { scenarios } = useScenarios()
+
   const activeScenario =
-    SCENARIO_CATALOG.find((s) => s.id === selectedScenarioId) || SCENARIO_CATALOG[0]
+    scenarios.find((s) => s.id === selectedScenarioId) || scenarios[0] || {}
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -43,7 +45,7 @@ export const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({
             {activeScenario.id}
           </span>
           <div className="truncate">
-            <div className="text-xs font-semibold text-white truncate">{activeScenario.label}</div>
+            <div className="text-xs font-semibold text-white truncate">{activeScenario.title}</div>
             <div className="text-[10px] text-neutral-400 truncate">{activeScenario.domain}</div>
           </div>
         </div>
@@ -57,10 +59,10 @@ export const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({
       {isOpen && (
         <div className="absolute right-0 top-full mt-2 w-[360px] max-h-[420px] overflow-y-auto rounded-2xl bg-[#12131D] border border-white/[0.12] shadow-2xl p-2 z-50 space-y-1 backdrop-blur-xl">
           <div className="px-2.5 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-400 border-b border-white/[0.06] mb-1">
-            Available Scenarios ({SCENARIO_CATALOG.length})
+            Available Scenarios ({scenarios.length})
           </div>
 
-          {SCENARIO_CATALOG.map((item) => {
+          {scenarios.map((item) => {
             const isSelected = item.id === selectedScenarioId
             return (
               <div
@@ -86,7 +88,7 @@ export const ScenarioSelector: React.FC<ScenarioSelectorProps> = ({
                     >
                       {item.id}
                     </span>
-                    <span className="text-xs font-bold text-white">{item.label}</span>
+                    <span className="text-xs font-bold text-white">{item.title}</span>
                   </div>
                   <div className="text-[11px] text-neutral-400 leading-snug line-clamp-1">
                     {item.description}

@@ -1,0 +1,117 @@
+# evidence_mappings.yaml — Canonical Data & Evidence Extraction Mappings
+#
+# Maps heterogeneous business sources to CanonicalEvidenceRecords.
+# Parameter bindings available:
+#   %(scenario_id)s, %(start_ts)s, %(end_ts)s
+
+mappings:
+
+  payment_gateway:
+    type: "sql"
+    entity_default: "checkout-gateway"
+    temporal_policy: "rate"
+    lineage:
+      - "payment_provider_api → payment_events"
+    query: |
+      SELECT
+        'payment_events:aggregate' AS raw_ref,
+        'checkout-gateway' AS entity,
+        'payment_failure_rate_15min' AS metric,
+        COUNT(*) AS total_count,
+        SUM(CASE WHEN success = false THEN 1 ELSE 0 END) AS failure_count,
+        AVG(latency_ms) AS avg_latency,
+        MAX(ts) AS timestamp
+      FROM payment_events
+      WHERE scenario_id = %(scenario_id)s
+        AND ts >= %(start_ts)s
+        AND ts <= %(end_ts)s
+    observation_template: >-
+      Payment gateway events in window: {total_count} total, {failure_count} failures
+      (failure rate: {failure_rate:.1f}%), average latency {avg_latency:.0f}ms.
+
+  inventory:
+    type: "sql"
+    entity_default: "warehouse-inventory"
+    temporal_policy: "snapshot"
+    lineage:
+      - "warehouse_system → inventory_events"
+    query: |
+      SELECT
+        'inventory_events:aggregate' AS raw_ref,
+        'warehouse-inventory' AS entity,
+        'inventory_fill_rate' AS metric,
+        AVG(fill_rate) AS avg_fill_rate,
+        MAX(ts) AS timestamp
+      FROM inventory_events
+      WHERE scenario_id = %(scenario_id)s
+        AND ts >= %(start_ts)s
+        AND ts <= %(end_ts)s
+    observation_template: >-
+      Inventory fill rate in window: average {avg_fill_rate:.1%}. Inventory levels appear normal.
+
+  deployment_log:
+    type: "sql"
+    entity_default: "deployment-service"
+    temporal_policy: "snapshot"
+    lineage:
+      - "ci_cd_system → deployment_log"
+    # Look for deployments in the 48h window before anomaly start
+    query: |
+      SELECT
+        'deployment_log:' || deploy_id AS raw_ref,
+        component AS entity,
+        'software_deployment' AS metric,
+        version,
+        component,
+        ts AS timestamp
+      FROM deployment_log
+      WHERE ts >= (CAST(%(start_ts)s AS TIMESTAMPTZ) - INTERVAL '48 hours')
+        AND ts <= CAST(%(start_ts)s AS TIMESTAMPTZ)
+      ORDER BY ts DESC
+    observation_template: >-
+      Deployment '{version}' of component '{component}' was deployed at {timestamp} (within 48h before anomaly window).
+
+  support_tickets:
+    type: "sql"
+    entity_default: "customer-support"
+    temporal_policy: "rate"
+    lineage:
+      - "support_system → support_tickets"
+    query: |
+      SELECT
+        'support_tickets:aggregate' AS raw_ref,
+        'customer-support' AS entity,
+        'support_ticket_volume' AS metric,
+        COUNT(*) AS total_count,
+        category,
+        MAX(ts) AS timestamp
+      FROM support_tickets
+      WHERE scenario_id = %(scenario_id)s
+        AND ts >= %(start_ts)s
+        AND ts <= %(end_ts)s
+      GROUP BY category
+      ORDER BY COUNT(*) DESC
+    observation_template: >-
+      Support tickets in window: {total_count} total for category {category}.
+
+  marketing:
+    type: "sql"
+    entity_default: "marketing-platform"
+    temporal_policy: "snapshot"
+    lineage:
+      - "campaign_platform_api → marketing_events"
+    query: |
+      SELECT
+        'marketing_events:aggregate' AS raw_ref,
+        channel AS entity,
+        'marketing_spend' AS metric,
+        SUM(spend) AS total_spend,
+        SUM(impressions) AS total_impressions,
+        MAX(ts) AS timestamp
+      FROM marketing_events
+      WHERE scenario_id = %(scenario_id)s
+        AND ts >= %(start_ts)s
+        AND ts <= %(end_ts)s
+      GROUP BY channel
+    observation_template: >-
+      Marketing campaign on channel '{entity}': total spend ${total_spend:.2f}, {total_impressions} impressions.

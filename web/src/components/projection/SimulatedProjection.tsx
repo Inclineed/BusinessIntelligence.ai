@@ -21,7 +21,7 @@ interface SimulatedProjectionProps {
 export const SimulatedProjection: React.FC<SimulatedProjectionProps> = ({ outcome, signals = [] }) => {
   const primarySignal = signals.find((s) => s.is_anomaly) || signals[0] || {}
   const delta = primarySignal.delta_pct || -12.0
-  const recoveryPct = outcome?.projected_recovery_pct || 85.0
+  const recoveryPct = outcome?.projected_recovery_pct ?? 0
   const metricName = outcome?.projected_metric || primarySignal.kpi_id || "Revenue / Conversion"
   const disclaimer =
     outcome?.disclaimer ||

@@ -100,12 +100,12 @@ export const E6ChallengeWorkspace: React.FC<E6ChallengeWorkspaceProps> = ({ resu
                   {/* Score Pills */}
                   <div className="flex flex-wrap items-center gap-2 text-xs font-mono shrink-0">
                     <span className="px-2 py-0.5 rounded bg-[#222222] text-[#9E9788] border border-[#333333]">
-                      Support: <strong className="text-[#4E8569]">{(sh.support_score * 100).toFixed(0)}%</strong>
+                      Support Score: <strong className="text-[#4E8569]">{(sh.support_score * 100).toFixed(0)}/100</strong>
                     </span>
 
                     {sh.contradiction_penalty > 0 && (
                       <span className="px-2 py-0.5 rounded bg-[#D8453A]/20 text-[#E56B62] border border-[#D8453A]/40 font-bold">
-                        Penalty: -{(sh.contradiction_penalty * 100).toFixed(0)}%
+                        Penalty: -{(sh.contradiction_penalty * 100).toFixed(0)}/100
                       </span>
                     )}
 
@@ -114,7 +114,7 @@ export const E6ChallengeWorkspace: React.FC<E6ChallengeWorkspaceProps> = ({ resu
                         ? "bg-[#4E8569]/25 text-[#F4EEE0] border-[#4E8569]/50"
                         : "bg-[#222222] text-[#9E9788] border-[#333333]"
                     }`}>
-                      Final: {(sh.final_score * 100).toFixed(0)}%
+                      Final Audit Score: {(sh.final_score * 100).toFixed(0)}/100
                     </span>
                   </div>
                 </div>

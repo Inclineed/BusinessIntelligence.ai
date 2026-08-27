@@ -1,13 +1,13 @@
 """
 engines/evidence.py — Engine E4: Evidence Engine [SQL]+[RETRIEVAL]
 
-Assembles authorized, freshness-weighted evidence from:
-  1. Structured SQL sources (payment_events, inventory_events, deployment_log,
-     support_tickets summary)
-  2. Unstructured ChromaDB retrieval (support tickets, release notes, deploy log)
+Assembles authorized, freshness-weighted evidence records using the Canonical
+Data & Evidence Layer:
+  1. Structured facts extracted and normalized via IngestionAdapter / SQL mappings
+  2. Unstructured semantic chunks retrieved from ChromaDB (or MockUnstructuredExtractor in test mode)
 
 Evidence is ALWAYS assembled AFTER the entitlement boundary.
-reliability_weight = freshness_decay(staleness, sla) * data_quality
+reliability_weight = calculate_reliability_decay(data_quality, staleness, sla)
 
 Requirements: 6.1–6.7, 7.3–7.5
 """
@@ -16,17 +16,26 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from datetime import datetime
 from typing import NamedTuple, Optional
 
 from models import (
     AnomalySignal,
+    CanonicalEvidenceRecord,
     Evidence,
     FreshnessStatus,
     MethodTag,
+    SourceRegistryEntry,
+    calculate_reliability_decay,
     clamp,
 )
 from config.registry import SourceRegistry
+from etl.ingestion_adapter import (
+    BatchSQLIngestionAdapter,
+    IngestionAdapter,
+    MockUnstructuredExtractor,
+)
 from security.entitlements import AuthorizationScope
 
 logger = logging.getLogger(__name__)
@@ -36,23 +45,11 @@ logger = logging.getLogger(__name__)
 # Public helper: reliability_weight
 # ---------------------------------------------------------------------------
 
-def reliability_weight(entry) -> float:
+def reliability_weight(entry: SourceRegistryEntry) -> float:
     """
     Compute freshness-decayed reliability weight for a SourceRegistryEntry.
-
-    Rules (Requirements 6.1–6.6):
-    - UNKNOWN freshness status OR sla_minutes == 0: return 0.0 (Req 6.6)
-    - In-SLA (freshness == FRESH): weight = data_quality  (Req 6.2)
-    - Stale beyond SLA: weight = data_quality * max(0, 1 - staleness_beyond_ratio)
-      where staleness_beyond_ratio = (staleness_minutes - sla_minutes) / sla_minutes
-      This is strictly < data_quality and monotonically non-increasing (Reqs 6.3, 6.4)
-    - Result clamped to [0, 1]
-
-    Returns
-    -------
-    float in [0, 1]
+    Delegates to the pinned continuous linear decay function.
     """
-    # Undeterminable freshness or no SLA defined → weight 0 (Req 6.6)
     if entry.sla_minutes == 0:
         logger.debug(
             "reliability_weight: source '%s' has sla_minutes=0; returning 0.0 "
@@ -68,22 +65,15 @@ def reliability_weight(entry) -> float:
         )
         return 0.0
 
-    staleness = entry.staleness_minutes
-    sla = float(entry.sla_minutes)
-
-    if staleness <= sla:
-        # In-SLA: full quality weight (Req 6.2)
-        return clamp(entry.data_quality, 0.0, 1.0)
-
-    # Stale beyond SLA: apply linear decay (Reqs 6.3, 6.4)
-    staleness_beyond_ratio = (staleness - sla) / sla
-    decay_factor = max(0.0, 1.0 - staleness_beyond_ratio)
-    weight = entry.data_quality * decay_factor
-    return clamp(weight, 0.0, 1.0)
+    return calculate_reliability_decay(
+        base_quality=entry.data_quality,
+        staleness_minutes=entry.staleness_minutes,
+        sla_minutes=float(entry.sla_minutes),
+    )
 
 
 def _reliability_weight_with_note(
-    entry,
+    entry: SourceRegistryEntry,
     notes: list[str],
 ) -> float:
     """
@@ -121,7 +111,7 @@ class EvidenceAssemblyResult(NamedTuple):
     reliability_notes : notes about zero-weight or missing metadata (Req 6.6)
     """
 
-    evidence: list[Evidence]
+    evidence: list[CanonicalEvidenceRecord]
     dropped_count: int
     reliability_notes: list[str]
 
@@ -179,7 +169,7 @@ def _maybe_summarize(
 
 
 # ---------------------------------------------------------------------------
-# Structured evidence assembly (Step A)
+# Structured evidence assembly (Step A) — IngestionAdapter
 # ---------------------------------------------------------------------------
 
 def _assemble_structured(
@@ -191,23 +181,21 @@ def _assemble_structured(
     db_conn,
     notes: list[str],
     provider,
-) -> tuple[list[Evidence], int]:
+    adapter: Optional[IngestionAdapter] = None,
+) -> tuple[list[CanonicalEvidenceRecord], int]:
     """
-    Query structured SQL sources and build Evidence items tagged [SQL].
-
-    Evidence retrieval is constrained by the authorized source set before evidence assembly.
-    Unauthorized sources are excluded at the retrieval layer.
+    Query structured sources via IngestionAdapter and build CanonicalEvidenceRecord items tagged [SQL].
     """
-    items: list[Evidence] = []
+    items: list[CanonicalEvidenceRecord] = []
     dropped = 0
 
-    if not authorized_sources:
+    if not authorized_sources or db_conn is None:
         return items, dropped
 
-    # -----------------------------------------------------------------------
-    # Helper: resolve registry entry and compute reliability weight
-    # -----------------------------------------------------------------------
-    def _get_weight(source_id: str) -> Optional[float]:
+    if adapter is None:
+        adapter = BatchSQLIngestionAdapter(db_conn=db_conn)
+
+    for source_id in sorted(list(authorized_sources)):
         try:
             entry = registry.get(source_id)
         except KeyError:
@@ -215,199 +203,26 @@ def _assemble_structured(
                 f"structured evidence: source '{source_id}' not found in registry; "
                 "item dropped (Req 7.5)"
             )
-            return None
-        return _reliability_weight_with_note(entry, notes)
+            dropped += 1
+            continue
 
-    # -----------------------------------------------------------------------
-    # Helper: execute a query and return rows (graceful on error)
-    # -----------------------------------------------------------------------
-    def _query(sql: str, params: tuple = ()) -> list:
-        if db_conn is None:
-            return []
         try:
-            cur = db_conn.cursor()
-            cur.execute(sql, params)
-            return cur.fetchall()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("_assemble_structured: query failed: %s", exc)
-            return []
-
-    start_ts = anomaly_window_start.isoformat()
-    end_ts = anomaly_window_end.isoformat()
-
-    # --- Payment events summary (source: payment_gateway) ---
-    SOURCE_PAYMENT = "payment_gateway"
-    if SOURCE_PAYMENT in authorized_sources:
-        weight = _get_weight(SOURCE_PAYMENT)
-        if weight is not None:
-            rows = _query(
-                """
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN success = false THEN 1 ELSE 0 END) AS failures,
-                    AVG(latency_ms) AS avg_latency
-                FROM payment_events
-                WHERE scenario_id = %s
-                  AND ts >= %s
-                  AND ts <= %s
-                """,
-                (scenario_id, start_ts, end_ts),
-            )
-            # COUNT(*) on an un-grouped aggregate always returns one row, so a
-            # bare `if rows:` is truthy even when the table holds nothing for
-            # this scenario. Emitting evidence then would assert a 0% failure
-            # rate from absent data — a fabricated fact. Require real rows.
-            if rows and (rows[0][0] or 0) > 0:
-                total, failures, avg_latency = rows[0]
-                total = total or 0
-                failures = failures or 0
-                avg_latency = avg_latency or 0.0
-                failure_rate = (failures / total * 100) if total > 0 else 0.0
-                summary = (
-                    f"Payment gateway events in window: {total} total, "
-                    f"{failures} failures (failure rate: {failure_rate:.1f}%), "
-                    f"average latency {avg_latency:.0f}ms."
+            for extracted in adapter.extract(
+                source_id=source_id,
+                window_start=anomaly_window_start,
+                window_end=anomaly_window_end,
+                scenario_id=scenario_id,
+            ):
+                norm_record = adapter.normalize(
+                    extracted=extracted,
+                    source_entry=entry,
+                    scenario_id=scenario_id,
                 )
-                summary = _maybe_summarize(summary, provider)
-                items.append(
-                    Evidence(
-                        evidence_id=_make_evidence_id(
-                            "payment_summary", scenario_id, f"{start_ts}:{end_ts}"
-                        ),
-                        kind="structured",
-                        summary=summary,
-                        source_id=SOURCE_PAYMENT,
-                        reliability_weight=weight,
-                        relevance=0.9,
-                        raw_ref="payment_events:aggregate",
-                        method=MethodTag.SQL,
-                    )
-                )
-        else:
-            dropped += 1
-
-    # --- Inventory fill rate (source: inventory) ---
-    SOURCE_INVENTORY = "inventory"
-    if SOURCE_INVENTORY in authorized_sources:
-        weight = _get_weight(SOURCE_INVENTORY)
-        if weight is not None:
-            rows = _query(
-                """
-                SELECT AVG(fill_rate) AS avg_fill_rate
-                FROM inventory_events
-                WHERE scenario_id = %s
-                  AND ts >= %s
-                  AND ts <= %s
-                """,
-                (scenario_id, start_ts, end_ts),
-            )
-            if rows and rows[0][0] is not None:
-                avg_fill = rows[0][0]
-                summary = (
-                    f"Inventory fill rate in window: average {avg_fill:.1%}. "
-                    "Inventory levels appear normal."
-                )
-                summary = _maybe_summarize(summary, provider)
-                items.append(
-                    Evidence(
-                        evidence_id=_make_evidence_id(
-                            "inventory_fill", scenario_id, f"{start_ts}:{end_ts}"
-                        ),
-                        kind="structured",
-                        summary=summary,
-                        source_id=SOURCE_INVENTORY,
-                        reliability_weight=weight,
-                        relevance=0.9,
-                        raw_ref="inventory_events:aggregate",
-                        method=MethodTag.SQL,
-                    )
-                )
-        else:
-            dropped += 1
-
-    # --- Deployment log (source: deployment_log) ---
-    SOURCE_DEPLOY = "deployment_log"
-    if SOURCE_DEPLOY in authorized_sources:
-        weight = _get_weight(SOURCE_DEPLOY)
-        if weight is not None:
-            # Look for deployments in the 48h before anomaly_window_start
-            rows = _query(
-                """
-                SELECT deploy_id, version, ts, component
-                FROM deployment_log
-                WHERE ts >= (CAST(%s AS TIMESTAMP) - INTERVAL '48 hours')
-                  AND ts <= CAST(%s AS TIMESTAMP)
-                ORDER BY ts DESC
-                """,
-                (start_ts, start_ts),
-            )
-            for row in rows:
-                deploy_id, version, deployed_at, component = row
-                summary = (
-                    f"Deployment '{version}' of component '{component}' was deployed "
-                    f"at {deployed_at} (within 48h before anomaly window)."
-                )
-                summary = _maybe_summarize(summary, provider)
-                items.append(
-                    Evidence(
-                        evidence_id=_make_evidence_id(
-                            "deployment", scenario_id, str(deploy_id)
-                        ),
-                        kind="structured",
-                        summary=summary,
-                        source_id=SOURCE_DEPLOY,
-                        reliability_weight=weight,
-                        relevance=0.9,
-                        raw_ref=f"deployment_log:{deploy_id}",
-                        method=MethodTag.SQL,
-                    )
-                )
-        else:
-            dropped += 1
-
-    # --- Support tickets (source: support_tickets) ---
-    SOURCE_SUPPORT = "support_tickets"
-    if SOURCE_SUPPORT in authorized_sources:
-        weight = _get_weight(SOURCE_SUPPORT)
-        if weight is not None:
-            rows = _query(
-                """
-                SELECT COUNT(*) AS total, category
-                FROM support_tickets
-                WHERE scenario_id = %s
-                  AND ts >= %s
-                  AND ts <= %s
-                GROUP BY category
-                ORDER BY COUNT(*) DESC
-                """,
-                (scenario_id, start_ts, end_ts),
-            )
-            if rows:
-                total_all = sum(r[0] for r in rows)
-                category_breakdown = ", ".join(
-                    f"{r[1]}: {r[0]}" for r in rows[:5]
-                )
-                summary = (
-                    f"Support tickets in window: {total_all} total. "
-                    f"Category breakdown — {category_breakdown}."
-                )
-                summary = _maybe_summarize(summary, provider)
-                items.append(
-                    Evidence(
-                        evidence_id=_make_evidence_id(
-                            "support_tickets", scenario_id, f"{start_ts}:{end_ts}"
-                        ),
-                        kind="structured",
-                        summary=summary,
-                        source_id=SOURCE_SUPPORT,
-                        reliability_weight=weight,
-                        relevance=0.9,
-                        raw_ref="support_tickets:aggregate",
-                        method=MethodTag.SQL,
-                    )
-                )
-        else:
-            dropped += 1
+                if norm_record is not None:
+                    norm_record.observation = _maybe_summarize(norm_record.observation, provider)
+                    items.append(norm_record)
+        except Exception as exc:
+            logger.warning("_assemble_structured: extraction failed for '%s': %s", source_id, exc)
 
     return items, dropped
 
@@ -424,7 +239,7 @@ _FORBIDDEN_EVIDENCE_COLLECTIONS: frozenset[str] = frozenset({
 
 
 # ---------------------------------------------------------------------------
-# Unstructured evidence assembly (Step B)
+# Unstructured evidence assembly (Step B) — Dual-Retrieval
 # ---------------------------------------------------------------------------
 
 def _assemble_unstructured(
@@ -436,17 +251,49 @@ def _assemble_unstructured(
     notes: list[str],
     provider,
     allowed_collections: Optional[frozenset[str]] = None,
-) -> tuple[list[Evidence], int]:
+    mock_extractor: Optional[MockUnstructuredExtractor] = None,
+) -> tuple[list[CanonicalEvidenceRecord], int]:
     """
-    Query ChromaDB for unstructured evidence tagged [RETRIEVAL].
-
-    Evidence retrieval is constrained by the authorized source set before evidence assembly.
-    Unauthorized sources and forbidden precedent collections are excluded at the retrieval layer.
+    Query ChromaDB (or MockUnstructuredExtractor in test mode) for unstructured
+    evidence tagged [RETRIEVAL].
     """
-    items: list[Evidence] = []
+    items: list[CanonicalEvidenceRecord] = []
     dropped = 0
 
-    if not authorized_sources or chroma_client is None:
+    if not authorized_sources:
+        return items, dropped
+
+    # Test / Demo mode swap using cached extraction fixtures
+    env_mode = os.getenv("ENV_MODE", "").lower()
+    if env_mode == "test" or mock_extractor is not None:
+        extractor = mock_extractor or MockUnstructuredExtractor()
+        for extracted in extractor.extract("anomaly investigation"):
+            payload = extracted.raw_payload
+            src_id = payload.get("source", "release_notes")
+            if src_id in authorized_sources:
+                try:
+                    entry = registry.get(src_id)
+                except KeyError:
+                    dropped += 1
+                    continue
+                weight = _reliability_weight_with_note(entry, notes)
+                items.append(
+                    CanonicalEvidenceRecord(
+                        source_id=src_id,
+                        source_name=entry.name,
+                        entity=payload.get("entity", src_id),
+                        observation=payload.get("observation", ""),
+                        timestamp=payload.get("timestamp", datetime.utcnow()),
+                        source_reliability=weight,
+                        confidence=0.95,
+                        method=MethodTag.RETRIEVAL,
+                        raw_ref=extracted.raw_identifier,
+                        kind="unstructured",
+                    )
+                )
+        return items, dropped
+
+    if chroma_client is None:
         return items, dropped
 
     collection_name = f"evidence_{scenario_id}"
@@ -468,10 +315,10 @@ def _assemble_unstructured(
         )
         return items, dropped
 
-    # Build retrieval query from signals
+    # Build generic retrieval query from signals
     kpi_ids = " ".join(s.kpi_id for s in signals if s.is_anomaly)
     query_text = (
-        f"checkout payment failure conversion drop deployment {kpi_ids}".strip()
+        f"incident anomaly failure telemetry logs deployment {kpi_ids}".strip()
     )
 
     try:
@@ -491,7 +338,7 @@ def _assemble_unstructured(
     else:
         where_filter = {"source": {"$in": auth_list}}
 
-    # Embed the query with bge-m3 so the vector dimension (1024) matches the collection.
+    # Embed query
     query_embedding = None
     try:
         if hasattr(provider, "embed"):
@@ -505,30 +352,43 @@ def _assemble_unstructured(
         query_embedding = None
 
     results = None
-    if query_embedding is not None:
+    try:
+        col_count = 5
         try:
-            count = collection.count()
-            if isinstance(count, int) and count == 0:
-                return items, dropped
-            n_results = min(5, count) if isinstance(count, int) else 5
-            for k in range(n_results, 0, -1):
-                try:
-                    results = collection.query(
-                        query_embeddings=[query_embedding],
-                        n_results=k,
-                        where=where_filter,
-                        include=["documents", "metadatas", "distances"],
-                    )
-                    break
-                except Exception:
-                    continue
-        except Exception as exc:
-            logger.warning("_assemble_unstructured: vector query failed: %s", exc)
+            raw_count = collection.count()
+            if isinstance(raw_count, int):
+                col_count = raw_count
+        except Exception:
+            col_count = 5
+        n_res = min(5, max(1, col_count))
+        if query_embedding is not None:
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_res,
+                where=where_filter,
+                include=["documents", "metadatas", "distances"],
+            )
+        else:
+            try:
+                results = collection.query(
+                    query_texts=[query_text],
+                    n_results=n_res,
+                    where=where_filter,
+                    include=["documents", "metadatas", "distances"],
+                )
+            except Exception:
+                results = collection.query(
+                    where=where_filter,
+                    n_results=n_res,
+                    include=["documents", "metadatas", "distances"],
+                )
+    except Exception as exc:
+        logger.warning("_assemble_unstructured: vector query failed: %s", exc)
 
-    if results is None or not results.get("ids") or not results["ids"][0]:
+    if results is None or not isinstance(results, dict) or not results.get("ids") or not results["ids"][0]:
         try:
             get_res = collection.get(where=where_filter, limit=5, include=["documents", "metadatas"])
-            if get_res and get_res.get("ids"):
+            if get_res and isinstance(get_res, dict) and get_res.get("ids"):
                 results = {
                     "ids": [get_res["ids"]],
                     "documents": [get_res.get("documents", [])],
@@ -537,6 +397,7 @@ def _assemble_unstructured(
                 }
         except Exception as exc:  # noqa: BLE001
             logger.warning("_assemble_unstructured: ChromaDB query fallback failed: %s", exc)
+
 
     if not results or not results.get("ids") or not results["ids"][0]:
         return items, dropped
@@ -572,27 +433,22 @@ def _assemble_unstructured(
             continue
 
         weight = _reliability_weight_with_note(entry, notes)
-
-        # ChromaDB returns L2 distance; convert to a [0,1] cosine-like relevance.
-        # distance=0 means identical (relevance=1), larger distance → lower relevance.
-        # Clamp to [0, 1].
         relevance = clamp(1.0 - float(distance), 0.0, 1.0)
-
         summary = doc or f"Document chunk from {source_id}."
         summary = _maybe_summarize(summary, provider)
 
         items.append(
-            Evidence(
-                evidence_id=_make_evidence_id(
-                    "retrieval", scenario_id, doc_id
-                ),
-                kind="unstructured",
-                summary=summary,
+            CanonicalEvidenceRecord(
                 source_id=source_id,
-                reliability_weight=weight,
-                relevance=relevance,
+                source_name=entry.name,
+                entity=str((meta or {}).get("entity", source_id)),
+                observation=summary,
+                freshness_minutes=entry.staleness_minutes,
+                source_reliability=weight,
+                confidence=relevance,
                 raw_ref=doc_id,
                 method=MethodTag.RETRIEVAL,
+                kind="unstructured",
             )
         )
 
@@ -615,36 +471,15 @@ def assemble_evidence(
     provider=None,
     scope: Optional[AuthorizationScope] = None,
     allowed_collections: Optional[frozenset[str]] = None,
+    adapter: Optional[IngestionAdapter] = None,
+    mock_extractor: Optional[MockUnstructuredExtractor] = None,
 ) -> EvidenceAssemblyResult:
     """
-    Assemble authorized, freshness-weighted evidence (Engine E4).
+    Assemble authorized, freshness-weighted canonical evidence (Engine E4).
 
-    Evidence retrieval is constrained by the authorized source set before evidence assembly.
-    Unauthorized sources and precedent collections are excluded at the retrieval layer.
-
-    Parameters
-    ----------
-    authorized_sources : frozenset[str]
-        Set of source_id strings authorized for the current persona.
-        Must be provided explicitly. An empty frozenset means no sources are
-        authorized (fail-closed, returns zero evidence).
-    signals       : AnomalySignal list from Engine E2.
-    registry      : SourceRegistry instance.
-    db_conn       : Database connection.
-    chroma_client : ChromaDB client.
-    scenario_id   : Current scenario ID.
-    anomaly_window_start : Window start datetime.
-    anomaly_window_end   : Window end datetime.
-    provider      : Optional LLMProvider.
-    scope         : Optional AuthorizationScope (extracted for backward compatibility).
-    allowed_collections : Optional frozenset[str] of permitted ChromaDB collection names.
-
-    Returns
-    -------
-    EvidenceAssemblyResult with evidence sorted by (reliability_weight *
-    relevance) descending, total dropped_count, and reliability_notes.
-
-    Requirements: 6.1–6.7, 7.3–7.5; ISSUE-002 Phase 2; ISSUE-003 Phase 1
+    Dual-retrieval pipeline:
+      - Structured facts via IngestionAdapter
+      - Unstructured semantic chunks via ChromaDB / Vector Extractor
     """
     if isinstance(authorized_sources, AuthorizationScope):
         scope = authorized_sources
@@ -675,7 +510,7 @@ def assemble_evidence(
     notes: list[str] = []
     total_dropped = 0
 
-    # Step A — structured
+    # Step A — structured facts via IngestionAdapter
     structured, dropped_a = _assemble_structured(
         authorized_sources=auth_sources,
         scenario_id=scenario_id,
@@ -685,10 +520,11 @@ def assemble_evidence(
         db_conn=db_conn,
         notes=notes,
         provider=provider,
+        adapter=adapter,
     )
     total_dropped += dropped_a
 
-    # Step B — unstructured
+    # Step B — unstructured semantic retrieval
     unstructured, dropped_b = _assemble_unstructured(
         authorized_sources=auth_sources,
         signals=signals,
@@ -698,28 +534,28 @@ def assemble_evidence(
         notes=notes,
         provider=provider,
         allowed_collections=allowed_collections,
+        mock_extractor=mock_extractor,
     )
     total_dropped += dropped_b
 
     all_items = structured + unstructured
 
-    # Step C — drop unresolvable source_ids (already handled inside A/B, but
-    # apply a final safety pass in case items were constructed externally)
-    verified: list[Evidence] = []
+    # Step C — verify source_ids in registry
+    verified: list[CanonicalEvidenceRecord] = []
     for item in all_items:
         try:
             registry.get(item.source_id)
             verified.append(item)
         except KeyError:
             notes.append(
-                f"final pass: evidence '{item.evidence_id}' source "
+                f"final pass: evidence '{item.id}' source "
                 f"'{item.source_id}' not in registry; dropped (Req 7.5)"
             )
             total_dropped += 1
 
-    # Sort by (reliability_weight * relevance) descending
+    # Sort by (source_reliability * confidence) descending
     verified.sort(
-        key=lambda e: e.reliability_weight * e.relevance,
+        key=lambda e: e.source_reliability * e.confidence,
         reverse=True,
     )
 

@@ -21,6 +21,8 @@ def test_execute_kpi_query_filters_incomplete_trailing_bucket():
     
     valid_rows = _execute_kpi_query(
         kpi_id="hourly_revenue",
+        grain="hourly",
+        query="SELECT 1",
         scenario_id="INC_005",
         window_start=datetime(2024, 1, 15, 0, 0, 0),
         window_end=window_end,

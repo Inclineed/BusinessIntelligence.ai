@@ -59,10 +59,13 @@ class SourceRegistry:
                 data_quality=float(src["data_quality"]),
                 lineage=list(src.get("lineage", [])),
                 owner=src.get("owner", ""),
+                decay_policy=src.get("decay_policy", "linear"),
+                temporal_policy=src.get("temporal_policy", "snapshot"),
             )
             # Compute and store initial freshness
             entry.freshness_status = self.compute_freshness(entry)
             self._entries[entry.source_id] = entry
+
 
     # ------------------------------------------------------------------
     # Public API

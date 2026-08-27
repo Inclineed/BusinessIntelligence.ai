@@ -59,6 +59,7 @@ from models import (
     MethodTag,
     Persona,
     Telemetry,
+    StructuredActionRecommendation,
 )
 from engines.challenge import ChallengeResult
 from llm.provider import LLMProvider, LLMUnavailableError
@@ -74,32 +75,6 @@ ABSTENTION_THRESHOLD: float = 0.60
 
 # Matches OllamaProvider.DEFAULT_TIMEOUT (Req 10.6)
 DEFAULT_TIMEOUT: float = 30.0
-
-# ---------------------------------------------------------------------------
-# Verification steps per driver type (Req 10.3 — 1-10 actionable steps)
-# ---------------------------------------------------------------------------
-
-VERIFICATION_STEPS: dict[str, list[str]] = {
-    "checkout": [
-        "payment_success_rate",
-        "conversion_rate_recovery",
-    ],
-    "payment": [
-        "payment_failure_rate",
-        "gateway_latency_p95",
-    ],
-    "inventory": [
-        "inventory_fill_rate",
-        "product_availability",
-    ],
-    "competitor": [
-        "market_share_indicators",
-        "competitor_pricing_monitoring",
-    ],
-    "default": [
-        "kpi_primary_metric_recovery",
-    ],
-}
 
 # ---------------------------------------------------------------------------
 # Persona narrative style directives
@@ -120,35 +95,25 @@ PERSONA_NARRATIVE_STYLES: dict[str, str] = {
     ),
 }
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _keyword_bucket(hypothesis_id: Optional[str], winning_statement: str) -> str:
-    """
-    Infer a verification bucket from the winning hypothesis statement so we
-    can fall back to the most relevant VERIFICATION_STEPS list.
-
-    Returns one of 'checkout', 'payment', 'inventory', 'competitor', 'default'.
-    """
+def _fallback_verification_metric(winning_statement: str, domain_semantics: dict) -> str:
+    """Return a comma-joined verification metric string derived from domain semantics."""
     lower = winning_statement.lower()
-    if any(kw in lower for kw in ("checkout", "conversion", "gateway")):
-        return "checkout"
-    if any(kw in lower for kw in ("payment", "failure", "latency")):
-        return "payment"
-    if any(kw in lower for kw in ("inventory", "stock", "shortage", "supply")):
-        return "inventory"
-    if any(kw in lower for kw in ("competitor", "pricing", "marketing", "external")):
-        return "competitor"
-    return "default"
-
-
-def _fallback_verification_metric(winning_statement: str) -> str:
-    """Return a comma-joined verification metric string from VERIFICATION_STEPS."""
-    bucket = _keyword_bucket(None, winning_statement)
-    steps = VERIFICATION_STEPS.get(bucket, VERIFICATION_STEPS["default"])
-    return ", ".join(steps)
+    mechanisms = domain_semantics.get("mechanisms", {})
+    
+    # Try to find a matching mechanism
+    matched_steps = []
+    for m_id, m_data in mechanisms.items():
+        if m_id == "default" or m_id == "external_factors":
+             continue
+        if any(kw in lower for kw in m_data.get("keywords", [])):
+            matched_steps = m_data.get("verification_steps", [])
+            break
+            
+    if not matched_steps:
+        # fallback to default mechanism if any
+        matched_steps = mechanisms.get("default", {}).get("verification_steps", ["kpi_primary_metric_recovery"])
+        
+    return ", ".join(matched_steps)
 
 
 def _abstain_narrative(reason: str, verification_steps: list[str]) -> str:
@@ -174,6 +139,9 @@ def _build_decision_prompt(
     challenge_result: ChallengeResult,
     persona: Persona,
     evidence_summaries: list[str],
+    decision_rights: dict,
+    winning_statement: str,
+    domain_semantics: dict,
 ) -> tuple[str, str]:
     """
     Build the (system_prompt, user_prompt) pair for the Decision LLM call.
@@ -190,6 +158,11 @@ def _build_decision_prompt(
         persona.value, PERSONA_NARRATIVE_STYLES["analyst"]
     )
 
+    levers = decision_rights.get("levers", {})
+    available_levers = ", ".join(f'"{k}"' for k in levers.keys())
+    if not available_levers:
+        available_levers = '"Default Mitigation"'
+
     system_prompt = (
         f"You are a senior business-intelligence analyst writing a decision recommendation "
         f"for a {persona.value.upper()} persona.\n"
@@ -199,10 +172,11 @@ def _build_decision_prompt(
         "2. Do NOT invent or reproduce any numeric figures — all numbers come from the "
         "   deterministic analysis already completed.\n"
         "3. Respond with ONLY valid JSON (no markdown fences, no extra commentary).\n"
-        "4. The JSON MUST contain exactly these five keys: "
-        "   recommended_action, expected_impact, verification_metric, "
+        "4. The JSON MUST contain exactly these keys: "
+        "   controllable_lever, recommended_action, verification_metric, "
         "   persona_narrative, monitoring_plan.\n"
-        "5. Keep persona_narrative under 300 words and recommended_action under 150 words."
+        f"5. controllable_lever MUST be EXACTLY one of the following strings: {available_levers}.\n"
+        "6. Keep persona_narrative under 300 words and recommended_action under 150 words."
     )
 
     confidence_str = top.confidence_state.value.upper()
@@ -222,18 +196,25 @@ def _build_decision_prompt(
     else:
         evidence_block = "  (no evidence summaries available)"
 
+    # Use domain semantics for the hypothesis generation policy / prompt
+    domain_policy = domain_semantics.get("hypothesis_generation", {}).get("decision_policy", "")
+    
+    if not domain_policy:
+        # Fallback if no domain policy is defined
+        domain_policy = (
+            "- Base your recommendation SOLELY on the winning hypothesis and its evidence.\n"
+            "- Set verification_metric to the specific KPI(s) that should be monitored to confirm recovery."
+        )
+
     user_prompt = (
         f"Winning hypothesis: {winning_id}\n"
+        f"Hypothesis statement: {winning_statement}\n"
         f"Confidence state: {confidence_str}\n\n"
         f"Rule verdicts:\n{rules_text}\n\n"
         f"Key supporting evidence:\n{evidence_block}\n\n"
         "Based on the above analysis, produce a JSON decision recommendation.\n\n"
         "Important context for this scenario:\n"
-        "- If the winning hypothesis involves checkout or payment degradation caused "
-        "  by a recent software release, your recommended_action MUST include rolling "
-        "  back that release (e.g. v4.3) as the primary remediation step.\n"
-        "- Set verification_metric to the specific KPI(s) that should be monitored to "
-        "  confirm recovery (e.g. payment success rate, conversion rate).\n\n"
+        f"{domain_policy}\n\n"
         "Respond with ONLY the JSON object (no prose before or after)."
     )
 
@@ -316,6 +297,9 @@ def decide(
     *,
     evidence_summaries: Optional[list[str]] = None,
     telemetry: Optional[Telemetry] = None,
+    decision_rights: Optional[dict] = None,
+    winning_statement: str = "",
+    domain_semantics: Optional[dict] = None,
 ) -> Decision:
     """
     Engine E7: Decision Engine.
@@ -351,6 +335,12 @@ def decide(
     """
     if evidence_summaries is None:
         evidence_summaries = []
+    if decision_rights is None:
+        decision_rights = {}
+    domain_semantics = domain_semantics or {}
+    default_verification_steps = domain_semantics.get("mechanisms", {}).get(
+        "default", {}
+    ).get("verification_steps", ["kpi_primary_metric_recovery"])
 
     winning_id = challenge_result.winning_hypothesis_id
 
@@ -366,7 +356,7 @@ def decide(
             challenge_result.abstained,
             challenge_result.overall_confidence.value,
         )
-        verification_steps = VERIFICATION_STEPS["default"]
+        verification_steps = default_verification_steps
         narrative = _abstain_narrative("low_confidence", verification_steps)
         decision = Decision(
             abstained=True,
@@ -384,7 +374,7 @@ def decide(
     # CASE B — Non-abstain: call the LLM to generate the recommendation
     # -----------------------------------------------------------------------
     system_prompt, user_prompt = _build_decision_prompt(
-        challenge_result, persona, evidence_summaries
+        challenge_result, persona, evidence_summaries, decision_rights, winning_statement, domain_semantics
     )
 
     try:
@@ -415,7 +405,7 @@ def decide(
         persona_narrative: str = parsed.get("persona_narrative", "")
 
         # Fallback: if the LLM did not provide a verification metric, derive
-        # one deterministically from VERIFICATION_STEPS (Req 10.3)
+        # one deterministically from domain_semantics (Req 10.3)
         if not verification_metric:
             # Derive from the winning hypothesis's top scored result
             top = challenge_result.scored_hypotheses[0]
@@ -423,7 +413,7 @@ def decide(
             bucket_hint = ""
             for rr in top.rule_results:
                 bucket_hint += rr.rationale + " "
-            verification_metric = _fallback_verification_metric(bucket_hint)
+            verification_metric = _fallback_verification_metric(bucket_hint, domain_semantics)
 
         # Fallback: if no recommended_action was extracted, use a safe default
         # (should be rare — the LLM prompt strongly requests it)
@@ -446,6 +436,47 @@ def decide(
                 "confidence hypothesis. Please refer to the evidence panel for full details."
             )
 
+        # Enforce Lever Authorization (Unknown Lever Guard)
+        controllable_lever = parsed.get("controllable_lever", "")
+        levers = decision_rights.get("levers", {})
+        if controllable_lever not in levers:
+            logger.warning(
+                "decide: LLM generated an unknown or unauthorized lever: %r. "
+                "Abstaining to prevent execution of unauthorized action.",
+                controllable_lever,
+            )
+            verification_steps = default_verification_steps
+            narrative = (
+                "The system formulated an action using an unauthorized lever. "
+                "Execution is blocked pending governance review."
+            )
+            decision = Decision(
+                abstained=True,
+                recommended_action=None,
+                verification_metric=", ".join(verification_steps),
+                winning_hypothesis_id=winning_id,
+                persona_narrative=narrative,
+                abstention_reason="unauthorized_lever_selected",
+                method=MethodTag.LLM,
+            )
+            _verify_decision_property_6(decision)
+            return decision
+            
+        # Valid lever selected — build the StructuredActionRecommendation
+        lever_cfg = levers[controllable_lever]
+        monitoring_plan = parsed.get("monitoring_plan", f"Monitor {verification_metric}")
+        
+        structured_rec = StructuredActionRecommendation(
+            driver=winning_statement or "Unknown",
+            controllable_lever=controllable_lever,
+            action=recommended_action,
+            expected_impact="Pending E8 Simulation",
+            owner=lever_cfg.get("owner", "Unknown"),
+            confidence=challenge_result.scored_hypotheses[0].final_score,
+            monitoring_plan=monitoring_plan,
+            authorized_personas=lever_cfg.get("authorized_personas", []),
+        )
+
         decision = Decision(
             abstained=False,
             recommended_action=recommended_action,
@@ -453,6 +484,7 @@ def decide(
             winning_hypothesis_id=winning_id,
             persona_narrative=persona_narrative,
             abstention_reason=None,
+            structured_recommendation=structured_rec,
             method=MethodTag.LLM,
         )
         _verify_decision_property_6(decision)
@@ -475,18 +507,15 @@ def decide(
             "Deterministic numeric outputs are preserved.",
             exc,
         )
-        verification_steps = VERIFICATION_STEPS.get(
-            _keyword_bucket(
-                winning_id,
-                # Try to infer bucket from the top hypothesis rule rationales
-                " ".join(
-                    rr.rationale
-                    for sh in challenge_result.scored_hypotheses[:1]
-                    for rr in sh.rule_results
-                ),
-            ),
-            VERIFICATION_STEPS["default"],
+        bucket_hint = " ".join(
+            rr.rationale
+            for sh in challenge_result.scored_hypotheses[:1]
+            for rr in sh.rule_results
         )
+        
+        fallback_metric = _fallback_verification_metric(bucket_hint, domain_semantics)
+        verification_steps = [s.strip() for s in fallback_metric.split(",")]
+        
         narrative = _abstain_narrative("provider_unavailable", verification_steps)
 
         decision = Decision(

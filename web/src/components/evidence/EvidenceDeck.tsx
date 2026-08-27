@@ -47,7 +47,7 @@ export const EvidenceDeck: React.FC<EvidenceDeckProps> = ({ evidence }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           {evidence.map((item) => {
             const isSQL = item.method === "SQL"
-            const reliabilityPct = Math.round(item.reliability_weight * 100)
+            const reliabilityPct = Math.round((item.reliability_weight ?? 1.0) * 100)
 
             return (
               <div

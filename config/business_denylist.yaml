@@ -1,0 +1,11 @@
+# business_denylist.yaml — Domain terms prohibited in core E1–E9 engine code
+#
+# Prevents business-specific or vertical-specific coupling from leaking into
+# the reusable intelligence engine spine (AST enforced by test_business_agnostic.py).
+
+denylist:
+  - "cart"
+  - "checkout"
+  - "retail"
+  - "inventory"
+  - "pos_system"

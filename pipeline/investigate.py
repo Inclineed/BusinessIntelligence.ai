@@ -30,6 +30,7 @@ from models import (
     Evidence,
     Hypothesis,
     InvestigationResult,
+    MaterialityAssessment,
     MethodTag,
     Persona,
     ScoredHypothesis,
@@ -38,6 +39,7 @@ from models import (
 from config.registry import SourceRegistry
 from engines.kpi_store import load_kpis
 from engines.signal import (
+    assess_materiality,
     assert_corroboration,
     build_history_from_kpis,
     detect_signals,
@@ -105,6 +107,8 @@ class Dependencies:
     kpi_contract: dict
     entitlements_config: dict
     sources_config: list
+    domain_semantics: dict
+    scenarios_config: dict
     # Scenario identifier (default matches the INC_001 demonstration scenario)
     scenario_id: str = "INC_001"
     # Anomaly detection window — defaults to last 7 days up to now
@@ -196,21 +200,34 @@ def _check_hypothesis_no_numbers(
 
 def _primary_signal(
     signals: list[AnomalySignal],
+    materiality: Optional[list[MaterialityAssessment]] = None,
     segmentable_kpi_ids: Optional[set] = None,
 ) -> Optional[AnomalySignal]:
     """
     Return the anomalous signal to hand to E3 for dimensional decomposition.
 
     Preference order:
-      1. The anomalous signal with the largest |delta_pct| whose KPI HAS
-         segmented data available (so E3 can actually decompose it, e.g.
-         hourly_conversion has device/channel breakdown).
-      2. Otherwise the anomalous signal with the largest |delta_pct|.
-      3. Otherwise the first signal of any kind.
+      1. The AnomalySignal corresponding to the MaterialityAssessment with the
+         highest priority_rank (rank 1 is highest priority among confirmed anomalies).
+      2. If no materiality assessments or tied, pick the anomalous signal with the
+         largest |delta_pct| whose KPI HAS segmented data available.
+      3. Otherwise the anomalous signal with the largest |delta_pct|.
+      4. Otherwise the first signal of any kind.
     Returns None when the list is empty.
     """
     if not signals:
         return None
+
+    if materiality:
+        # Find assessments for anomalous signals sorted by priority_rank (1 is highest, >0 is ranked)
+        ranked = [m for m in materiality if m.is_statistical_anomaly and m.priority_rank > 0]
+        if ranked:
+            ranked.sort(key=lambda m: m.priority_rank)
+            top_kpi_id = ranked[0].kpi_id
+            for s in signals:
+                if s.kpi_id == top_kpi_id:
+                    return s
+
     anomalous = [s for s in signals if s.is_anomaly]
     if anomalous:
         if segmentable_kpi_ids:
@@ -304,24 +321,22 @@ def investigate(
     # ------------------------------------------------------------------
     # Resolve window
     # ------------------------------------------------------------------
-    # Default to the INC_001 data range (Jan 8-16 2024) so the pipeline
-    # works without explicit window parameters during the demo.
+    # Establish evaluation bounds (Requirement 13.1)
     # Production deployments would pass explicit window_start/window_end.
-    # Per-scenario baseline + observation windows. Baseline is the prior week;
-    # the window ENDS at each scenario's incident close so the most-recent
-    # aggregated period is the degraded value. Explicit deps windows override.
-    _SCENARIO_WINDOWS = {
-        "INC_001": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0)),
-        "INC_002": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 14, 0, 0)),
-        "INC_004": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0)),
-        "INC_005": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0)),
-        "INC_006": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0)),
-        "INC_007": (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 16, 12, 0, 0)),
-        "INC_008": (datetime(2024, 2, 2, 0, 0, 0), datetime(2024, 2, 10, 18, 0, 0)),
-    }
-    _ws_default, _we_default = _SCENARIO_WINDOWS.get(
-        scenario_id, (datetime(2024, 1, 8, 0, 0, 0), datetime(2024, 1, 15, 15, 0, 0))
-    )
+    # Per-scenario baseline + observation windows. Baseline is the prior week.
+    
+    _ws_default = datetime(2024, 1, 8, 0, 0, 0)
+    _we_default = datetime(2024, 1, 15, 15, 0, 0)
+    
+    scenarios = deps.scenarios_config.get("scenarios", [])
+    sc_conf = next((s for s in scenarios if s.get("id") == scenario_id), None)
+    if sc_conf and sc_conf.get("window_start") and sc_conf.get("window_end"):
+        _ws_default = datetime.fromisoformat(sc_conf["window_start"])
+        _we_default = datetime.fromisoformat(sc_conf["window_end"])
+    elif deps.scenarios_config.get("default_window_start"):
+        _ws_default = datetime.fromisoformat(deps.scenarios_config["default_window_start"])
+        _we_default = datetime.fromisoformat(deps.scenarios_config["default_window_end"])
+
     window_end: datetime   = deps.window_end   if deps.window_end   is not None else _we_default
     window_start: datetime = deps.window_start if deps.window_start is not None else _ws_default
 
@@ -456,16 +471,24 @@ def investigate(
             signals = detect_signals(kpi_values, history)
             kpi_periods = _build_kpi_periods(signals, kpi_values)
             signals = assert_corroboration(signals, kpi_periods)
+            _segmentable = {kv.kpi_id for kv in kpi_values if kv.dimension_filters}
+            materiality = assess_materiality(
+                signals=signals,
+                kpi_contract=deps.kpi_contract,
+                segmentable_kpi_ids=_segmentable,
+            )
         
         anom_count = sum(1 for s in signals if s.is_anomaly)
         safe_print(f"\033[93m[E2 SIGNAL]\033[0m Detected {len(signals)} signal(s) | {anom_count} confirmed anomaly/anomalies")
-        for s in signals:
-            if s.is_anomaly:
-                safe_print(f"   * Anomaly: {s.kpi_id} (z-score={s.z_score:+.2f}, delta={s.delta_pct:+.1%})")
+        for m in materiality:
+            if m.is_statistical_anomaly:
+                impact_str = f"financial=₹{m.financial_impact:,.0f}" if m.financial_impact is not None else (f"volume={m.volume_impact:,.0f}" if m.volume_impact is not None else "n/a")
+                safe_print(f"   * Anomaly: {m.kpi_id} (z-score={m.z_score:+.2f}, delta={m.delta_pct:+.1%}) -> Materiality: {m.business_materiality.value} [{impact_str}] Priority: #{m.priority_rank}")
     except Exception as exc:  # noqa: BLE001
         safe_print(f"\033[91m[E2 ERROR]\033[0m Signal Engine failed: {exc}")
         logger.error("investigate [E2] Signal Engine failed: %s", exc, exc_info=True)
         signals = []
+        materiality = []
 
     method_ownership["signal"] = [MethodTag.STATS]
 
@@ -487,7 +510,7 @@ def investigate(
         # KPIs that have segmented (dimension_filters) rows available so E3
         # can decompose them (e.g. hourly_conversion by device/channel).
         _segmentable = {kv.kpi_id for kv in kpi_values if kv.dimension_filters}
-        primary_sig = _primary_signal(signals, segmentable_kpi_ids=_segmentable)
+        primary_sig = _primary_signal(signals, materiality=materiality, segmentable_kpi_ids=_segmentable)
         with telemetry_svc.measure_engine("diagnostic"):
             if primary_sig is not None:
                 diagnostic_result = decompose(
@@ -572,6 +595,7 @@ def investigate(
         ]
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # E5 — Hypothesis [LLM] (no numbers)
     # Requirement: 8.1–8.7
     # ------------------------------------------------------------------
@@ -596,6 +620,7 @@ def investigate(
                     contributions=contributions,
                     evidence=evidence_items,
                     contract=deps.kpi_contract,
+                    domain_semantics=deps.domain_semantics,
                     provider=provider,
                     telemetry=telemetry_svc.live_telemetry,
                 )
@@ -620,11 +645,10 @@ def investigate(
     _check_hypothesis_no_numbers(hypotheses, method_violations)
 
     # ------------------------------------------------------------------
-    # E6 — Challenge [RULES + LLM_NARRATIVE]
-    # Requirement: 9.1–9.8
+    # Engine E6: Challenge Engine (Deterministic)
     # ------------------------------------------------------------------
-    logger.info("investigate: [E6] Challenge Engine")
-    try:
+    challenge_result = None
+    if hypotheses:
         evidence_by_id: dict[str, Evidence] = {e.evidence_id: e for e in evidence_items}
         thresholds = deps.challenge_thresholds or ChallengeThresholds()
 
@@ -634,17 +658,14 @@ def investigate(
                 evidence_by_id=evidence_by_id,
                 signals=signals,
                 contributions=contributions,
+                domain_semantics=deps.domain_semantics,
                 thresholds=thresholds,
                 provider=provider,
                 telemetry=telemetry_svc.live_telemetry,
             )
-        scored_hypotheses = challenge_result.scored_hypotheses
-        safe_print(f"\033[93m[E6 CHALLENGE]\033[0m Scored {len(scored_hypotheses)} hypothesis/hypotheses across 5 verification rules")
+        safe_print(f"\033[93m[E6 CHALLENGE]\033[0m Scored {len(challenge_result.scored_hypotheses)} hypothesis/hypotheses across 5 verification rules")
         safe_print(f"   * Confidence: {challenge_result.overall_confidence.value.upper()} | Winner: {challenge_result.winning_hypothesis_id} | Abstained: {challenge_result.abstained}")
-    except Exception as exc:  # noqa: BLE001
-        safe_print(f"\033[91m[E6 ERROR]\033[0m Challenge Engine failed: {exc}")
-        logger.error("investigate [E6] Challenge Engine failed: %s", exc, exc_info=True)
-        scored_hypotheses = []
+    else:
         from engines.challenge import ChallengeResult
         challenge_result = ChallengeResult(
             scored_hypotheses=[],
@@ -653,10 +674,12 @@ def investigate(
             abstained=True,
         )
 
+    scored_hypotheses = challenge_result.scored_hypotheses if challenge_result else []
+
     method_ownership["challenge"] = [MethodTag.RULES, MethodTag.LLM_NARRATIVE]
 
     # Verify scored hypothesis numeric fields are not LLM-tagged (Req 13.1)
-    for sh in scored_hypotheses:
+    for sh in challenge_result.scored_hypotheses:
         _check_deterministic_engine_output(
             "challenge",
             sh.method,
@@ -665,28 +688,36 @@ def investigate(
         )
 
     # ------------------------------------------------------------------
-    # E7 — Decision [LLM]
-    # Requirement: 10.1–10.6
+    # Engine E7: Decision Engine (LLM)
     # ------------------------------------------------------------------
-    logger.info("investigate: [E7] Decision Engine")
-    try:
+    decision = None
+    if challenge_result:
+        decision_rights = deps.entitlements_config.get("decision_rights", {})
         evidence_summaries = [e.summary for e in evidence_items[:5]]
-        with telemetry_svc.measure_engine("decision"):
-            decision = decide(
-                challenge_result=challenge_result,
-                persona=persona,
-                provider=provider,
-                evidence_summaries=evidence_summaries,
-                telemetry=telemetry_svc.live_telemetry,
-            )
+        
+        winning_statement = ""
+        if challenge_result.winning_hypothesis_id:
+            for h in hypotheses:
+                if h.hypothesis_id == challenge_result.winning_hypothesis_id:
+                    winning_statement = h.statement
+                    break
+        
+        decision = decide(
+            challenge_result=challenge_result,
+            persona=persona,
+            provider=provider,
+            evidence_summaries=evidence_summaries,
+            domain_semantics=deps.domain_semantics,
+            decision_rights=decision_rights,
+            telemetry=telemetry_svc.live_telemetry,
+            winning_statement=winning_statement,
+        )
         safe_print(f"\033[92m[E7 DECISION]\033[0m Formulated action directive. Abstained: {decision.abstained}")
         if decision.recommended_action:
             safe_print(f"   * Action: {decision.recommended_action[:90]}...")
         elif decision.abstention_reason:
             safe_print(f"   * Reason: {decision.abstention_reason}")
-    except Exception as exc:  # noqa: BLE001
-        safe_print(f"\033[91m[E7 ERROR]\033[0m Decision Engine failed: {exc}")
-        logger.error("investigate [E7] Decision Engine failed: %s", exc, exc_info=True)
+    else:
         from models import Decision
         decision = Decision(
             abstained=True,
@@ -713,14 +744,22 @@ def investigate(
         )
 
     # ------------------------------------------------------------------
-    # E8 — Outcome Engine [SIMULATED]
-    # Requirement: 14.1–14.3, 14.5
+    # Engine E8: Outcome Engine (Deterministic)
     # ------------------------------------------------------------------
     logger.info("investigate: [E8] Outcome Engine")
     outcome = None
     try:
         if decision is not None:
-            outcome = project_outcome(decision)
+            outcome = project_outcome(decision, deps.domain_semantics)
+            
+            # Inject E8 expected impact back into the governed action record
+            if not decision.abstained and decision.structured_recommendation and outcome:
+                import dataclasses
+                final_structured_rec = dataclasses.replace(
+                    decision.structured_recommendation,
+                    expected_impact=f"Projected {outcome.projected_recovery_pct}% recovery on {outcome.projected_metric}"
+                )
+                decision = dataclasses.replace(decision, structured_recommendation=final_structured_rec)
     except Exception as exc:  # noqa: BLE001
         logger.error("investigate [E8] Outcome Engine failed: %s", exc, exc_info=True)
         outcome = None
@@ -748,6 +787,7 @@ def investigate(
         scenario_id=scenario_id,
         persona=persona,
         signals=signals,
+        materiality=materiality,
         contributions=contributions,
         evidence=evidence_items,
         hypotheses=hypotheses,

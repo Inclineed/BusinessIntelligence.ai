@@ -80,3 +80,18 @@ personas:
         - in_stock
     authorized_regions: own_only
     # region is resolved from the request context at runtime
+
+decision_rights:
+  levers:
+    "Software Release Reversion":
+      owner: "Platform Engineering"
+      authorized_personas: ["analyst", "manager"]
+    "Inventory Replenishment":
+      owner: "Supply Chain"
+      authorized_personas: ["manager"]
+    "Promotional Adjustment":
+      owner: "Marketing"
+      authorized_personas: ["analyst", "manager", "cfo"]
+    "Default Mitigation":
+      owner: "Operations"
+      authorized_personas: ["analyst", "manager"]

@@ -10,9 +10,11 @@ import {
   ReferenceLine,
   CartesianGrid,
 } from "recharts"
+import { AnomalySignal } from "../../types/investigation"
 
 interface AnomalyCorridorChartProps {
   scenarioId: string
+  signal?: AnomalySignal
   kpiLabel?: string
   data?: Array<{
     period: string
@@ -35,15 +37,61 @@ const DEFAULT_CHART_DATA = [
 
 export const AnomalyCorridorChart: React.FC<AnomalyCorridorChartProps> = ({
   scenarioId,
-  kpiLabel = "Hourly Metric Anomaly Corridor (±3σ)",
-  data = DEFAULT_CHART_DATA,
+  signal,
+  kpiLabel,
+  data: propData,
 }) => {
+  const chartData = React.useMemo(() => {
+    if (propData && propData.length > 0) return propData
+
+    if (signal && signal.expected !== undefined && signal.observed !== undefined) {
+      const baseline = signal.expected
+      const observed = signal.observed
+      const z = Math.abs(signal.z_score || 3.0)
+      const sigma = z > 0 ? Math.abs(observed - baseline) / z : baseline * 0.05
+      const upper = baseline + 3 * sigma
+      const lower = Math.max(0, baseline - 3 * sigma)
+
+      const periods = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00"]
+      return periods.map((period, idx) => {
+        let obs = baseline
+        if (idx < 3) {
+          obs = baseline + (idx % 2 === 0 ? 0.3 : -0.2) * sigma
+        } else if (idx === 3) {
+          obs = baseline - 0.5 * sigma * (observed < baseline ? 1 : -1)
+        } else if (idx === 4) {
+          obs = baseline + (observed - baseline) * 0.85
+        } else if (idx === 5) {
+          obs = observed
+        } else {
+          obs = observed + (idx % 2 === 0 ? 0.1 : -0.1) * sigma
+        }
+
+        return {
+          period,
+          observed: Number(obs.toFixed(2)),
+          baseline: Number(baseline.toFixed(2)),
+          upperCorridor: Number(upper.toFixed(2)),
+          lowerCorridor: Number(lower.toFixed(2)),
+        }
+      })
+    }
+
+    return DEFAULT_CHART_DATA
+  }, [propData, signal])
+
+  const displayLabel =
+    kpiLabel ||
+    (signal
+      ? `${signal.kpi_id.replace(/_/g, " ").toUpperCase()} ANOMALY CORRIDOR (±3Σ)`
+      : "HOURLY METRIC ANOMALY CORRIDOR (±3Σ)")
+
   return (
     <div className="p-5 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] space-y-3">
       <div className="flex items-center justify-between gap-2 mb-1">
         <div>
           <div className="text-xs font-mono font-bold text-[#F4EEE0] uppercase tracking-wider">
-            {kpiLabel}
+            {displayLabel}
           </div>
           <div className="text-[11px] font-mono text-[#9E9788]">
             Historical Baseline Window (μ ± 3σ) vs Observed Incident Trajectory
@@ -63,7 +111,7 @@ export const AnomalyCorridorChart: React.FC<AnomalyCorridorChartProps> = ({
 
       <div className="h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 25, right: 15, left: -20, bottom: 0 }}>
+          <ComposedChart data={chartData} margin={{ top: 25, right: 15, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="corridorGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#6B9BB0" stopOpacity={0.18} />
@@ -72,7 +120,7 @@ export const AnomalyCorridorChart: React.FC<AnomalyCorridorChartProps> = ({
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
             <XAxis dataKey="period" stroke="#888888" fontSize={10} tickLine={false} />
-            <YAxis stroke="#888888" fontSize={10} tickLine={false} domain={["dataMin - 0.5", "dataMax + 0.5"]} />
+            <YAxis stroke="#888888" fontSize={10} tickLine={false} domain={["auto", "auto"]} />
             <Tooltip
               contentStyle={{
                 backgroundColor: "#181818",

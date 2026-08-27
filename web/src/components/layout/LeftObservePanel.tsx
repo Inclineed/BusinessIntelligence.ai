@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { InvestigationResult, PersonaType, TelemetryData } from "../../types/investigation"
-import { SCENARIO_CATALOG } from "../../lib/api"
+import { useScenarios } from "../../contexts/ScenariosContext"
 import { formatMetricValue, formatDelta, isAdverseMetric } from "../../lib/utils"
 import {
   Activity,
@@ -45,8 +45,9 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
   onOpenHealth,
 }) => {
   const [scenarioDropdownOpen, setScenarioDropdownOpen] = useState(false)
+  const { scenarios } = useScenarios()
   const currentScenario =
-    SCENARIO_CATALOG.find((s) => s.id === activeScenarioId) || SCENARIO_CATALOG[0]
+    scenarios.find((s) => s.id === activeScenarioId) || scenarios[0] || {}
   const primarySignal = result.signals?.[0]
   const isAnomaly = primarySignal?.is_anomaly ?? false
   const hasGuardAlerts = Boolean(
@@ -104,7 +105,7 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
                 <div className="px-2 py-1 text-[10px] font-mono text-[#9E9788] uppercase tracking-wider border-b border-[#2E2E2E] mb-1">
                   Switch Incident Scenario
                 </div>
-                {SCENARIO_CATALOG.map((sc) => (
+                {scenarios.map((sc) => (
                   <button
                     key={sc.id}
                     onClick={() => {
@@ -268,7 +269,7 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
               <div className="px-2 py-1 text-[10px] font-mono text-[#9E9788] uppercase tracking-wider border-b border-[#2E2E2E] mb-1">
                 Incident Catalog
               </div>
-              {SCENARIO_CATALOG.map((sc) => (
+              {scenarios.map((sc) => (
                 <button
                   key={sc.id}
                   onClick={() => {

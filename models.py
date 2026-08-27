@@ -118,9 +118,12 @@ class SourceRegistryEntry:
     data_quality: float      # 0.0 – 1.0
     lineage: list[str] = field(default_factory=list)   # upstream table/file refs
     owner: str = ""
+    decay_policy: str = "linear"
+    temporal_policy: str = "snapshot"
 
     def __post_init__(self) -> None:
         validate_weight(self.data_quality)
+
 
     @property
     def staleness_minutes(self) -> float:
@@ -175,6 +178,35 @@ class AnomalySignal:
     method: MethodTag = MethodTag.STATS
 
 
+class BusinessMateriality(str, Enum):
+    """
+    Business materiality tier distinguishing statistical significance from business impact.
+    """
+    NEGLIGIBLE = "NEGLIGIBLE"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass
+class MaterialityAssessment:
+    """
+    Translates a statistical AnomalySignal into domain-specific business impact and priority rank.
+    """
+
+    kpi_id: str
+    observed_value: float
+    baseline_mean: float
+    z_score: float
+    delta_pct: float
+    is_statistical_anomaly: bool
+    financial_impact: Optional[float] = None
+    volume_impact: Optional[float] = None
+    business_materiality: BusinessMateriality = BusinessMateriality.NEGLIGIBLE
+    priority_rank: int = 0
+
+
 @dataclass
 class DimensionContribution:
     """
@@ -189,22 +221,83 @@ class DimensionContribution:
     method: MethodTag = MethodTag.SQL
 
 
-@dataclass
-class Evidence:
+class TemporalAlignmentPolicy(str, Enum):
     """
-    A single evidence item assembled by the Evidence_Engine after the
-    entitlement boundary (Requirements 6.1 – 6.6, 7.3 – 7.5).
-    reliability_weight and relevance are clamped to [0, 1].
+    Temporal semantics governing observation normalization over the investigation window.
+    Cadence (e.g. hourly, daily) is defined separately.
+    No automatic proportional allocation is applied to any grain or semantic type.
+    """
+    SNAPSHOT = "snapshot"
+    PERIOD_TOTAL = "period_total"
+    AVERAGE = "average"
+    RATE = "rate"
+    LAST_KNOWN_VALUE = "last_known_value"
+
+
+def calculate_reliability_decay(
+    base_quality: float,
+    staleness_minutes: float,
+    sla_minutes: float,
+) -> float:
+    """
+    Continuous linear decay.
+    If staleness <= SLA: weight = base_quality
+    If staleness > SLA: decays linearly to 0 over the duration of (2 * SLA).
+
+    Note on Replay / Temporal Context:
+    staleness_minutes is measured relative to the ingestion clock. When replaying
+    historical ExtractionResult fixtures or logs in a different temporal context,
+    ensure the reference clock is pinned (e.g. via SourceRegistry.update_last_refresh)
+    to avoid artificial decay drift against wall-clock time.
+    """
+    if sla_minutes <= 0 or base_quality <= 0:
+        return 0.0
+    if staleness_minutes <= sla_minutes:
+        return clamp(base_quality, 0.0, 1.0)
+
+    # Linear decay reaching 0 at 2 * SLA
+    staleness_beyond_ratio = (staleness_minutes - sla_minutes) / sla_minutes
+    decay_factor = max(0.0, 1.0 - staleness_beyond_ratio)
+    return clamp(base_quality * decay_factor, 0.0, 1.0)
+
+
+@dataclass
+class ExtractionResult:
+    """Intermediate payload from raw sources before normalization."""
+    raw_payload: Any               # SQL row (tuple/dict), JSON (dict), plain text (str)
+    source_type: str               # "sql", "vector", "api"
+    extracted_at: datetime         # Ingestion timestamp
+    raw_identifier: str            # Original PK or chunk ID
+
+
+@dataclass
+class CanonicalEvidenceRecord:
+    """
+    Canonical evidence record standardizing structured, semi-structured,
+    and unstructured data across heterogeneous sources into a unified contract.
     """
 
-    evidence_id: str = ""
-    kind: str = "structured"   # "structured" | "unstructured"
-    summary: str = ""
+    schema_version: str = "1.0"
+    id: str = ""
     source_id: str = "test_source"
-    reliability_weight: float = 1.0   # [0, 1] — freshness-decayed
-    relevance: float = 1.0            # [0, 1] — retrieval / relevance score
-    raw_ref: str = "raw_ref"          # table row id or document chunk id
-    method: MethodTag = MethodTag.SQL # SQL for structured, RETRIEVAL for unstructured
+    source_name: str = ""
+    entity: str = ""
+    observation: str = ""
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    metric: Optional[str] = None
+    dimension: dict[str, str] = field(default_factory=dict)
+    value: Optional[float] = None
+    # Computed at ingestion time relative to SourceRegistry last_refresh.
+    # Note: will drift if replayed without anchoring the scenario clock.
+    freshness_minutes: float = 0.0
+
+    source_reliability: float = 1.0   # [0, 1] — freshness-decayed
+    confidence: float = 1.0          # [0, 1] — extraction or retrieval relevance
+    method: MethodTag = MethodTag.SQL
+    lineage: list[str] = field(default_factory=list)
+    provenance_hash: str = ""
+    raw_ref: str = "raw_ref"
+    kind: str = "structured"          # "structured" | "unstructured"
 
     def __init__(
         self,
@@ -212,24 +305,105 @@ class Evidence:
         kind: str = "structured",
         summary: str = "",
         source_id: str = "test_source",
-        reliability_weight: float = 1.0,
-        relevance: float = 1.0,
+        source_name: str = "",
+        reliability_weight: Optional[float] = None,
+        relevance: Optional[float] = None,
         raw_ref: str = "raw_ref",
         method: MethodTag = MethodTag.SQL,
         id: Optional[str] = None,
+        schema_version: str = "1.0",
+        entity: str = "",
+        observation: str = "",
+        timestamp: Optional[datetime] = None,
+        metric: Optional[str] = None,
+        dimension: Optional[dict[str, str]] = None,
+        value: Optional[float] = None,
+        freshness_minutes: float = 0.0,
+        source_reliability: Optional[float] = None,
+        confidence: Optional[float] = None,
+        lineage: Optional[list[str]] = None,
+        provenance_hash: str = "",
     ) -> None:
-        self.evidence_id = id if id is not None else evidence_id
-        self.kind = kind
-        self.summary = summary
+        self.schema_version = schema_version
         self.source_id = source_id
-        self.reliability_weight = validate_weight(reliability_weight)
-        self.relevance = validate_weight(relevance)
+        self.source_name = source_name or source_id
+        self.entity = entity or source_id
+        self.observation = observation or summary
+        self.timestamp = timestamp if timestamp is not None else datetime.utcnow()
+        self.metric = metric
+        self.dimension = dimension or {}
+        self.value = value
+        self.freshness_minutes = freshness_minutes
+        self.kind = kind
         self.raw_ref = raw_ref
         self.method = method
+        self.lineage = lineage or []
+
+        # Resolve reliability
+        resolved_rel = source_reliability if source_reliability is not None else (
+            reliability_weight if reliability_weight is not None else 1.0
+        )
+        self.source_reliability = validate_weight(clamp(float(resolved_rel), 0.0, 1.0))
+
+        # Resolve confidence
+        resolved_conf = confidence if confidence is not None else (
+            relevance if relevance is not None else 1.0
+        )
+        self.confidence = validate_weight(clamp(float(resolved_conf), 0.0, 1.0))
+
+        # Resolve ID
+        resolved_id = id if id is not None else (evidence_id if evidence_id else "")
+        if resolved_id:
+            self.id = resolved_id
+        else:
+            import hashlib
+            raw_id_input = f"{self.raw_ref}:{self.source_id}:{self.timestamp.isoformat()}:{self.entity}:{self.observation}"
+            self.id = hashlib.sha256(raw_id_input.encode()).hexdigest()[:16]
+
+        # Resolve Provenance Hash
+        if provenance_hash:
+            self.provenance_hash = provenance_hash
+        else:
+            import hashlib
+            raw_prov_input = f"{self.schema_version}:{self.source_id}:{self.entity}:{self.observation}:{self.timestamp.isoformat()}:{self.raw_ref}"
+            self.provenance_hash = hashlib.sha256(raw_prov_input.encode()).hexdigest()
 
     @property
-    def id(self) -> str:
-        return self.evidence_id
+    def evidence_id(self) -> str:
+        return self.id
+
+    @evidence_id.setter
+    def evidence_id(self, val: str) -> None:
+        self.id = val
+
+    @property
+    def summary(self) -> str:
+        return self.observation
+
+    @summary.setter
+    def summary(self, val: str) -> None:
+        self.observation = val
+
+    @property
+    def reliability_weight(self) -> float:
+        return self.source_reliability
+
+    @reliability_weight.setter
+    def reliability_weight(self, val: float) -> None:
+        self.source_reliability = validate_weight(clamp(float(val), 0.0, 1.0))
+
+    @property
+    def relevance(self) -> float:
+        return self.confidence
+
+    @relevance.setter
+    def relevance(self, val: float) -> None:
+        self.confidence = validate_weight(clamp(float(val), 0.0, 1.0))
+
+
+# Alias for backward compatibility
+Evidence = CanonicalEvidenceRecord
+
 
 
 @dataclass
@@ -320,7 +494,23 @@ class ScoredHypothesis:
 HypothesisScore = ScoredHypothesis
 
 
-@dataclass
+@dataclass(frozen=True)
+class StructuredActionRecommendation:
+    """
+    Deterministic, structured operational decision record (Requirement 10.x).
+    Enforces strict provenance for all governance fields.
+    """
+    driver: str
+    controllable_lever: str
+    action: str
+    expected_impact: str
+    owner: str
+    confidence: float
+    monitoring_plan: str
+    authorized_personas: list[str]
+
+
+@dataclass(frozen=True)
 class Decision:
     """
     Recommended action (or abstention) produced by the Decision_Engine
@@ -333,7 +523,8 @@ class Decision:
     verification_metric: Optional[str]
     winning_hypothesis_id: Optional[str]
     persona_narrative: str
-    abstention_reason: Optional[str] = None   # "low_confidence" | "provider_unavailable"
+    abstention_reason: Optional[str] = None   # "low_confidence" | "provider_unavailable" | "unauthorized_lever_selected"
+    structured_recommendation: Optional[StructuredActionRecommendation] = None
     method: MethodTag = MethodTag.LLM
 
     def __post_init__(self) -> None:
@@ -355,6 +546,9 @@ class OutcomeProjection:
     projected_metric: str
     projected_recovery_pct: float
     disclaimer: str                 # "not causal proof"
+    recovery_window_hours: Optional[float] = None
+    mean_time_to_normalcy: Optional[str] = None
+    assumptions: list[str] = field(default_factory=list)
     method: MethodTag = MethodTag.SIMULATED
 
     def __post_init__(self) -> None:
@@ -397,6 +591,7 @@ class InvestigationResult:
     scenario_id: str
     persona: Persona
     signals: list[AnomalySignal] = field(default_factory=list)
+    materiality: list[MaterialityAssessment] = field(default_factory=list)
     contributions: list[DimensionContribution] = field(default_factory=list)
     evidence: list[Evidence] = field(default_factory=list)
     hypotheses: list[Hypothesis] = field(default_factory=list)

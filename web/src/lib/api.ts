@@ -1,72 +1,5 @@
 import { InvestigationResult, ScenarioMeta, StructuredFeedbackSubmission, FeedbackResponse, FeedbackRecord } from "../types/investigation"
 
-export const SCENARIO_CATALOG: ScenarioMeta[] = [
-  {
-    id: "INC_001",
-    status: "live",
-    title: "Payment Gateway Latency Regression",
-    domain: "E-Commerce Checkout",
-    type: "Single Root Cause (HIGH)",
-    description: "Checkout v4.3 deploy caused connection pool exhaustion in payment gateway client.",
-  },
-  {
-    id: "INC_002",
-    status: "live",
-    title: "Simultaneous Conflicting Causes",
-    domain: "E-Commerce Checkout",
-    type: "Ambiguous (ABSTAIN)",
-    description: "Simultaneous gateway latency spike & competitor pricing campaign.",
-  },
-  {
-    id: "INC_003",
-    status: "evaluation_only",
-    title: "Sparse Baseline History",
-    domain: "E-Commerce Growth",
-    type: "Evaluation Harness Only",
-    description: "New premium conversion metric with insufficient historical baseline samples.",
-  },
-  {
-    id: "INC_004",
-    status: "live",
-    title: "ETL Ingestion Pipeline Delay",
-    domain: "Data Engineering",
-    type: "Data-Quality Guard (ABSTAIN)",
-    description: "Apparent revenue drop caused by delayed batch data warehouse ingestion.",
-  },
-  {
-    id: "INC_005",
-    status: "live",
-    title: "Trailing Partial Bucket Guard",
-    domain: "E-Commerce Volume",
-    type: "False Anomaly Guard (ABSTAIN)",
-    description: "Incomplete trailing hour volume correctly suppressed from anomaly attribution.",
-  },
-  {
-    id: "INC_006",
-    status: "live",
-    title: "Compound Network & Deploy Failure",
-    domain: "E-Commerce Platform",
-    type: "Multi-Factor (HIGH)",
-    description: "Simultaneous upstream packet loss and service client latency regression.",
-  },
-  {
-    id: "INC_007",
-    status: "live",
-    title: "Gradual Worker Memory Leak",
-    domain: "Microservices",
-    type: "Degradation Drift (HIGH)",
-    description: "Progressive 48h memory leak causing slow failure rate drift.",
-  },
-  {
-    id: "INC_008",
-    status: "live",
-    title: "Enterprise SAML SSO Outage",
-    domain: "B2B SaaS Security",
-    type: "Cross-Domain Shift (HIGH)",
-    description: "Identity provider certificate rotation failure blocking enterprise login.",
-  },
-]
-
 const API_BASE = "/api"
 
 export async function fetchScenarios(): Promise<ScenarioMeta[]> {
@@ -74,21 +7,21 @@ export async function fetchScenarios(): Promise<ScenarioMeta[]> {
     const res = await fetch(`${API_BASE}/scenarios`)
     if (res.ok) {
       const data = await res.json()
-      const apiScenarios: Array<{ id: string; status?: string; label?: string }> = data.scenarios || []
-      const apiIds = new Set(apiScenarios.map((s) => (typeof s === "string" ? s : s.id)))
-
-      // Merge enriched catalog with API scenarios
-      return SCENARIO_CATALOG.map((item) => {
-        if (apiIds.has(item.id)) {
-          return item
-        }
-        return item
-      })
+      const apiScenarios: Array<{ id: string; status?: string; label?: string; domain?: string; type?: string; description?: string }> = data.scenarios || []
+      
+      return apiScenarios.map((s) => ({
+        id: s.id,
+        status: (s.status as "live" | "evaluation_only") || "live",
+        title: s.label || s.id,
+        domain: s.domain || "Unknown Domain",
+        type: s.type || "Anomaly",
+        description: s.description || s.label || "",
+      }))
     }
   } catch (err) {
-    console.warn("Could not fetch remote scenarios, using catalog:", err)
+    console.warn("Could not fetch remote scenarios:", err)
   }
-  return SCENARIO_CATALOG
+  return []
 }
 
 export interface ApiInvestigationError extends Error {

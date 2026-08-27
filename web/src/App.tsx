@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { InvestigationOverview } from "./components/investigation/InvestigationOverview"
-import { DEFAULT_INC_001, SCENARIO_PREVIEWS } from "./lib/defaultData"
+import { DEFAULT_INC_001 } from "./lib/defaultData"
 import { runInvestigation, ApiInvestigationError } from "./lib/api"
 import { InvestigationResult, PersonaType } from "./types/investigation"
 import { ErrorBoundary } from "./components/common/ErrorBoundary"

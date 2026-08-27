@@ -1,0 +1,79 @@
+domain: E-Commerce Retail
+
+mechanisms:
+  payment_gateway:
+    keywords: ["payment", "gateway", "stripe", "adyen", "auth", "checkout"]
+    associated_kpis: ["gateway_latency_15min", "payment_failure_rate_15min"]
+    verification_steps:
+      - payment_success_rate
+      - conversion_rate_recovery
+  inventory_system:
+    keywords: ["inventory", "stock", "warehouse", "depletion", "out of stock"]
+    associated_kpis: ["inventory_fill_rate_daily"]
+    verification_steps:
+      - inventory_fill_rate
+      - product_availability
+  external_factors:
+    keywords: ["competitor", "market", "pricing", "macro", "holiday"]
+    verification_steps:
+      - market_share_indicators
+      - competitor_pricing_monitoring
+  device_performance:
+    keywords: ["device", "mobile", "ios", "android", "web", "app crash"]
+    verification_steps:
+      - app_crash_rate
+      - device_specific_conversion
+  deployment_issues:
+    keywords: ["deploy", "release", "rollback", "v4.3", "v4.2", "frontend", "backend"]
+    verification_steps:
+      - error_rate
+      - latency_p95
+  default:
+    keywords: []
+    verification_steps:
+      - kpi_primary_metric_recovery
+
+recovery_curves:
+  rollback:
+    keywords: ["rollback", "roll back", "revert", "downgrade"]
+    projected_metric: "payment_success_rate + conversion_rate"
+    projected_recovery_pct: 85.0
+    recovery_window_hours: 2
+    mean_time_to_normalcy: "5 min"
+    assumptions:
+      - "Rollback to previous stable version restores baseline connection pool configuration."
+      - "Gateway metrics stabilize post-reload without residual network contention."
+    narrative: >
+      Following a rollback of the problematic release, payment success rate 
+      and conversion are expected to recover toward baseline levels within 
+      the defined window.
+  reorder:
+    keywords: ["reorder", "re-order", "replenish", "restock", "inventory", "supply"]
+    projected_metric: "inventory_fill_rate"
+    projected_recovery_pct: 90.0
+    recovery_window_hours: 6
+    mean_time_to_normalcy: "6 hours"
+    assumptions:
+      - "Supplier replenishment restores SKU fulfillment above critical threshold."
+  default:
+    keywords: []
+    projected_metric: "kpi_primary_metric"
+    projected_recovery_pct: 75.0
+    recovery_window_hours: 4
+    mean_time_to_normalcy: "15 min"
+    assumptions:
+      - "Remediation directly addresses identified primary anomaly driver."
+
+hypothesis_generation:
+  prompt_context: >
+    - The domain is an e-commerce retail business.
+    - If a hypothesis involves checkout or payment degradation caused by a recent 
+      software release, the recommended action MUST include rolling back that release 
+      (e.g., v4.3) as the primary remediation step.
+    - If a hypothesis involves inventory shortages, the recommended action should 
+      include reordering or restocking affected product lines.
+  drivers:
+    - "technical degradation (e.g. latency, crashes)"
+    - "external factors (e.g. competitor pricing, holidays)"
+    - "inventory/supply chain disruptions"
+    - "marketing/promotional changes"

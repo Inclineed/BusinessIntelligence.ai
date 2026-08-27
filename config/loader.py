@@ -134,7 +134,7 @@ def load_kpi_contract(path: str | Path) -> dict:
             _require(kpi, key, ARTIFACT, context=ctx)
 
         # Additional element checks (Requirement 2.1 — six elements)
-        for extra in ("definition", "calculation", "lineage", "thresholds"):
+        for extra in ("definition", "calculation", "lineage", "thresholds", "query", "unit"):
             _require(kpi, extra, ARTIFACT, context=ctx)
 
         # drivers and lineage must be lists
@@ -157,6 +157,20 @@ def load_kpi_contract(path: str | Path) -> dict:
             raise ConfigError(
                 f"[{ARTIFACT}] 'access' must be a non-empty mapping ({ctx})."
             )
+
+        # materiality (optional, but if present must be a valid mapping with required keys)
+        if "materiality" in kpi:
+            mat = kpi["materiality"]
+            if not isinstance(mat, dict):
+                raise ConfigError(
+                    f"[{ARTIFACT}] 'materiality' must be a mapping ({ctx})."
+                )
+            for mat_key in ("impact_metric", "multiplier", "critical_threshold", "high_threshold", "medium_threshold", "low_threshold"):
+                _require(mat, mat_key, ARTIFACT, context=f"{ctx}.materiality")
+            if mat["impact_metric"] not in ("financial", "volume"):
+                raise ConfigError(
+                    f"[{ARTIFACT}] 'impact_metric' in materiality must be 'financial' or 'volume' ({ctx})."
+                )
 
     return data
 
@@ -212,6 +226,24 @@ def load_entitlements(path: str | Path) -> dict:
                 f"[{ARTIFACT}] 'authorized_fields' must be a non-empty mapping "
                 f"({ctx})."
             )
+
+    if "decision_rights" in data:
+        decision_rights = data["decision_rights"]
+        if not isinstance(decision_rights, dict):
+            raise ConfigError(f"[{ARTIFACT}] 'decision_rights' must be a YAML mapping.")
+            
+        levers = decision_rights.get("levers")
+        if levers is not None:
+            if not isinstance(levers, dict):
+                raise ConfigError(f"[{ARTIFACT}] 'levers' in decision_rights must be a mapping.")
+            for lever_name, lever_cfg in levers.items():
+                if not isinstance(lever_cfg, dict):
+                    raise ConfigError(f"[{ARTIFACT}] Lever '{lever_name}' must be a YAML mapping.")
+                _require(lever_cfg, "owner", ARTIFACT, context=f"lever '{lever_name}'")
+                _require(lever_cfg, "authorized_personas", ARTIFACT, context=f"lever '{lever_name}'")
+                auth_personas = lever_cfg["authorized_personas"]
+                if not isinstance(auth_personas, list) or len(auth_personas) == 0:
+                    raise ConfigError(f"[{ARTIFACT}] 'authorized_personas' for lever '{lever_name}' must be a non-empty list.")
 
     return data
 
@@ -341,3 +373,37 @@ def load_memory_retention(path: str | Path) -> dict:
         "default_ttl_days": int(default_ttl),
         "by_source": by_source_lookup,
     }
+
+def load_domain_semantics(path: str | Path) -> dict:
+    """Load and validate domain_semantics.yaml."""
+    ARTIFACT = "domain_semantics.yaml"
+    data = _load_yaml(path, ARTIFACT)
+
+    if not isinstance(data, dict):
+        raise ConfigError(f"[{ARTIFACT}] Top level must be a YAML mapping.")
+
+    for key in ("domain", "mechanisms", "recovery_curves", "hypothesis_generation"):
+        _require(data, key, ARTIFACT)
+        
+    return data
+
+def load_scenarios(path: str | Path) -> dict:
+    """Load and validate scenarios.yaml."""
+    ARTIFACT = "scenarios.yaml"
+    data = _load_yaml(path, ARTIFACT)
+    
+    if not isinstance(data, dict):
+        raise ConfigError(f"[{ARTIFACT}] Top level must be a YAML mapping.")
+        
+    _require(data, "scenarios", ARTIFACT)
+    if not isinstance(data["scenarios"], list):
+        raise ConfigError(f"[{ARTIFACT}] 'scenarios' must be a list.")
+        
+    for i, sc in enumerate(data["scenarios"]):
+        if not isinstance(sc, dict):
+            raise ConfigError(f"[{ARTIFACT}] Scenario at index {i} must be a YAML mapping.")
+        ctx = f"scenario[{i}]"
+        for key in ("id", "label", "domain", "status", "window_start", "window_end"):
+            _require(sc, key, ARTIFACT, context=ctx)
+            
+    return data

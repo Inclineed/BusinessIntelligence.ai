@@ -11,7 +11,7 @@ export const DiagnosticBreakdown: React.FC<DiagnosticBreakdownProps> = ({ contri
   if (!contributions || contributions.length === 0) {
     return (
       <div className="p-6 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] text-center text-xs font-mono text-[#9E9788]">
-        No dimensional breakdown slices available for this scenario.
+        No dimensional variance observed / no cohort-level partition data available for this investigation.
       </div>
     )
   }

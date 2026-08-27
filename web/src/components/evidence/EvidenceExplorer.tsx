@@ -27,15 +27,15 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
 
   // Summary calculations
   const sources = Array.from(new Set(evidence.map((e) => e.source_id)))
-  const freshCount = evidence.filter((e) => e.reliability_weight >= 0.85).length
-  const meanRelevance = evidence.reduce((acc, e) => acc + e.relevance, 0) / evidence.length
+  const freshCount = evidence.filter((e) => (e.reliability_weight ?? 1.0) >= 0.85).length
+  const meanRelevance = evidence.reduce((acc, e) => acc + (e.relevance ?? 1.0), 0) / evidence.length
 
   // Filtered evidence
   const filtered = evidence.filter((e) => {
     const matchesSource = selectedSource === "all" || e.source_id === selectedSource
     const matchesSearch =
-      e.evidence_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e.evidence_id ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e.summary ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.source_id.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesSource && matchesSearch
   })
@@ -111,10 +111,10 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
       {/* Evidence Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filtered.map((e) => {
-          const isFresh = e.reliability_weight >= 0.85
+          const isFresh = (e.reliability_weight ?? 1.0) >= 0.85
           return (
             <div
-              key={e.evidence_id}
+              key={(e.evidence_id ?? "")}
               onClick={() => onSelectEvidence(e)}
               className="group p-4 rounded-lg bg-surface border border-hairline hover:border-semantic-neutral/60 cursor-pointer transition-all duration-150 shadow-card flex flex-col justify-between"
             >
@@ -122,7 +122,7 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
                 <div className="flex justify-between items-center mb-2">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs font-bold text-semantic-neutral bg-semantic-neutral-bg border border-semantic-neutral-border px-2 py-0.5 rounded">
-                      ◈ {e.evidence_id}
+                      ◈ {(e.evidence_id ?? "")}
                     </span>
                     <span className="font-mono text-[10px] text-muted-foreground uppercase">{e.source_id}</span>
                   </div>
@@ -132,14 +132,14 @@ export const EvidenceExplorer: React.FC<EvidenceExplorerProps> = ({
                 </div>
 
                 <p className="text-xs text-foreground font-sans line-clamp-3 leading-relaxed mb-3">
-                  {e.summary}
+                  {(e.summary ?? "")}
                 </p>
               </div>
 
               <div className="pt-3 border-t border-hairline-subtle flex justify-between items-center text-[11px] font-mono text-muted-foreground">
                 <div className="flex items-center gap-3">
-                  <span>Rel: <b className="text-white">{e.relevance.toFixed(2)}</b></span>
-                  <span>Weight: <b className={isFresh ? "text-semantic-positive" : "text-semantic-warning"}>{e.reliability_weight.toFixed(2)}</b></span>
+                  <span>Rel: <b className="text-white">{(e.relevance ?? 1.0).toFixed(2)}</b></span>
+                  <span>Weight: <b className={isFresh ? "text-semantic-positive" : "text-semantic-warning"}>{(e.reliability_weight ?? 1.0).toFixed(2)}</b></span>
                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-surface-raised border border-hairline">{e.method}</span>
                 </div>
                 <span className="text-semantic-neutral group-hover:translate-x-0.5 transition-transform flex items-center text-[11px] font-sans font-medium">

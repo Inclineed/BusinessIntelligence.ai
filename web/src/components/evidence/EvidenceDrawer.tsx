@@ -13,11 +13,11 @@ interface EvidenceDrawerProps {
 export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({ evidence, isOpen, onClose, hypotheses }) => {
   if (!isOpen || !evidence) return null
 
-  const isFresh = evidence.reliability_weight >= 0.85
+  const isFresh = (evidence.reliability_weight ?? 1.0) >= 0.85
   const citingHyps = hypotheses.filter(
     (h) =>
-      h.supporting_evidence_ids?.includes(evidence.evidence_id) ||
-      h.contradictory_evidence_ids?.includes(evidence.evidence_id)
+      h.supporting_evidence_ids?.includes(evidence.evidence_id ?? "") ||
+      h.contradictory_evidence_ids?.includes(evidence.evidence_id ?? "")
   )
 
   return (
@@ -56,7 +56,7 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({ evidence, isOpen
                 <ShieldCheck className="w-3.5 h-3.5 text-semantic-positive" /> SOURCE RELIABILITY (SLA)
               </div>
               <div className="text-xl font-bold font-mono text-white">
-                {evidence.reliability_weight.toFixed(3)}
+                {(evidence.reliability_weight ?? 1.0).toFixed(3)}
               </div>
               <span className={cn("inline-block text-[10px] font-mono font-bold mt-1 px-1.5 py-0.5 rounded border", isFresh ? "text-semantic-positive bg-semantic-positive-bg border-semantic-positive-border" : "text-semantic-warning bg-semantic-warning-bg border-semantic-warning-border")}>
                 {isFresh ? "FRESH (WITHIN SLA)" : "STALE / DOWN-WEIGHTED"}
@@ -68,7 +68,7 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({ evidence, isOpen
                 <Clock className="w-3.5 h-3.5 text-semantic-neutral" /> RELEVANCE TO SIGNAL
               </div>
               <div className="text-xl font-bold font-mono text-white">
-                {evidence.relevance.toFixed(3)}
+                {(evidence.relevance ?? 1.0).toFixed(3)}
               </div>
               <span className="inline-block text-[10px] font-mono text-muted-foreground mt-1">
                 Cosine Similarity Score
@@ -117,7 +117,7 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({ evidence, isOpen
             {citingHyps.length > 0 ? (
               <div className="space-y-2">
                 {citingHyps.map((h) => {
-                  const isSupport = h.supporting_evidence_ids?.includes(evidence.evidence_id)
+                  const isSupport = h.supporting_evidence_ids?.includes(evidence.evidence_id ?? "")
                   return (
                     <div
                       key={h.hypothesis_id}

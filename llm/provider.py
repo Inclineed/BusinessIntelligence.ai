@@ -31,11 +31,20 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    load_dotenv(_env_path, override=False)
+except Exception:
+    pass
+
 logger = logging.getLogger(__name__)
+
 
 
 # ---------------------------------------------------------------------------
@@ -309,17 +318,9 @@ class GroqProvider(LLMProvider):
         ollama_embed_host: str | None = None,
         credential_mode: str | None = None,
     ) -> None:
-        env_vars = {}
-        try:
-            from dotenv import dotenv_values
-            from pathlib import Path
-            env_vars = dotenv_values(Path(__file__).resolve().parent.parent / ".env")
-        except Exception:
-            pass
+        self._credential_mode = (credential_mode or os.getenv("GROQ_CREDENTIAL_MODE", "pool")).lower()
 
-        self._credential_mode = credential_mode or env_vars.get("GROQ_CREDENTIAL_MODE") or os.getenv("GROQ_CREDENTIAL_MODE", "pool").lower()
-
-        raw_keys = api_key or env_vars.get("GROQ_API_KEYS") or os.getenv("GROQ_API_KEYS") or env_vars.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
+        raw_keys = api_key or os.getenv("GROQ_API_KEYS") or os.getenv("GROQ_API_KEY", "")
         if isinstance(raw_keys, list):
             parsed_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
         else:
@@ -339,19 +340,20 @@ class GroqProvider(LLMProvider):
 
         self._current_key_idx = 0
         self._api_key = self._api_keys[0]
-        self._model = model or env_vars.get("GROQ_MODEL") or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
+        self._model = model or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
         self.model = self._model
         self.DEFAULT_MODEL = self._model
-        self._base_url = (base_url or env_vars.get("GROQ_BASE_URL") or os.getenv("GROQ_BASE_URL", self.DEFAULT_BASE_URL)).rstrip("/")
+        self._base_url = (base_url or os.getenv("GROQ_BASE_URL", self.DEFAULT_BASE_URL)).rstrip("/")
         self._timeout = timeout
         self._max_retries = max_retries
         self._ollama_embed_host = (
-            ollama_embed_host or env_vars.get("OLLAMA_HOST") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+            ollama_embed_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         )
         self._embedder = OllamaProvider(base_url=self._ollama_embed_host, timeout=self._timeout)
 
     @property
     def provider_name(self) -> str:
+
         return "groq"
 
     def _get_active_key(self) -> str:
@@ -414,8 +416,8 @@ class GroqProvider(LLMProvider):
             user_content = prompt + "\n\nCRITICAL INSTRUCTION: Keep thinking process brief. Output ONLY valid JSON matching the schema immediately."
         messages.append({"role": "user", "content": user_content})
 
-        # Stay within Groq's 8000 TPM limit (1767 prompt + 4500 max_tokens = 6267 < 8000)
-        actual_max_tokens = 4500 if is_reasoning_model else min(max_tokens, 3500)
+        # Stay safely within Groq's 8000 TPM limit (e.g. ~3500 prompt + 1500 completion = 5000 < 8000)
+        actual_max_tokens = min(max_tokens, 1500)
 
         payload: dict[str, Any] = {
             "model": target_model,
@@ -447,6 +449,7 @@ class GroqProvider(LLMProvider):
 
                 # Check for rate limiting
                 if response.status_code == 429:
+                    retry_after_sec = self._parse_retry_after(response.headers, attempt, response.text)
                     if len(self._api_keys) > 1:
                         self._rotate_key()
                         logger.warning(
@@ -455,10 +458,13 @@ class GroqProvider(LLMProvider):
                             self._max_retries + 1,
                             self._current_key_idx,
                         )
-                        time.sleep(0.2)
+                        # If a full cycle completed across all keys, back off briefly
+                        if (attempt + 1) % len(self._api_keys) == 0:
+                            time.sleep(max(0.5, retry_after_sec))
+                        else:
+                            time.sleep(0.1)
                         continue
 
-                    retry_after_sec = self._parse_retry_after(response.headers, attempt, response.text)
                     logger.warning(
                         "Groq rate limit (429) hit on attempt %d/%d (credential_index=%d). Retrying after %.2fs...",
                         attempt + 1,
@@ -637,24 +643,16 @@ def get_llm_provider(provider_type: str | None = None) -> LLMProvider:
     Reads provider from *provider_type* argument or LLM_PROVIDER env variable.
     Default: 'ollama'.
     """
-    env_vars = {}
-    try:
-        from dotenv import dotenv_values, load_dotenv
-        from pathlib import Path
-        env_path = Path(__file__).resolve().parent.parent / ".env"
-        load_dotenv(env_path, override=True)
-        env_vars = dotenv_values(env_path)
-    except Exception:
-        pass
-
-    name = (provider_type or env_vars.get("LLM_PROVIDER") or os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
+    name = (provider_type or os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
 
     if name == "groq":
         return GroqProvider()
 
     if name == "ollama":
-        ollama_host = env_vars.get("OLLAMA_HOST") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         return OllamaProvider(base_url=ollama_host)
+
+
 
     raise ValueError(
         f"Unsupported LLM_PROVIDER: {name!r}. "

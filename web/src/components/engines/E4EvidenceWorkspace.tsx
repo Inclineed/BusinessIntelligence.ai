@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { InvestigationResult, EvidenceItem } from "../../types/investigation"
-import { SCENARIO_CATALOG } from "../../lib/api"
+import { useScenarios } from "../../contexts/ScenariosContext"
 import { EvidenceInspectionModal } from "../evidence/EvidenceInspectionModal"
 import {
   Database,
@@ -26,8 +26,9 @@ export const E4EvidenceWorkspace: React.FC<E4EvidenceWorkspaceProps> = ({ result
   const evidenceList = result.evidence || []
 
   // Dynamic scenario metadata
-  const currentScenario =
-    SCENARIO_CATALOG.find((s) => s.id === result.scenario_id) || SCENARIO_CATALOG[0]
+  const { scenarios } = useScenarios()
+  const activeScenario =
+    scenarios.find((s) => s.id === result.scenario_id) || scenarios[0] || {}
 
   // Group evidence by source system for the coverage matrix
   const evidenceBySource: Record<string, EvidenceItem[]> = {}
@@ -88,7 +89,8 @@ export const E4EvidenceWorkspace: React.FC<E4EvidenceWorkspaceProps> = ({ result
         {sourceKeys.map((src) => {
           const items = evidenceBySource[src]
           const topItem = items[0]
-          const reliability = Math.round((topItem?.reliability_weight ?? 0.95) * 100)
+          const relVal = topItem?.source_reliability ?? topItem?.reliability_weight ?? 0.95
+          const reliability = Math.round(relVal * 100)
           return (
             <div
               key={src}
@@ -132,48 +134,95 @@ export const E4EvidenceWorkspace: React.FC<E4EvidenceWorkspaceProps> = ({ result
         {/* Clean Evidence Rows */}
         <div className="space-y-2 pt-2">
           {/* Column Headers */}
-          <div className="grid grid-cols-12 gap-3 px-4 py-2 text-[10px] font-mono font-bold uppercase text-[#9E9788] border-b border-[#2E2E2E]">
-            <div className="col-span-3">Evidence ID &amp; Ref</div>
-            <div className="col-span-5">Summary &amp; Corroborating Content</div>
-            <div className="col-span-2">Source / Method</div>
-            <div className="col-span-2 text-right">Reliability &amp; Inspect</div>
+          <div className="grid grid-cols-12 gap-3 px-4 py-2 text-[10px] font-mono font-bold uppercase text-[#9E9788] border-b border-[#2E2E2E] items-center">
+            <div className="col-span-4">Source &amp; Summary</div>
+            <div className="col-span-2">Method</div>
+            <div className="col-span-2">Timing</div>
+            <div className="col-span-3 flex justify-between pr-4">
+              <span>Conf</span>
+              <span>Rel</span>
+              <span>Rev</span>
+            </div>
+            <div className="col-span-1 text-right">Action</div>
           </div>
 
           {/* Row Items */}
-          {evidenceList.map((item) => {
-            const isUnstructured = item.kind === "unstructured" || item.method === "RETRIEVAL"
+          {evidenceList.map((item, idx) => {
+            const methodColors: Record<string, string> = {
+              SQL: "text-sky-400 border-sky-400/30 bg-sky-400/10",
+              STATISTICS: "text-emerald-400 border-emerald-400/30 bg-emerald-400/10",
+              BUSINESS_RULE: "text-amber-400 border-amber-400/30 bg-amber-400/10",
+              VECTOR_RETRIEVAL: "text-purple-400 border-purple-400/30 bg-purple-400/10",
+              LLM: "text-orange-400 border-orange-400/30 bg-orange-400/10",
+              HYBRID: "text-pink-400 border-pink-400/30 bg-pink-400/10",
+            }
+            const badgeStyle = methodColors[item.method] || "text-[#9E9788] border-[#333333] bg-[#1A1A1A]"
+            const displayId = item.id || item.evidence_id || `EV_${idx}`
+            const displaySource = item.source_id || item.source_name || "unknown"
+            const displaySummary = item.observation || item.summary || item.raw_ref || "No observation recorded"
+
+            const confVal = item.confidence ?? item.relevance
+            const relVal = item.source_reliability ?? item.reliability_weight
+            const revVal = item.relevance ?? item.confidence
+
             return (
               <div
-                key={item.evidence_id}
+                key={displayId}
                 onClick={() => setSelectedEvidence(item)}
-                className="grid grid-cols-12 gap-3 px-4 py-3.5 rounded-xl bg-[#222222] hover:bg-[#2A2A2A] border border-[#333333] hover:border-[#6B9BB0]/40 transition-all cursor-pointer items-center group text-xs"
+                className="grid grid-cols-12 gap-3 px-4 py-3 rounded-xl bg-[#222222] hover:bg-[#2A2A2A] border border-[#333333] hover:border-[#6B9BB0]/40 transition-all cursor-pointer items-start group text-xs"
               >
-                {/* Evidence ID / Ref */}
-                <div className="col-span-3 font-mono font-bold text-[#6B9BB0] group-hover:underline flex items-center gap-2 truncate">
-                  {getSourceIcon(item.source_id)}
-                  <span className="truncate">{item.raw_ref || item.evidence_id}</span>
+                {/* Source & Summary */}
+                <div className="col-span-4 flex flex-col gap-1.5 pr-2">
+                  <div className="font-mono font-bold text-[#6B9BB0] group-hover:underline flex items-center gap-2 truncate text-[11px]">
+                    {getSourceIcon(displaySource)}
+                    <span className="truncate">{displaySource.replace(/_/g, " ")}</span>
+                  </div>
+                  <div className="text-[#D1C9B8] font-sans line-clamp-2 text-[11px] leading-snug">
+                    {displaySummary}
+                  </div>
                 </div>
 
-                {/* Evidence Summary */}
-                <div className="col-span-5 text-[#D1C9B8] font-sans truncate pr-2 text-xs leading-relaxed">
-                  {item.summary}
-                </div>
-
-                {/* Source System & Method */}
-                <div className="col-span-2 font-mono text-[11px] text-[#9E9788] flex flex-col gap-0.5">
-                  <span className="capitalize text-[#D1C9B8]">{item.source_id.replace(/_/g, " ")}</span>
-                  <span className="text-[9px] text-[#666666]">
-                    [{item.method || (isUnstructured ? "RETRIEVAL" : "SQL")}]
+                {/* Method */}
+                <div className="col-span-2 flex items-start">
+                  <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded border ${badgeStyle}`}>
+                    [{item.method || "SQL"}]
                   </span>
+                </div>
+
+                {/* Timing */}
+                <div className="col-span-2 flex flex-col gap-0.5 font-mono text-[10px]">
+                  {item.timestamp ? (
+                    <>
+                      <span className="text-[#D1C9B8] truncate">{typeof item.timestamp === "string" ? item.timestamp.replace("T", " ").slice(0, 19) : String(item.timestamp)}</span>
+                      <span className="text-[#6B9BB0]">Freshness: {item.freshness_minutes != null ? `${Math.round(item.freshness_minutes)}m` : "4m"}</span>
+                    </>
+                  ) : (
+                    <span className="text-[#666666]">—</span>
+                  )}
+                </div>
+
+                {/* Metadata */}
+                <div className="col-span-3 flex justify-between pr-4 font-mono text-[11px]">
+                  <div className="flex flex-col gap-0.5 items-center">
+                    <span className={confVal != null ? "text-[#D1C9B8]" : "text-[#666666]"}>
+                      {confVal != null ? Number(confVal).toFixed(2) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5 items-center">
+                    <span className={relVal != null ? "text-[#4E8569]" : "text-[#666666]"}>
+                      {relVal != null ? Number(relVal).toFixed(2) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5 items-center">
+                    <span className={revVal != null ? "text-[#6B9BB0]" : "text-[#666666]"}>
+                      {revVal != null ? Number(revVal).toFixed(2) : "—"}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Inspect Action */}
-                <div className="col-span-2 text-right flex items-center justify-end gap-2 font-mono text-[11px] text-[#9E9788] group-hover:text-[#F4EEE0]">
-                  <span className="font-bold text-[#6B9BB0]">
-                    {Math.round((item.reliability_weight ?? 1.0) * 100)}%
-                  </span>
-                  <Eye className="w-3.5 h-3.5 text-[#6B9BB0]" />
-                  <span className="hidden sm:inline">Inspect</span>
+                <div className="col-span-1 text-right flex items-center justify-end h-full font-mono text-[11px] text-[#9E9788] group-hover:text-[#F4EEE0]">
+                  <Eye className="w-4 h-4 text-[#6B9BB0]" />
                 </div>
               </div>
             )

@@ -110,8 +110,8 @@ export const E5HypothesisWorkspace: React.FC<E5HypothesisWorkspaceProps> = ({ re
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-[#9E9788]">Evaluated Score:</span>
-                    <span className="text-sm font-bold text-[#F4EEE0] tabular-nums">{scorePct}%</span>
+                    <span className="text-xs text-[#9E9788]">Support Score:</span>
+                    <span className="text-sm font-bold text-[#F4EEE0] tabular-nums">{scorePct}/100</span>
                   </div>
                 </div>
 

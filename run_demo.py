@@ -49,6 +49,7 @@ from models import (
     RuleResult,
     RuleVerdict,
     ScoredHypothesis,
+    StructuredActionRecommendation,
     Telemetry,
     clamp,
 )
@@ -427,8 +428,19 @@ def _build_mock_inc001_result() -> InvestigationResult:
     scored = [sh1, sh2, sh3]
 
     # ------------------------------------------------------------------
-    # Decision â€” rollback v4.3
+    # Decision — rollback v4.3
     # ------------------------------------------------------------------
+    structured_rec = StructuredActionRecommendation(
+        driver="A defect in the payment gateway integration introduced by the recent checkout-service release...",
+        controllable_lever="Software Release Reversion",
+        action="Immediately rollback v4.3 of checkout-service to v4.2 to restore payment gateway stability.",
+        expected_impact="Projected 92.0% recovery on payment_success_rate",
+        owner="Platform Engineering",
+        confidence=0.94,
+        monitoring_plan="Monitor payment_success_rate for recovery.",
+        authorized_personas=["analyst", "manager"],
+    )
+
     decision = Decision(
         abstained=False,
         recommended_action=(
@@ -444,6 +456,7 @@ def _build_mock_inc001_result() -> InvestigationResult:
             "disproportionately impacting Android and iOS app channels. "
             "Recommend immediate rollback and recovery monitoring."
         ),
+        structured_recommendation=structured_rec,
         method=MethodTag.LLM,
     )
 

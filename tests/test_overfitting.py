@@ -22,6 +22,7 @@ from engines.challenge import (
     score_hypothesis,
 )
 from evaluation.evaluator import Evaluator
+from config.loader import load_domain_semantics
 from models import (
     AnomalySignal,
     ConfidenceState,
@@ -783,6 +784,7 @@ class TestAdversarialPerturbation:
                     method=MethodTag.STATS,
                 )
             ],
+            domain_semantics=load_domain_semantics("config/domain_semantics.yaml"),
         )
 
         assert challenge_res.abstained is False

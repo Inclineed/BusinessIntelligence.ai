@@ -15,7 +15,14 @@ from typing import Optional
 
 import numpy as np
 
-from models import AnomalySignal, FreshnessStatus, KPIValue, MethodTag
+from models import (
+    AnomalySignal,
+    BusinessMateriality,
+    FreshnessStatus,
+    KPIValue,
+    MaterialityAssessment,
+    MethodTag,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +337,136 @@ def build_history_from_kpis(
         )
 
     return history
+
+
+# ---------------------------------------------------------------------------
+# Business Materiality & Priority Ranking
+# ---------------------------------------------------------------------------
+
+_MATERIALITY_SEVERITY_ORDER: dict[BusinessMateriality, int] = {
+    BusinessMateriality.CRITICAL: 1,
+    BusinessMateriality.HIGH: 2,
+    BusinessMateriality.MEDIUM: 3,
+    BusinessMateriality.LOW: 4,
+    BusinessMateriality.NEGLIGIBLE: 5,
+}
+
+
+def assess_materiality(
+    signals: list[AnomalySignal],
+    kpi_contract: dict | None = None,
+    segmentable_kpi_ids: Optional[set[str]] = None,
+) -> list[MaterialityAssessment]:
+    """
+    Assess business materiality for each AnomalySignal.
+
+    Distinguishes statistical significance from business impact and assigns
+    deterministic priority ranking:
+      1. Materiality severity (CRITICAL -> HIGH -> MEDIUM -> LOW -> NEGLIGIBLE)
+      2. Absolute business impact (financial or volume magnitude)
+      3. Segmentability tie-breaker (segmentable before non-segmentable)
+      4. Deterministic KPI ID tie-breaker
+
+    Non-anomalies default to NEGLIGIBLE and are excluded from investigation ranking (priority_rank=0).
+    """
+    if segmentable_kpi_ids is None:
+        segmentable_kpi_ids = set()
+
+    # Map KPI id to contract definition if provided
+    contract_by_id: dict[str, dict] = {}
+    if kpi_contract and isinstance(kpi_contract, dict):
+        for kpi_def in kpi_contract.get("kpis", []):
+            if isinstance(kpi_def, dict) and "id" in kpi_def:
+                contract_by_id[kpi_def["id"]] = kpi_def
+
+    assessments: list[MaterialityAssessment] = []
+    anomalous_assessments: list[tuple[MaterialityAssessment, float, bool]] = []
+
+    for sig in signals:
+        kpi_def = contract_by_id.get(sig.kpi_id, {})
+        mat_cfg = kpi_def.get("materiality", {})
+
+        observed_val = sig.observed
+        expected_val = sig.expected
+        baseline_mean = expected_val if not _is_nan(expected_val) else 0.0
+
+        if not sig.is_anomaly or _is_nan(observed_val) or _is_nan(expected_val):
+            # Non-anomalies or un-evaluable signals default to NEGLIGIBLE (excluded from rank)
+            assessments.append(
+                MaterialityAssessment(
+                    kpi_id=sig.kpi_id,
+                    observed_value=observed_val,
+                    baseline_mean=baseline_mean,
+                    z_score=sig.z_score,
+                    delta_pct=sig.delta_pct,
+                    is_statistical_anomaly=sig.is_anomaly,
+                    financial_impact=None,
+                    volume_impact=None,
+                    business_materiality=BusinessMateriality.NEGLIGIBLE,
+                    priority_rank=0,
+                )
+            )
+            continue
+
+        # Anomaly confirmed: compute absolute delta and business impact
+        abs_delta = abs(observed_val - baseline_mean)
+        impact_metric = mat_cfg.get("impact_metric", "financial")
+        multiplier = float(mat_cfg.get("multiplier", 1.0))
+        calculated_impact = round(abs_delta * multiplier, 2)
+
+        crit_thresh = float(mat_cfg.get("critical_threshold", 50000.0))
+        high_thresh = float(mat_cfg.get("high_threshold", 10000.0))
+        med_thresh = float(mat_cfg.get("medium_threshold", 5000.0))
+        low_thresh = float(mat_cfg.get("low_threshold", 1000.0))
+
+        if calculated_impact >= crit_thresh:
+            tier = BusinessMateriality.CRITICAL
+        elif calculated_impact >= high_thresh:
+            tier = BusinessMateriality.HIGH
+        elif calculated_impact >= med_thresh:
+            tier = BusinessMateriality.MEDIUM
+        elif calculated_impact >= low_thresh:
+            tier = BusinessMateriality.LOW
+        else:
+            tier = BusinessMateriality.NEGLIGIBLE
+
+        fin_impact: Optional[float] = calculated_impact if impact_metric == "financial" else None
+        vol_impact: Optional[float] = calculated_impact if impact_metric == "volume" else None
+
+        assessment = MaterialityAssessment(
+            kpi_id=sig.kpi_id,
+            observed_value=observed_val,
+            baseline_mean=baseline_mean,
+            z_score=sig.z_score,
+            delta_pct=sig.delta_pct,
+            is_statistical_anomaly=True,
+            financial_impact=fin_impact,
+            volume_impact=vol_impact,
+            business_materiality=tier,
+            priority_rank=0,  # ranked below
+        )
+        is_seg = sig.kpi_id in segmentable_kpi_ids
+        anomalous_assessments.append((assessment, calculated_impact, is_seg))
+        assessments.append(assessment)
+
+    # Sort anomalous assessments deterministically:
+    # 1. Materiality severity (1=CRITICAL, 2=HIGH, 3=MEDIUM, 4=LOW, 5=NEGLIGIBLE)
+    # 2. -calculated_impact (descending impact magnitude)
+    # 3. not is_seg (segmentable True comes before False)
+    # 4. kpi_id (alphabetical)
+    anomalous_assessments.sort(
+        key=lambda item: (
+            _MATERIALITY_SEVERITY_ORDER[item[0].business_materiality],
+            -item[1],
+            not item[2],
+            item[0].kpi_id,
+        )
+    )
+
+    for rank, (assessment, _, _) in enumerate(anomalous_assessments, start=1):
+        assessment.priority_rank = rank
+
+    return assessments
 
 
 # ---------------------------------------------------------------------------

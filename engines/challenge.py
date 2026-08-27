@@ -105,94 +105,6 @@ class ChallengeThresholds:
 _MAX_RAW: float = 2.0  # rule_modifier (1.0) + capped support half (1.0)
 
 
-# ---------------------------------------------------------------------------
-# Internal keyword sets for rule logic
-# ---------------------------------------------------------------------------
-
-# Keywords that suggest a checkout/payment/gateway mechanism
-_PAYMENT_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "payment",
-        "checkout",
-        "gateway",
-        "transaction",
-        "purchase",
-        "order",
-        "cart",
-        "conversion",
-    }
-)
-
-# Keywords that suggest an inventory mechanism
-_INVENTORY_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "inventory",
-        "stock",
-        "supply",
-        "shortage",
-        "out-of-stock",
-        "fulfillment",
-        "warehouse",
-        "availability",
-    }
-)
-
-# Keywords that suggest a competitor / external mechanism
-_EXTERNAL_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "competitor",
-        "competition",
-        "pricing",
-        "promotion",
-        "marketing",
-        "external",
-        "market",
-        "campaign",
-    }
-)
-
-# Device/segment keywords
-_DEVICE_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "android",
-        "ios",
-        "mobile",
-        "desktop",
-        "web",
-        "app",
-        "device",
-    }
-)
-
-# Words in evidence summaries that indicate a deployment
-_DEPLOY_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "deploy",
-        "deployed",
-        "deployment",
-        "release",
-        "rollout",
-        "version",
-        "upgrade",
-        "patch",
-    }
-)
-
-# Words in evidence summaries that indicate inventory is normal
-_INVENTORY_NORMAL_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "normal",
-        "stable",
-        "adequate",
-        "sufficient",
-        "no shortage",
-        "healthy",
-        "available",
-        "fill rate",
-        "fill_rate",
-    }
-)
-
 
 def _lower_tokens(text: str) -> frozenset[str]:
     """Return a frozenset of lower-cased whitespace tokens from *text*."""
@@ -216,6 +128,7 @@ def evaluate_rule(
     evidence_by_id: dict[str, Evidence],
     signals: list[AnomalySignal],
     contributions: list[DimensionContribution],
+    domain_semantics: Optional[dict] = None,
 ) -> RuleResult:
     """
     Evaluate a single named rule for *hypothesis* and return a RuleResult.
@@ -239,14 +152,15 @@ def evaluate_rule(
 
     Requirements: 9.1, 9.2
     """
+    domain_semantics = domain_semantics or {}
     if rule_name == "timeline":
-        return _rule_timeline(hypothesis, evidence_by_id)
+        return _rule_timeline(hypothesis, evidence_by_id, domain_semantics)
     elif rule_name == "segment_alignment":
-        return _rule_segment_alignment(hypothesis, evidence_by_id, contributions)
+        return _rule_segment_alignment(hypothesis, evidence_by_id, contributions, domain_semantics)
     elif rule_name == "kpi_corroboration":
-        return _rule_kpi_corroboration(hypothesis, evidence_by_id, signals)
+        return _rule_kpi_corroboration(hypothesis, evidence_by_id, signals, domain_semantics)
     elif rule_name == "mechanism_consistency":
-        return _rule_mechanism_consistency(hypothesis, evidence_by_id)
+        return _rule_mechanism_consistency(hypothesis, evidence_by_id, domain_semantics)
     elif rule_name == "contradiction":
         return _rule_contradiction(hypothesis, evidence_by_id)
     else:
@@ -266,6 +180,7 @@ def evaluate_rule(
 def _rule_timeline(
     hypothesis: Hypothesis,
     evidence_by_id: dict[str, Evidence],
+    domain_semantics: dict,
 ) -> RuleResult:
     """
     TIMELINE rule
@@ -318,17 +233,25 @@ def _rule_timeline(
     #   (c) payment_gateway evidence is present — the payment gateway is the
     #       component affected by the v4.3 deploy, so its spike is itself evidence
     #       that a deployment-related change impacted the system.
+    deploy_keywords = set()
+    for m_id, m_data in domain_semantics.get("mechanisms", {}).items():
+        # Identify deployment/timeline related mechanisms (e.g. by checking if 'deploy' or 'release' is in keywords)
+        kw = set(m_data.get("keywords", []))
+        if "deploy" in kw or "release" in kw or "rollback" in kw:
+            deploy_keywords.update(kw)
+
     deployment_found = False
-    payment_gw_found = False
+    mechanism_found = False
     for eid in hypothesis.supporting_evidence_ids:
         ev = evidence_by_id.get(eid)
         if ev is None:
             continue
-        if ev.source_id == "deployment_log" or _contains_any(ev.summary, _DEPLOY_KEYWORDS):
+        if ev.source_id == "deployment_log" or _contains_any(ev.summary, deploy_keywords):
             deployment_found = True
             break
-        if ev.source_id == "payment_gateway":
-            payment_gw_found = True
+        # Identify if evidence maps to ANY configured mechanism
+        if ev.source_id in domain_semantics.get("mechanisms", {}):
+            mechanism_found = True
 
     if deployment_found:
         return RuleResult(
@@ -340,23 +263,22 @@ def _rule_timeline(
             ),
         )
 
-    if payment_gw_found:
+    if mechanism_found:
         return RuleResult(
             rule_name="timeline",
             verdict=RuleVerdict.PASS,
             rationale=(
-                "Payment gateway evidence is present; the gateway is the component "
-                "affected by the deployment, confirming temporal alignment between "
-                "the release and the observed anomaly."
+                "Mechanism evidence is present; the affected component is "
+                "supported by the supporting set, confirming temporal alignment between "
+                "the mechanism and the observed anomaly."
             ),
         )
 
-    # No deployment or gateway evidence → partial
     return RuleResult(
         rule_name="timeline",
         verdict=RuleVerdict.PARTIAL,
         rationale=(
-            "No deployment or payment-gateway evidence found in the supporting set; "
+            "No deployment or mechanism evidence found in the supporting set; "
             "timeline consistency is neither confirmed nor refuted."
         ),
     )
@@ -366,6 +288,7 @@ def _rule_segment_alignment(
     hypothesis: Hypothesis,
     evidence_by_id: dict[str, Evidence],
     contributions: list[DimensionContribution],
+    domain_semantics: dict,
 ) -> RuleResult:
     """
     SEGMENT_ALIGNMENT rule
@@ -396,8 +319,21 @@ def _rule_segment_alignment(
         c for c in contributions if c.dimension.lower() == "device"
     ]
 
-    # Determine whether the hypothesis is about a payment/checkout mechanism
-    is_payment_mechanism = _contains_any(combined, _PAYMENT_KEYWORDS)
+    # Determine if any non-external mechanism is explicitly supported
+    supported_mechanism = None
+    for m_id, m_data in domain_semantics.get("mechanisms", {}).items():
+        if m_id == "external_factors" or m_id == "default":
+            continue
+        # if the hypothesis supports this mechanism
+        if _contains_any(combined, set(m_data.get("keywords", []))):
+            if m_id in [evidence_by_id[eid].source_id for eid in hypothesis.supporting_evidence_ids if eid in evidence_by_id]:
+                supported_mechanism = m_id
+                break
+            # also check if any supporting source maps to this mechanism
+            for eid in hypothesis.supporting_evidence_ids:
+                if eid in evidence_by_id and m_id in evidence_by_id[eid].source_id:
+                     supported_mechanism = m_id
+                     break
 
     # --- Supporting evidence sources ---
     supporting_sources = {
@@ -432,14 +368,10 @@ def _rule_segment_alignment(
     if not mentioned_segments and device_contributions:
         dominant = max(device_contributions, key=lambda c: abs(c.contribution_pct))
 
-        # --- Payment/checkout hypotheses: PASS without explicit segment mention ---
-        # The LLM frequently does not name "Android" in the statement even when
-        # the mechanism (checkout/payment code) explains why Android is dominant.
-        # If (a) the hypothesis is about checkout/payment, (b) payment_gateway
-        # evidence supports it, and (c) the dominant segment is a mobile app
-        # channel (android/ios/mobile) where checkout code changes would manifest
-        # most strongly — treat segment alignment as PASS.
-        if is_payment_mechanism and "payment_gateway" in supporting_sources:
+        # For hypotheses backed by a specific internal/technical mechanism (like deploy or gateway),
+        # the LLM frequently does not name the segment in the statement even when
+        # the mechanism explains why a specific channel is dominant.
+        if supported_mechanism:
             dominant_is_mobile = any(
                 kw in dominant.segment.lower()
                 for kw in ("android", "ios", "mobile", "app")
@@ -449,11 +381,10 @@ def _rule_segment_alignment(
                     rule_name="segment_alignment",
                     verdict=RuleVerdict.PASS,
                     rationale=(
-                        f"Payment/checkout mechanism hypothesis with payment_gateway "
+                        f"Mechanism hypothesis ({supported_mechanism}) with supporting "
                         f"evidence; dominant segment '{dominant.segment}' "
                         f"({dominant.contribution_pct:.1f}%) is consistent with "
-                        "a checkout code regression affecting mobile app users — "
-                        "segment alignment confirmed."
+                        "a regression affecting that segment — segment alignment confirmed."
                     ),
                 )
 
@@ -493,6 +424,7 @@ def _rule_kpi_corroboration(
     hypothesis: Hypothesis,
     evidence_by_id: dict[str, Evidence],
     signals: list[AnomalySignal],
+    domain_semantics: dict,
 ) -> RuleResult:
     """
     KPI_CORROBORATION rule
@@ -524,22 +456,24 @@ def _rule_kpi_corroboration(
         for kpi_id in anomalous_kpi_ids:
             if kpi_id.lower() in ev.summary.lower():
                 corroborated_kpis.add(kpi_id)
-        # Cross-reference: payment_gateway source covers payment failure and latency KPIs
-        if ev.source_id == "payment_gateway":
-            # Count as corroborating payment-related anomalies
-            for kpi_id in anomalous_kpi_ids:
-                if any(
-                    kw in kpi_id.lower()
-                    for kw in ("payment", "conversion", "revenue", "gateway", "latency")
-                ):
-                    corroborated_kpis.add(kpi_id)
-        # Orders source corroborates revenue/conversion anomalies
+                
+        # Cross-reference using domain_semantics: if the source represents a mechanism, 
+        # it corroborates KPIs aligned with that mechanism's verification steps or associated KPIs.
+        for m_id, m_data in domain_semantics.get("mechanisms", {}).items():
+            if ev.source_id == m_id or m_id in ev.source_id:
+                related_kpis = m_data.get("associated_kpis", []) + m_data.get("verification_steps", [])
+                for kpi_id in anomalous_kpi_ids:
+                    # check if the kpi_id overlaps with any related_kpi concept
+                    if any(kw in kpi_id.lower() or kw.replace("_", "") in kpi_id.lower() for kw in related_kpis):
+                        corroborated_kpis.add(kpi_id)
+                    # fallback to check if mechanism keywords match the kpi
+                    if any(kw in kpi_id.lower() for kw in m_data.get("keywords", [])):
+                         corroborated_kpis.add(kpi_id)
+                         
+        # General generic check for orders/revenue
         if ev.source_id in ("orders", "order_events"):
             for kpi_id in anomalous_kpi_ids:
-                if any(
-                    kw in kpi_id.lower()
-                    for kw in ("revenue", "conversion", "order")
-                ):
+                if any(kw in kpi_id.lower() for kw in ("revenue", "conversion", "order")):
                     corroborated_kpis.add(kpi_id)
 
     count = len(corroborated_kpis)
@@ -576,30 +510,17 @@ def _rule_kpi_corroboration(
 def _rule_mechanism_consistency(
     hypothesis: Hypothesis,
     evidence_by_id: dict[str, Evidence],
+    domain_semantics: dict,
 ) -> RuleResult:
     """
     MECHANISM_CONSISTENCY rule
     --------------------------
-    Checks whether the stated mechanism (checkout/payment, inventory shortage,
-    competitor/external) is consistent with what the supporting evidence shows.
-
-    PASS   : H1-like (checkout/payment): supporting evidence contains payment_gateway
-             source evidence — mechanism is confirmed.
-             H2-like (external/competitor): marketing evidence supports it.
-    FAIL   : H3-like (inventory shortage): supporting evidence contains inventory
-             evidence with "normal" fill rate — the evidence actually refutes the
-             claimed shortage mechanism.
-             Also FAIL when the hypothesis mechanism is external/competitor but
-             only payment/checkout evidence is provided.
-    PARTIAL: everything else.
+    Checks whether the stated mechanism is consistent with what the supporting evidence shows.
+    Uses domain_semantics instead of hardcoded rules.
     """
     stmt_lower = hypothesis.statement.lower()
     reasoning_lower = hypothesis.reasoning.lower()
     combined = stmt_lower + " " + reasoning_lower
-
-    is_payment_hyp = _contains_any(combined, _PAYMENT_KEYWORDS)
-    is_inventory_hyp = _contains_any(combined, _INVENTORY_KEYWORDS)
-    is_external_hyp = _contains_any(combined, _EXTERNAL_KEYWORDS)
 
     supporting_sources: list[str] = []
     supporting_summaries: list[str] = []
@@ -610,148 +531,58 @@ def _rule_mechanism_consistency(
         supporting_sources.append(ev.source_id)
         supporting_summaries.append(ev.summary)
 
-    # --- H3-like: inventory shortage hypothesis ---
-    # Use "inventory" keyword density to differentiate genuine inventory hypotheses
-    # from payment/checkout hypotheses that merely mention "checkout" as a destination.
-    # An inventory hypothesis is one where inventory/shortage/stock appear in the
-    # statement AND payment mechanism keywords do NOT dominate.
-    inventory_keyword_count = sum(
-        1 for kw in _INVENTORY_KEYWORDS if kw in combined
-    )
-    payment_keyword_count = sum(
-        1 for kw in _PAYMENT_KEYWORDS
-        if kw in combined and kw not in ("checkout",)  # exclude "checkout" as destination
-    )
-    is_primarily_inventory = is_inventory_hyp and (
-        not is_payment_hyp
-        or inventory_keyword_count > payment_keyword_count
-        or any(kw in combined for kw in ("shortage", "stock", "supply", "inventory"))
-    )
-
-    if is_primarily_inventory:
-        # Check if any evidence with an inventory source says inventory is normal
-        for source_id, summary in zip(supporting_sources, supporting_summaries):
-            if source_id == "inventory" or "inventory" in source_id.lower():
-                if _contains_any(summary, _INVENTORY_NORMAL_KEYWORDS):
-                    return RuleResult(
-                        rule_name="mechanism_consistency",
-                        verdict=RuleVerdict.FAIL,
-                        rationale=(
-                            f"Hypothesis claims inventory shortage but evidence from "
-                            f"source '{source_id}' shows inventory levels are normal "
-                            f"(summary: '{summary[:120]}...') — mechanism is refuted."
-                        ),
-                    )
-        # Also check all evidence in evidence_by_id for inventory-normal contradiction
-        # even if the hypothesis didn't reference it directly
-        for ev in evidence_by_id.values():
-            if ev.source_id == "inventory" or "inventory" in ev.source_id.lower():
-                if _contains_any(ev.summary, _INVENTORY_NORMAL_KEYWORDS):
-                    if ev.reliability_weight > 0.3:  # only if reasonably reliable
-                        return RuleResult(
-                            rule_name="mechanism_consistency",
-                            verdict=RuleVerdict.FAIL,
-                            rationale=(
-                                f"Inventory evidence ('{ev.evidence_id}') shows normal "
-                                "fill rate — inventory shortage mechanism is refuted by "
-                                "available data."
-                            ),
-                        )
+    mechanisms = domain_semantics.get("mechanisms", {})
+    if not mechanisms:
+        # Fallback if config is missing
         return RuleResult(
             rule_name="mechanism_consistency",
             verdict=RuleVerdict.PARTIAL,
-            rationale=(
-                "Inventory shortage mechanism claimed but no conclusive "
-                "inventory evidence found to confirm or refute it."
-            ),
+            rationale="No domain semantics configured; cannot assess mechanism consistency.",
         )
 
-    # --- H1-like: checkout/payment hypothesis ---
-    if is_payment_hyp:
-        has_payment_evidence = any(
-            src in ("payment_gateway", "payment_events")
-            or "payment" in src.lower()
-            or "gateway" in src.lower()
-            for src in supporting_sources
-        )
-        if has_payment_evidence:
-            return RuleResult(
-                rule_name="mechanism_consistency",
-                verdict=RuleVerdict.PASS,
-                rationale=(
-                    "Checkout/payment mechanism is supported by payment_gateway evidence "
-                    "— mechanism is consistent with the stated driver."
-                ),
-            )
-        # Also check if deployment evidence supports a checkout degradation mechanism
-        has_deploy_evidence = any(
-            src == "deployment_log" or "deploy" in src.lower()
-            or any(_contains_any(s, _DEPLOY_KEYWORDS) for s in supporting_summaries)
-            for src in supporting_sources
-        )
-        if has_deploy_evidence:
-            return RuleResult(
-                rule_name="mechanism_consistency",
-                verdict=RuleVerdict.PASS,
-                rationale=(
-                    "Deployment evidence supports the checkout degradation mechanism "
-                    "— a recent release is a plausible root cause."
-                ),
-            )
+    # Classify the hypothesis into a mechanism based on keyword overlap
+    best_mech = None
+    best_overlap = 0
+    for mech_name, mech_cfg in mechanisms.items():
+        if mech_name == "default":
+            continue
+        kws = set(kw.lower() for kw in mech_cfg.get("keywords", []))
+        overlap = sum(1 for kw in kws if kw in combined)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_mech = mech_name
+
+    if not best_mech:
         return RuleResult(
             rule_name="mechanism_consistency",
             verdict=RuleVerdict.PARTIAL,
-            rationale=(
-                "Checkout/payment mechanism claimed but no payment or deployment "
-                "evidence found in the supporting set — mechanism is plausible but unconfirmed."
-            ),
+            rationale="Mechanism could not be clearly classified from hypothesis text; verdict is PARTIAL.",
         )
 
-    # --- H2-like: external/competitor hypothesis ---
-    if is_external_hyp:
-        has_marketing_evidence = any(
-            "marketing" in src.lower() or src == "marketing"
-            for src in supporting_sources
-        )
-        if has_marketing_evidence:
-            return RuleResult(
-                rule_name="mechanism_consistency",
-                verdict=RuleVerdict.PASS,
-                rationale=(
-                    "External/competitor mechanism supported by marketing evidence."
-                ),
-            )
-        # For H2, if only payment evidence exists, the mechanism is inconsistent
-        has_only_payment = supporting_sources and all(
-            "payment" in src.lower() or "deploy" in src.lower()
-            for src in supporting_sources
-        )
-        if has_only_payment:
-            return RuleResult(
-                rule_name="mechanism_consistency",
-                verdict=RuleVerdict.FAIL,
-                rationale=(
-                    "External/competitor mechanism claimed but only payment/deployment "
-                    "evidence supports it — mechanism is inconsistent."
-                ),
-            )
+    # Now verify if the evidence supports this mechanism
+    mech_cfg = mechanisms[best_mech]
+    mech_kws = set(kw.lower() for kw in mech_cfg.get("keywords", []))
+    
+    # Are any mechanism keywords present in the evidence summaries or sources?
+    evidence_supports_mech = False
+    for src, summary in zip(supporting_sources, supporting_summaries):
+        src_lower = src.lower()
+        sum_lower = summary.lower()
+        if best_mech in src_lower or any(kw in src_lower or kw in sum_lower for kw in mech_kws):
+            evidence_supports_mech = True
+            break
+            
+    if evidence_supports_mech:
         return RuleResult(
             rule_name="mechanism_consistency",
-            verdict=RuleVerdict.PARTIAL,
-            rationale=(
-                "External/competitor mechanism has limited direct evidence support; "
-                "mechanism is plausible but weakly supported."
-            ),
+            verdict=RuleVerdict.PASS,
+            rationale=f"Mechanism '{best_mech}' is supported by evidence — mechanism is consistent.",
         )
 
-    # Fallback: could not classify the mechanism
     return RuleResult(
         rule_name="mechanism_consistency",
-        verdict=RuleVerdict.PARTIAL,
-        rationale=(
-            "Mechanism could not be clearly classified as payment, inventory, or "
-            "external; verdict is PARTIAL by default."
-        ),
+        verdict=RuleVerdict.FAIL,
+        rationale=f"Mechanism '{best_mech}' claimed but evidence does not support it — mechanism is inconsistent.",
     )
 
 
@@ -881,6 +712,7 @@ def score_hypothesis(
     signals: Optional[list[AnomalySignal]] = None,
     contributions: Optional[list[DimensionContribution]] = None,
     thresholds: Optional[ChallengeThresholds] = None,
+    domain_semantics: Optional[dict] = None,
 ) -> ScoredHypothesis:
     """
     Score a single hypothesis deterministically.
@@ -923,9 +755,11 @@ def score_hypothesis(
             ),
             violations=violations,
         )
+    domain_semantics = domain_semantics or {}
+
     # Step 1: Evaluate all rules
     rule_results: list[RuleResult] = [
-        evaluate_rule(name, h, evidence_by_id, signals, contributions)
+        evaluate_rule(name, h, evidence_by_id, signals, contributions, domain_semantics)
         for name in RULE_NAMES
     ]
 
@@ -1174,11 +1008,12 @@ def generate_narrative(
 def score_all(
     hypotheses: list[Hypothesis],
     evidence_by_id: dict[str, Evidence],
-    signals: list[AnomalySignal],
-    contributions: list[DimensionContribution],
+    signals: Optional[list[AnomalySignal]] = None,
+    contributions: Optional[list[DimensionContribution]] = None,
     thresholds: Optional[ChallengeThresholds] = None,
     provider=None,
     telemetry: Optional[Telemetry] = None,
+    domain_semantics: Optional[dict] = None,
 ) -> list[ScoredHypothesis]:
     """
     Score all hypotheses and apply abstention resolution.
@@ -1208,8 +1043,12 @@ def score_all(
     if thresholds is None:
         thresholds = ChallengeThresholds()
 
+    domain_semantics = domain_semantics or {}
+    signals = signals or []
+    contributions = contributions or []
+
     scored: list[ScoredHypothesis] = [
-        score_hypothesis(h, evidence_by_id, signals, contributions, thresholds)
+        score_hypothesis(h, evidence_by_id, signals, contributions, thresholds, domain_semantics)
         for h in hypotheses
     ]
 
@@ -1258,6 +1097,7 @@ def challenge(
     thresholds: Optional[ChallengeThresholds] = None,
     provider=None,
     telemetry: Optional[Telemetry] = None,
+    domain_semantics: Optional[dict] = None,
 ) -> ChallengeResult:
     """
     Main entry point for Engine E6: Challenge Engine.
@@ -1304,6 +1144,8 @@ def challenge(
             abstained=True,
         )
 
+    domain_semantics = domain_semantics or {}
+
     ranked = score_all(
         hypotheses=hypotheses,
         evidence_by_id=evidence_by_id,
@@ -1312,6 +1154,7 @@ def challenge(
         thresholds=thresholds,
         provider=provider,
         telemetry=telemetry,
+        domain_semantics=domain_semantics,
     )
 
     # Determine the winner and overall confidence

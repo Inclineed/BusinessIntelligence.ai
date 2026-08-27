@@ -13,11 +13,23 @@ kpis:
     label: "Hourly Sales Revenue"
     source: orders
     grain: hourly
+    unit: "USD"
     formula: "SUM(revenue) WHERE conversion=true GROUP BY hour"
     definition: >
       The total revenue generated from successfully converted (paid) orders
       within a given hour, aggregated across all channels and regions.
     calculation: "SUM(order_total) WHERE conversion_flag = true GROUP BY hour_bucket"
+    query: >
+      SELECT
+          date_trunc('hour', ts) AS period,
+          SUM(revenue) AS value
+      FROM orders
+      WHERE scenario_id = %s
+        AND conversion = true
+        AND ts >= %s
+        AND ts <= %s
+      GROUP BY period
+      ORDER BY period
     drivers:
       - footfall
       - average_basket_size
@@ -27,6 +39,13 @@ kpis:
     thresholds:
       anomaly_threshold_zscore: 3.0
       anomaly_threshold_delta_pct: 10.0
+    materiality:
+      impact_metric: "financial"
+      multiplier: 1.0
+      critical_threshold: 25000.0
+      high_threshold: 10000.0
+      medium_threshold: 5000.0
+      low_threshold: 1000.0
     lineage:
       - "pos_system → orders → kpi:hourly_revenue"
       - "payment_provider_api → payment_events → driver:payment_success_rate"
@@ -39,11 +58,26 @@ kpis:
     label: "Hourly Conversion Rate"
     source: orders
     grain: hourly
+    unit: "ratio"
     formula: "COUNT(conversion=true)/COUNT(*) GROUP BY hour, device"
     definition: >
       The proportion of sessions that result in a completed purchase,
       broken down by hour and device type.
     calculation: "COUNT(CASE WHEN conversion_flag = true THEN 1 END)::float / COUNT(*) GROUP BY hour_bucket, device_type"
+    dimensions:
+      - device
+    query: >
+      SELECT
+          date_trunc('hour', ts) AS period,
+          device,
+          COUNT(CASE WHEN conversion = true THEN 1 END)::float
+              / NULLIF(COUNT(*), 0) AS value
+      FROM orders
+      WHERE scenario_id = %s
+        AND ts >= %s
+        AND ts <= %s
+      GROUP BY period, device
+      ORDER BY period, device
     drivers:
       - payment_success_rate
       - checkout_ux
@@ -52,6 +86,13 @@ kpis:
     thresholds:
       anomaly_threshold_zscore: 3.0
       anomaly_threshold_delta_pct: 10.0
+    materiality:
+      impact_metric: "financial"
+      multiplier: 20000.0
+      critical_threshold: 25000.0
+      high_threshold: 10000.0
+      medium_threshold: 5000.0
+      low_threshold: 1000.0
     lineage:
       - "pos_system → orders → kpi:hourly_conversion"
     access:
@@ -63,11 +104,25 @@ kpis:
     label: "Payment Failure Rate (15-min)"
     source: payment_gateway
     grain: 15-min
+    unit: "ratio"
     formula: "COUNT(success=false)/COUNT(*) GROUP BY 15min window"
     definition: >
       The fraction of payment attempts that fail within each 15-minute window,
       across all active payment methods.
     calculation: "COUNT(CASE WHEN success_flag = false THEN 1 END)::float / NULLIF(COUNT(*), 0) GROUP BY window_15min"
+    query: >
+      SELECT
+          date_trunc('minute', ts
+              - (EXTRACT(minute FROM ts)::int %% 15) * interval '1 minute'
+          ) AS period,
+          COUNT(CASE WHEN success = false THEN 1 END)::float
+              / NULLIF(COUNT(*), 0) AS value
+      FROM payment_events
+      WHERE scenario_id = %s
+        AND ts >= %s
+        AND ts <= %s
+      GROUP BY period
+      ORDER BY period
     drivers:
       - gateway_reliability
       - checkout_code_quality
@@ -75,6 +130,13 @@ kpis:
     thresholds:
       anomaly_threshold_zscore: 3.0
       anomaly_threshold_delta_pct: 10.0
+    materiality:
+      impact_metric: "financial"
+      multiplier: 5000.0
+      critical_threshold: 20000.0
+      high_threshold: 8000.0
+      medium_threshold: 3000.0
+      low_threshold: 500.0
     lineage:
       - "payment_provider_api → payment_events → kpi:payment_failure_rate_15min"
     access:
@@ -86,11 +148,25 @@ kpis:
     label: "Gateway Latency P95 (15-min)"
     source: payment_gateway
     grain: 15-min
+    unit: "ms"
     formula: "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms)"
     definition: >
       The 95th-percentile end-to-end latency (ms) for payment gateway round-trips,
       measured in 15-minute windows.
     calculation: "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) GROUP BY window_15min"
+    query: >
+      SELECT
+          date_trunc('minute', ts
+              - (EXTRACT(minute FROM ts)::int %% 15) * interval '1 minute'
+          ) AS period,
+          PERCENTILE_CONT(0.95)
+              WITHIN GROUP (ORDER BY latency_ms) AS value
+      FROM payment_events
+      WHERE scenario_id = %s
+        AND ts >= %s
+        AND ts <= %s
+      GROUP BY period
+      ORDER BY period
     drivers:
       - gateway_reliability
       - checkout_code_quality
@@ -98,6 +174,13 @@ kpis:
     thresholds:
       anomaly_threshold_zscore: 3.0
       anomaly_threshold_delta_pct: 10.0
+    materiality:
+      impact_metric: "volume"
+      multiplier: 10.0
+      critical_threshold: 3000.0
+      high_threshold: 1500.0
+      medium_threshold: 500.0
+      low_threshold: 100.0
     lineage:
       - "payment_provider_api → payment_events → kpi:gateway_latency_15min"
     access:
@@ -109,11 +192,26 @@ kpis:
     label: "Inventory Fill Rate (Daily)"
     source: inventory
     grain: daily
+    unit: "ratio"
     formula: "COUNT(in_stock=true)/COUNT(*) per store per day"
     definition: >
       The fraction of SKUs that are in-stock at each store location,
       aggregated to a daily snapshot.
     calculation: "COUNT(CASE WHEN in_stock_flag = true THEN 1 END)::float / NULLIF(COUNT(*), 0) GROUP BY store_id, day_bucket"
+    dimensions:
+      - store_id
+    query: >
+      SELECT
+          date_trunc('day', ts) AS period,
+          store_id,
+          COUNT(CASE WHEN in_stock = true THEN 1 END)::float
+              / NULLIF(COUNT(*), 0) AS value
+      FROM inventory_events
+      WHERE scenario_id = %s
+        AND ts >= %s
+        AND ts <= %s
+      GROUP BY period, store_id
+      ORDER BY period, store_id
     drivers:
       - supplier_delivery_performance
       - demand_forecast_accuracy
@@ -121,6 +219,13 @@ kpis:
     thresholds:
       anomaly_threshold_zscore: 2.0
       absolute_drop_pct: 15.0
+    materiality:
+      impact_metric: "financial"
+      multiplier: 2000.0
+      critical_threshold: 30000.0
+      high_threshold: 15000.0
+      medium_threshold: 5000.0
+      low_threshold: 1000.0
     lineage:
       - "warehouse_system → inventory_events → kpi:inventory_fill_rate_daily"
     access:

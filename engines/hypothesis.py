@@ -84,6 +84,7 @@ def _build_user_prompt(
     contributions: list[DimensionContribution],
     evidence: list[Evidence],
     drivers: list[str],
+    domain_semantics: dict,
 ) -> str:
     """
     User prompt containing:
@@ -123,15 +124,21 @@ def _build_user_prompt(
         + ("\n".join(contrib_lines) if contrib_lines else "  - No dimensional data available.")
     )
 
-    # --- Evidence list ---
+    # --- Evidence list (top-10 by relevance * reliability to keep prompt concise) ---
+    sorted_evidence = sorted(
+        evidence,
+        key=lambda e: (e.source_reliability * getattr(e, "confidence", 0.9)),
+        reverse=True,
+    )[:10]
+
     evidence_lines: list[str] = []
-    for ev in evidence:
+    for ev in sorted_evidence:
         freshness_note = ""
         # Qualitative freshness hint so the LLM can reason about reliability
         # without seeing numeric weights (those are for E6)
-        if ev.reliability_weight < 0.3:
+        if ev.source_reliability < 0.3:
             freshness_note = " [note: source may be stale — treat with lower confidence]"
-        elif ev.reliability_weight < 0.7:
+        elif ev.source_reliability < 0.7:
             freshness_note = " [note: source is moderately fresh]"
         else:
             freshness_note = " [note: source is fresh]"
@@ -171,12 +178,13 @@ def _build_user_prompt(
     )
 
     # --- Output format instructions ---
+    prompt_context = domain_semantics.get("hypothesis_generation", {}).get("prompt_context", "")
+    if prompt_context:
+        prompt_context = f"Domain Context:\n{prompt_context}\n\n"
+        
     output_instructions = (
-        "Generate EXACTLY 3 hypotheses that explain the KPI movement. "
-        "For the INC_001 checkout/payment scenario, consider:\n"
-        "  H1: A checkout or payment system degradation (cite BOTH the recent deployment changelog and the payment gateway telemetry as 'supports')\n"
-        "  H2: External competitive pressure (competitor promotions, pricing changes)\n"
-        "  H3: Inventory shortage reducing available products (cite inventory evidence)\n\n"
+        f"{prompt_context}"
+        "Generate EXACTLY 3 hypotheses that explain the KPI movement.\n\n"
         "You MUST output ONLY valid JSON matching this exact schema — no prose before or after:\n"
         "{\n"
         '  "hypotheses": [\n'
@@ -507,6 +515,7 @@ def generate_hypotheses(
     contributions: list[DimensionContribution],
     evidence: list[Evidence],
     contract: Any,
+    domain_semantics: dict,
     provider: LLMProvider,
     telemetry: Optional[Telemetry] = None,
 ) -> HypothesisGenerationResult:
@@ -560,20 +569,11 @@ def generate_hypotheses(
                             drivers.append(str(d))
                             seen.add(d)
 
-    # Fallback: well-known retail drivers if contract provides none
+    # Fallback: use domain_semantics drivers if contract provides none
     if not drivers:
-        drivers = [
-            "footfall",
-            "average_basket_size",
-            "conversion_rate",
-            "inventory_availability",
-            "payment_success_rate",
-            "gateway_reliability",
-            "checkout_code_quality",
-            "checkout_ux",
-            "competitor_pricing",
-            "supplier_delivery_performance",
-        ]
+        drivers = domain_semantics.get("hypothesis_generation", {}).get("drivers", [])
+    if not drivers:
+        drivers = ["technical degradation", "external factors", "inventory disruptions"]
 
     # ------------------------------------------------------------------
     # Build a set of valid evidence IDs for validation guards
@@ -585,7 +585,7 @@ def generate_hypotheses(
     # Construct prompts and call the LLM
     # ------------------------------------------------------------------
     system_prompt = _build_system_prompt(drivers)
-    user_prompt = _build_user_prompt(signals, contributions, evidence, drivers)
+    user_prompt = _build_user_prompt(signals, contributions, evidence, drivers, domain_semantics)
 
     logger.debug(
         "generate_hypotheses: calling LLM with %d signals, %d contributions, "

@@ -40,59 +40,34 @@ SIMULATED_DISCLAIMER: str = (
 #   narrative               : Optional plain-text context (display only).
 # ---------------------------------------------------------------------------
 
-RECOVERY_CURVES: dict[str, dict] = {
-    "rollback": {
-        "projected_metric": "payment_success_rate + conversion_rate",
-        "projected_recovery_pct": 85.0,
-        "recovery_window_hours": 2,
-        "narrative": (
-            "Following a rollback of the problematic release, payment success rate "
-            "and conversion are expected to recover toward baseline levels within "
-            "the defined window."
-        ),
-    },
-    "reorder": {
-        "projected_metric": "inventory_fill_rate",
-        "projected_recovery_pct": 90.0,
-        "recovery_window_hours": 6,
-    },
-    "default": {
-        "projected_metric": "kpi_primary_metric",
-        "projected_recovery_pct": 75.0,
-        "recovery_window_hours": 4,
-    },
-}
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 
-def _match_curve(recommended_action: str) -> dict:
+def _match_curve(recommended_action: str, domain_semantics: dict) -> dict:
     """
     Determine the best-matching recovery curve from the recommended action text.
 
-    Looks for intervention keywords in order of specificity.  Falls back to
-    the 'default' curve when no keyword matches.
-
-    Parameters
-    ----------
-    recommended_action : The recommended-action string from the Decision Engine.
-
-    Returns
-    -------
-    The matching curve dict from RECOVERY_CURVES.
+    Looks for intervention keywords in order of specificity from domain_semantics.
+    Falls back to the 'default' curve when no keyword matches.
     """
     lower = recommended_action.lower()
+    recovery_curves = domain_semantics.get("recovery_curves", {})
 
-    if any(kw in lower for kw in ("rollback", "roll back", "revert", "downgrade")):
-        return RECOVERY_CURVES["rollback"]
+    for curve_id, curve_data in recovery_curves.items():
+        if curve_id == "default":
+             continue
+        if any(kw in lower for kw in curve_data.get("keywords", [])):
+            return curve_data
 
-    if any(kw in lower for kw in ("reorder", "re-order", "replenish", "restock",
-                                   "inventory", "supply")):
-        return RECOVERY_CURVES["reorder"]
-
-    return RECOVERY_CURVES["default"]
+    return recovery_curves.get("default", {
+        "projected_metric": "kpi_primary_metric",
+        "projected_recovery_pct": 75.0,
+        "recovery_window_hours": 4,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +75,7 @@ def _match_curve(recommended_action: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def project_outcome(decision: Decision) -> Optional[OutcomeProjection]:
+def project_outcome(decision: Decision, domain_semantics: Optional[dict] = None) -> Optional[OutcomeProjection]:
     """
     Engine E8: produce a SIMULATED outcome projection from a Decision.
 
@@ -134,14 +109,17 @@ def project_outcome(decision: Decision) -> Optional[OutcomeProjection]:
         )
         return None
 
-    # Select the matching pre-scripted recovery curve.
-    curve = _match_curve(decision.recommended_action)
+    domain_semantics = domain_semantics or {}
+    curve = _match_curve(decision.recommended_action, domain_semantics)
 
     # Build the projection — always SIMULATED (Req 14.1, 14.2).
     projection = OutcomeProjection(
         outcome_type=OutcomeType.SIMULATED,
         projected_metric=curve["projected_metric"],
         projected_recovery_pct=curve["projected_recovery_pct"],
+        recovery_window_hours=curve.get("recovery_window_hours"),
+        mean_time_to_normalcy=curve.get("mean_time_to_normalcy", "5 min"),
+        assumptions=list(curve.get("assumptions", [])),
         disclaimer=SIMULATED_DISCLAIMER,
         method=MethodTag.SIMULATED,
     )

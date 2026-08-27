@@ -28,7 +28,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from config.loader import load_kpi_contract, load_entitlements, load_sources, ConfigError
+from config.loader import (
+    load_kpi_contract, 
+    load_entitlements, 
+    load_sources, 
+    load_domain_semantics, 
+    load_scenarios, 
+    ConfigError
+)
 from config.registry import SourceRegistry
 from llm.provider import OllamaProvider, get_llm_provider
 from models import Persona
@@ -91,6 +98,8 @@ def _to_json(obj: Any) -> Any:
         return [_to_json(item) for item in obj]
     if isinstance(obj, dict):
         return {k: _to_json(v) for k, v in obj.items()}
+    if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+        return obj.isoformat()
     # Sanitize non-JSON-compliant floats (NaN, Inf, -Inf)
     if isinstance(obj, float):
         import math as _math
@@ -144,6 +153,20 @@ async def lifespan(app: FastAPI):
     except ConfigError as exc:
         logger.error("Failed to load sources.yaml: %s", exc)
         state.sources_config = []
+
+    try:
+        state.domain_semantics = load_domain_semantics(_CONFIG_DIR / "domain_semantics.yaml")
+        logger.info("Loaded domain_semantics.yaml")
+    except ConfigError as exc:
+        logger.error("Failed to load domain_semantics.yaml: %s", exc)
+        state.domain_semantics = {}
+
+    try:
+        state.scenarios_config = load_scenarios(_CONFIG_DIR / "scenarios.yaml")
+        logger.info("Loaded scenarios.yaml")
+    except ConfigError as exc:
+        logger.error("Failed to load scenarios.yaml: %s", exc)
+        state.scenarios_config = {"scenarios": []}
 
     # ------------------------------------------------------------------
     # Postgres connection
@@ -249,22 +272,15 @@ async def health() -> dict:
 
 
 @app.get("/scenarios")
-async def scenarios() -> dict:
+async def scenarios(request: Request) -> dict:
     """
     Return the complete list of available scenario identifiers with catalog metadata.
     """
-    return {
-        "scenarios": [
-            {"id": "INC_001", "status": "live", "label": "Payment Gateway Latency Regression", "domain": "E-Commerce Checkout"},
-            {"id": "INC_002", "status": "live", "label": "Simultaneous Conflicting Causes", "domain": "E-Commerce Marketing"},
-            {"id": "INC_003", "status": "live", "label": "Sparse Baseline History", "domain": "E-Commerce Growth"},
-            {"id": "INC_004", "status": "live", "label": "ETL Ingestion Pipeline Delay", "domain": "Data Engineering"},
-            {"id": "INC_005", "status": "live", "label": "Seasonal Demand Pattern", "domain": "E-Commerce Demand"},
-            {"id": "INC_006", "status": "live", "label": "Compound Network & Deploy Failure", "domain": "Platform Infrastructure"},
-            {"id": "INC_007", "status": "live", "label": "Gradual Worker Memory Leak", "domain": "Backend Compute"},
-            {"id": "INC_008", "status": "live", "label": "Enterprise SAML SSO Outage", "domain": "Enterprise Security"},
-        ]
-    }
+    scenarios_config = request.app.state.scenarios_config
+    if not scenarios_config or not scenarios_config.get("scenarios"):
+        # Fallback empty list if config is missing or invalid
+        return {"scenarios": []}
+    return scenarios_config
 
 
 @app.get("/kpi-contract")
@@ -423,6 +439,22 @@ async def investigate_endpoint(
         except Exception:
             sources_config = []
 
+    domain_semantics = getattr(state, "domain_semantics", None)
+    if domain_semantics is None:
+        try:
+            domain_semantics = load_domain_semantics(_CONFIG_DIR / "domain_semantics.yaml")
+            state.domain_semantics = domain_semantics
+        except Exception:
+            domain_semantics = {}
+            
+    scenarios_config = getattr(state, "scenarios_config", None)
+    if scenarios_config is None:
+        try:
+            scenarios_config = load_scenarios(_CONFIG_DIR / "scenarios.yaml")
+            state.scenarios_config = scenarios_config
+        except Exception:
+            scenarios_config = {"scenarios": []}
+
     deps = Dependencies(
         db_conn=db_conn,
         chroma_client=chroma_client,
@@ -430,6 +462,8 @@ async def investigate_endpoint(
         kpi_contract=kpi_contract or entitlements_config,
         entitlements_config=entitlements_config,
         sources_config=sources_config,
+        domain_semantics=domain_semantics,
+        scenarios_config=scenarios_config,
         scenario_id=body.scenario_id,
         region=body.region,
     )

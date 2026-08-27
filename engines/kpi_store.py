@@ -36,110 +36,7 @@ class KPILoadResult(NamedTuple):
     access_denied: list[str]
 
 
-# ---------------------------------------------------------------------------
-# Unit labels for each KPI
-# ---------------------------------------------------------------------------
 
-_KPI_UNITS: dict[str, str] = {
-    "hourly_revenue": "USD",
-    "hourly_conversion": "ratio",
-    "payment_failure_rate_15min": "ratio",
-    "gateway_latency_15min": "ms",
-    "inventory_fill_rate_daily": "ratio",
-}
-
-# ---------------------------------------------------------------------------
-# SQL queries per KPI id
-# ---------------------------------------------------------------------------
-# Each query accepts (scenario_id, window_start, window_end) as positional
-# %s parameters (psycopg2 style).
-
-_QUERIES: dict[str, str] = {
-    "hourly_revenue": """
-        SELECT
-            date_trunc('hour', ts) AS period,
-            SUM(revenue) AS value
-        FROM orders
-        WHERE scenario_id = %s
-          AND conversion = true
-          AND ts >= %s
-          AND ts <= %s
-        GROUP BY period
-        ORDER BY period
-    """,
-
-    "hourly_conversion": """
-        SELECT
-            date_trunc('hour', ts) AS period,
-            device,
-            COUNT(CASE WHEN conversion = true THEN 1 END)::float
-                / NULLIF(COUNT(*), 0) AS value
-        FROM orders
-        WHERE scenario_id = %s
-          AND ts >= %s
-          AND ts <= %s
-        GROUP BY period, device
-        ORDER BY period, device
-    """,
-
-    # Aggregate (device-agnostic) version for hourly_conversion summary row
-    "_hourly_conversion_agg": """
-        SELECT
-            date_trunc('hour', ts) AS period,
-            COUNT(CASE WHEN conversion = true THEN 1 END)::float
-                / NULLIF(COUNT(*), 0) AS value
-        FROM orders
-        WHERE scenario_id = %s
-          AND ts >= %s
-          AND ts <= %s
-        GROUP BY period
-        ORDER BY period
-    """,
-
-    "payment_failure_rate_15min": """
-        SELECT
-            date_trunc('minute', ts
-                - (EXTRACT(minute FROM ts)::int %% 15) * interval '1 minute'
-            ) AS period,
-            COUNT(CASE WHEN success = false THEN 1 END)::float
-                / NULLIF(COUNT(*), 0) AS value
-        FROM payment_events
-        WHERE scenario_id = %s
-          AND ts >= %s
-          AND ts <= %s
-        GROUP BY period
-        ORDER BY period
-    """,
-
-    "gateway_latency_15min": """
-        SELECT
-            date_trunc('minute', ts
-                - (EXTRACT(minute FROM ts)::int %% 15) * interval '1 minute'
-            ) AS period,
-            PERCENTILE_CONT(0.95)
-                WITHIN GROUP (ORDER BY latency_ms) AS value
-        FROM payment_events
-        WHERE scenario_id = %s
-          AND ts >= %s
-          AND ts <= %s
-        GROUP BY period
-        ORDER BY period
-    """,
-
-    "inventory_fill_rate_daily": """
-        SELECT
-            date_trunc('day', ts) AS period,
-            store_id,
-            COUNT(CASE WHEN in_stock = true THEN 1 END)::float
-                / NULLIF(COUNT(*), 0) AS value
-        FROM inventory_events
-        WHERE scenario_id = %s
-          AND ts >= %s
-          AND ts <= %s
-        GROUP BY period, store_id
-        ORDER BY period, store_id
-    """,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +107,10 @@ def load_kpis(
 
         kpi_name: str = kpi_def.get("label", kpi_id)
         source_id: str = kpi_def.get("source", "")
-        unit: str = _KPI_UNITS.get(kpi_id, "")
+        unit: str = kpi_def.get("unit", "")
+        query: str = kpi_def.get("query", "")
+        grain: str = kpi_def.get("grain", "")
+        dimensions: list[str] = kpi_def.get("dimensions", [])
 
         # -----------------------------------------------------------------
         # Resolve freshness from the registry (Requirement 1.4)
@@ -221,7 +121,9 @@ def load_kpis(
         # Execute the appropriate SQL query (Requirement 2.4)
         # -----------------------------------------------------------------
         try:
-            rows = _execute_kpi_query(kpi_id, scenario_id, window_start, window_end, db_conn)
+            if not query:
+                raise ValueError(f"No SQL query defined in contract for kpi '{kpi_id}'")
+            rows = _execute_kpi_query(kpi_id, grain, query, scenario_id, window_start, window_end, db_conn)
         except Exception as exc:  # noqa: BLE001 — never raise; pipeline handles gracefully
             # Requirement 1.7: return KPI with freshness=UNKNOWN and error indication
             errors.append(
@@ -252,6 +154,7 @@ def load_kpis(
             source_id=source_id,
             freshness=freshness,
             rows=rows,
+            dimensions=dimensions,
         )
         kpi_values.extend(built)
 
@@ -354,25 +257,22 @@ def _resolve_freshness(
 
 def _execute_kpi_query(
     kpi_id: str,
+    grain: str,
+    query: str,
     scenario_id: str,
     window_start: datetime,
     window_end: datetime,
     db_conn,
 ) -> list[tuple]:
     """
-    Run the SQL query for *kpi_id*.  For hourly_conversion the device-segmented
-    query is used; an aggregate query is also run and tagged with dimension
-    ``_agg`` so callers can distinguish it.
+    Run the SQL query for *kpi_id*.
 
     Raises psycopg2.Error (or any other DB exception) on failure — the caller
     wraps this in a try/except.
     """
     from datetime import timedelta
 
-    if kpi_id not in _QUERIES:
-        raise ValueError(f"No SQL query defined for kpi_id '{kpi_id}'")
-
-    sql = _QUERIES[kpi_id]
+    sql = query
     params = (scenario_id, window_start, window_end)
 
     with db_conn.cursor() as cur:
@@ -392,13 +292,14 @@ def _execute_kpi_query(
                 p_dt = p_dt.replace(tzinfo=w_end.tzinfo)
             
             # Filter incomplete trailing periods
-            if "hourly" in kpi_id:
+            grain = grain.lower()
+            if "hour" in grain:
                 if p_dt + timedelta(hours=1) > w_end:
                     continue
-            elif "15min" in kpi_id:
+            elif "15-min" in grain or "15min" in grain:
                 if p_dt + timedelta(minutes=15) > w_end:
                     continue
-            elif "daily" in kpi_id:
+            elif "day" in grain or "daily" in grain:
                 if p_dt + timedelta(days=1) > w_end:
                     continue
         valid_rows.append(row)
@@ -413,72 +314,27 @@ def _build_kpi_values(
     source_id: str,
     freshness: FreshnessStatus,
     rows: list[tuple],
+    dimensions: list[str],
 ) -> list[KPIValue]:
     """
     Convert raw DB rows into KPIValue objects.
 
-    Row shapes per query
-    --------------------
-    hourly_revenue             : (period, value)
-    hourly_conversion          : (period, device, value)  — segmented
-    payment_failure_rate_15min : (period, value)
-    gateway_latency_15min      : (period, value)
-    inventory_fill_rate_daily  : (period, store_id, value) — segmented
+    If dimensions is present, expects (period, dimension_val, value).
+    Otherwise, expects (period, value).
     """
     result: list[KPIValue] = []
 
     if not rows:
         return result
 
-    # Determine column layout from kpi_id
-    if kpi_id == "hourly_conversion":
-        # Segmented by device: (period, device, value)
-        # Build one KPIValue per (period, device) combination, plus one
-        # aggregated KPIValue per period (average across devices in that hour).
-        period_device_map: dict[str, dict[str, float]] = {}
+    if dimensions:
+        dim_name = dimensions[0]
+        # Segmented by dimension: (period, dim_val, value)
+        # Build one KPIValue per (period, dim_val) combination, plus one
+        # aggregated KPIValue per period (average across dims in that period).
+        period_dim_map: dict[str, dict[str, float]] = {}
         for row in rows:
-            period_dt, device, value = row[0], row[1], row[2]
-            period_str = _period_to_str(period_dt)
-            val = float(value) if value is not None else float("nan")
-            # Per-device KPIValue
-            result.append(
-                KPIValue(
-                    kpi_id=kpi_id,
-                    name=kpi_name,
-                    value=val,
-                    unit=unit,
-                    period=period_str,
-                    dimension_filters={"device": str(device)},
-                    source_id=source_id,
-                    freshness=freshness,
-                    method=MethodTag.SQL,
-                )
-            )
-            period_device_map.setdefault(period_str, {})[str(device)] = val
-
-        # Aggregate row per period (mean of finite device values)
-        for period_str, device_vals in sorted(period_device_map.items()):
-            finite_vals = [v for v in device_vals.values() if _is_finite(v)]
-            agg_val = sum(finite_vals) / len(finite_vals) if finite_vals else float("nan")
-            result.append(
-                KPIValue(
-                    kpi_id=kpi_id,
-                    name=kpi_name,
-                    value=agg_val,
-                    unit=unit,
-                    period=period_str,
-                    dimension_filters={},  # aggregate — no dimension filter
-                    source_id=source_id,
-                    freshness=freshness,
-                    method=MethodTag.SQL,
-                )
-            )
-
-    elif kpi_id == "inventory_fill_rate_daily":
-        # Segmented by store_id: (period, store_id, value)
-        period_store_map: dict[str, dict[str, float]] = {}
-        for row in rows:
-            period_dt, store_id, value = row[0], row[1], row[2]
+            period_dt, dim_val, value = row[0], row[1], row[2]
             period_str = _period_to_str(period_dt)
             val = float(value) if value is not None else float("nan")
             result.append(
@@ -488,17 +344,17 @@ def _build_kpi_values(
                     value=val,
                     unit=unit,
                     period=period_str,
-                    dimension_filters={"store_id": str(store_id)},
+                    dimension_filters={dim_name: str(dim_val)},
                     source_id=source_id,
                     freshness=freshness,
                     method=MethodTag.SQL,
                 )
             )
-            period_store_map.setdefault(period_str, {})[str(store_id)] = val
+            period_dim_map.setdefault(period_str, {})[str(dim_val)] = val
 
-        # Aggregate row per day (mean across stores)
-        for period_str, store_vals in sorted(period_store_map.items()):
-            finite_vals = [v for v in store_vals.values() if _is_finite(v)]
+        # Aggregate row per period (mean of finite dim values)
+        for period_str, dim_vals in sorted(period_dim_map.items()):
+            finite_vals = [v for v in dim_vals.values() if _is_finite(v)]
             agg_val = sum(finite_vals) / len(finite_vals) if finite_vals else float("nan")
             result.append(
                 KPIValue(

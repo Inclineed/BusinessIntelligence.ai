@@ -24,6 +24,8 @@ sources:
     cadence_minutes: 60
     sla_minutes: 120
     data_quality: 0.98
+    decay_policy: "linear"
+    temporal_policy: "period_total"
     lineage:
       - "pos_system → orders"
     owner: "Retail Operations"
@@ -34,6 +36,8 @@ sources:
     cadence_minutes: 15
     sla_minutes: 30
     data_quality: 0.99
+    decay_policy: "linear"
+    temporal_policy: "rate"
     lineage:
       - "payment_provider_api → payment_events"
     owner: "Platform Engineering"
@@ -44,6 +48,8 @@ sources:
     cadence_minutes: 1440
     sla_minutes: 2880
     data_quality: 0.95
+    decay_policy: "linear"
+    temporal_policy: "snapshot"
     lineage:
       - "warehouse_system → inventory_events"
     owner: "Supply Chain"
@@ -54,12 +60,11 @@ sources:
     cadence_minutes: 1440
     sla_minutes: 2880
     data_quality: 0.90
+    decay_policy: "linear"
+    temporal_policy: "snapshot"
     lineage:
       - "campaign_platform_api → marketing_events"
     owner: "Marketing"
-    # last_refresh will be set to utcnow() - 5h by the ETL loader to produce
-    # an intentionally stale source for the INC_001 scenario (stale marketing
-    # weakens the competitor-pricing hypothesis H2 in the challenge engine).
 
   - id: deployment_log
     name: "Deployment Log"
@@ -67,6 +72,8 @@ sources:
     cadence_minutes: 0
     sla_minutes: 10080
     data_quality: 1.00
+    decay_policy: "linear"
+    temporal_policy: "snapshot"
     lineage:
       - "ci_cd_system → deployment_log"
     owner: "Platform Engineering"
@@ -77,6 +84,8 @@ sources:
     cadence_minutes: 60
     sla_minutes: 240
     data_quality: 0.92
+    decay_policy: "linear"
+    temporal_policy: "rate"
     lineage:
       - "support_system → support_tickets"
     owner: "Customer Operations"
@@ -87,6 +96,9 @@ sources:
     cadence_minutes: 0
     sla_minutes: 10080
     data_quality: 1.00
+    decay_policy: "linear"
+    temporal_policy: "snapshot"
     lineage:
       - "engineering_wiki → release_notes"
     owner: "Platform Engineering"
+

@@ -1,6 +1,7 @@
 export type PersonaType = "analyst" | "cfo" | "manager"
 export type ConfidenceState = "HIGH" | "MEDIUM" | "LOW" | "ABSTAIN"
 export type RuleVerdict = "pass" | "partial" | "fail" | "n/a"
+export type BusinessMateriality = "NEGLIGIBLE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
 
 export interface AnomalySignal {
   kpi_id: string
@@ -15,6 +16,19 @@ export interface AnomalySignal {
   data_quality_suspect?: boolean
 }
 
+export interface MaterialityAssessment {
+  kpi_id: string
+  observed_value: number
+  baseline_mean: number
+  z_score: number
+  delta_pct: number
+  is_statistical_anomaly: boolean
+  financial_impact?: number | null
+  volume_impact?: number | null
+  business_materiality: BusinessMateriality
+  priority_rank: number
+}
+
 export interface DimensionContribution {
   dimension: string
   segment: string
@@ -24,15 +38,23 @@ export interface DimensionContribution {
 }
 
 export interface EvidenceItem {
-  evidence_id: string
+  id?: string
+  evidence_id?: string
   source_id: string
+  source_name?: string
+  entity?: string
   kind?: string
   method: string
-  relevance: number
-  reliability_weight: number
-  summary: string
+  relevance?: number
+  reliability_weight?: number
+  source_reliability?: number
+  confidence?: number
+  summary?: string
+  observation?: string
   raw_ref?: string
   timestamp?: string
+  freshness_minutes?: number
+  lineage?: string[]
 }
 
 export interface HypothesisItem {
@@ -59,6 +81,17 @@ export interface ScoredHypothesisItem {
   narrative?: string
 }
 
+export interface StructuredActionRecommendation {
+  driver: string
+  controllable_lever: string
+  action: string
+  expected_impact: string
+  owner: string
+  confidence: number
+  monitoring_plan: string
+  authorized_personas: string[]
+}
+
 export interface DecisionPayload {
   winning_hypothesis_id?: string
   recommended_action?: string
@@ -66,6 +99,7 @@ export interface DecisionPayload {
   abstention_reason?: string
   verification_metric?: string
   persona_narrative?: string
+  structured_recommendation?: StructuredActionRecommendation
 }
 
 export interface OutcomeProjection {
@@ -73,6 +107,9 @@ export interface OutcomeProjection {
   outcome_type?: string
   projected_recovery_pct?: number
   projected_metric?: string
+  recovery_window_hours?: number
+  mean_time_to_normalcy?: string
+  assumptions?: string[]
   disclaimer?: string
 }
 
@@ -114,6 +151,7 @@ export interface InvestigationResult {
   scenario_id: string
   persona: PersonaType
   signals: AnomalySignal[]
+  materiality?: MaterialityAssessment[]
   contributions: DimensionContribution[]
   evidence: EvidenceItem[]
   hypotheses: HypothesisItem[]
