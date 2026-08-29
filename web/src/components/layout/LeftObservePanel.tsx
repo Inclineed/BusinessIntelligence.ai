@@ -394,8 +394,8 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
               <span className="text-[#9E9788]">
                 Confidence:{" "}
                 <span className="text-[#6B9BB0] font-bold">
-                  {result.scored?.[0]?.final_score
-                    ? `${Math.round(result.scored[0].final_score * 100)}%`
+                  {result.scored?.[0]?.final_audit_score
+                    ? `${Math.round(result.scored[0].final_audit_score * 100)}%`
                     : "85%"}
                 </span>
               </span>

@@ -1,4 +1,4 @@
-﻿"""
+"""
 etl/seed_scenario_evidence.py — Seed ChromaDB evidence collections for the
 additional live scenarios (INC_002, INC_004).
 
@@ -54,7 +54,15 @@ def main():
 
     for sid, docs in SEED_DOCS.items():
         name = f"evidence_{sid}"
-        col = client.get_or_create_collection(name=name, embedding_function=ef, metadata={"hnsw:space": "cosine"})
+        col = client.get_or_create_collection(
+            name=name,
+            embedding_function=ef,
+            metadata={
+                "hnsw:space": "cosine",
+                "hnsw:search_ef": 64,
+                "hnsw:M": 32,
+            },
+        )
         ids = [f"{sid}_{d[1]}" for d in docs]
         documents = [d[2] for d in docs]
         metadatas = [{"source": d[0], "scenario_id": sid, "evidence_type": "unstructured"} for d in docs]

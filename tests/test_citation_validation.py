@@ -24,7 +24,7 @@ def test_citation_formatting_mismatch_is_non_fatal():
     v_exact = validate_citations(h_exact, evidence_by_id)
     assert len(v_exact) == 0
     score_exact = score_hypothesis(h_exact, evidence_by_id)
-    assert score_exact.final_score > 0
+    assert score_exact.final_audit_score > 0
     
     # 2. Formatting drift (minor spacing, punctuation, case)
     h_drift = Hypothesis(
@@ -36,7 +36,7 @@ def test_citation_formatting_mismatch_is_non_fatal():
     v_drift = validate_citations(h_drift, evidence_by_id)
     assert len(v_drift) == 0 # Caught by normalization, no violation
     score_drift = score_hypothesis(h_drift, evidence_by_id)
-    assert score_drift.final_score > 0
+    assert score_drift.final_audit_score > 0
     
     # 3. Material mismatch (hallucinated content)
     h_material = Hypothesis(
@@ -49,7 +49,7 @@ def test_citation_formatting_mismatch_is_non_fatal():
     assert len(v_material) == 1
     assert v_material[0].violation_type == "summary_mismatch"
     score_material = score_hypothesis(h_material, evidence_by_id)
-    assert score_material.final_score == 0.0 # Fatal
+    assert score_material.final_audit_score == 0.0 # Fatal
     
     # 4. Phantom ID
     h_phantom = Hypothesis(
@@ -62,9 +62,9 @@ def test_citation_formatting_mismatch_is_non_fatal():
     assert len(v_phantom) == 1
     assert v_phantom[0].violation_type == "phantom_id"
     score_phantom = score_hypothesis(h_phantom, evidence_by_id)
-    assert score_phantom.final_score == 0.0 # Fatal
+    assert score_phantom.final_audit_score == 0.0 # Fatal
     v_phantom = validate_citations(h_phantom, evidence_by_id)
     assert len(v_phantom) == 1
     assert v_phantom[0].violation_type == "phantom_id"
     score_phantom = score_hypothesis(h_phantom, evidence_by_id)
-    assert score_phantom.final_score == 0.0 # Fatal, score is 0
+    assert score_phantom.final_audit_score == 0.0 # Fatal, score is 0

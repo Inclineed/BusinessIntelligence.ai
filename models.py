@@ -73,13 +73,22 @@ class FreshnessStatus(str, Enum):
     UNKNOWN = "unknown"   # unavailable or SLA undefined
 
 
-class ConfidenceState(str, Enum):
-    """Confidence band produced by the Challenge_Engine."""
+class AuditVerdict(str, Enum):
+    """Deterministic audit result produced by the Challenge_Engine."""
 
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
+    VERIFIED = "verified"
+    MARGINAL = "marginal"
+    REJECTED = "rejected"
     ABSTAIN = "abstain"
+
+
+class EvidenceSufficiencyLevel(str, Enum):
+    """Evidence sufficiency levels determined by deduplicated support sum."""
+
+    INSUFFICIENT = "insufficient"
+    LIMITED = "limited"
+    SUFFICIENT = "sufficient"
+    STRONG = "strong"
 
 
 class RuleVerdict(str, Enum):
@@ -435,6 +444,7 @@ class Hypothesis:
 
     hypothesis_id: str = "H1"                 # e.g. "H1"
     statement: str = ""                       # LLM prose, 1–2000 chars, NO numbers
+    mechanism_tag: str = ""                   # explicit structured mechanism tag
     citations: list[EvidenceCitation] = field(default_factory=list)
     reasoning: str = ""                       # 1–5000 chars
     # Narrative prose only. Must not reference evidence IDs or assert
@@ -466,28 +476,33 @@ class RuleResult:
 @dataclass
 class ScoredHypothesis:
     """
-    A hypothesis after deterministic confidence scoring by the Challenge_Engine
-    (Requirements 9.1 – 9.8).  final_score is clamped to [0, 1].
-    narrative (LLM_NARRATIVE) never mutates final_score or confidence_state.
+    A hypothesis after deterministic constraint auditing by the Challenge_Engine
+    (Requirements 9.1 – 9.8).  final_audit_score is clamped to [0, 1].
+    narrative (LLM_NARRATIVE) never mutates final_audit_score or audit_verdict.
     """
 
     hypothesis_id: str
     rule_results: list[RuleResult] = field(default_factory=list)
     support_score: float = 0.0
-    contradiction_penalty: float = 0.0
-    final_score: float = 0.0          # clamped [0, 1]
-    confidence_state: ConfidenceState = ConfidenceState.LOW
+    contradiction_score: float = 0.0
+    rule_score: float = 0.0
+    final_audit_score: float = 0.0          # clamped [0, 1]
+    audit_verdict: AuditVerdict = AuditVerdict.REJECTED
+    evidence_sufficiency_score: float = 0.0
+    evidence_sufficiency_level: EvidenceSufficiencyLevel = EvidenceSufficiencyLevel.INSUFFICIENT
     narrative: str = ""               # optional LLM_NARRATIVE; never alters score
     method: MethodTag = MethodTag.RULES
     disqualification_reason: Optional[str] = None
     violations: list[CitationViolation] = field(default_factory=list)
+    unaligned_evidence_ids: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.final_score = clamp(self.final_score, 0.0, 1.0)
+        self.final_audit_score = clamp(self.final_audit_score, 0.0, 1.0)
 
     @property
-    def confidence(self) -> ConfidenceState:
-        return self.confidence_state
+    def verdict(self) -> AuditVerdict:
+        return self.audit_verdict
+
 
 
 # Alias for backward/test compatibility
@@ -619,7 +634,7 @@ class StructuredFeedbackSubmission:
     verdict: FeedbackVerdict
     persona: str = "analyst"
     corrected_hypothesis_id: Optional[str] = None
-    corrected_confidence_state: Optional[str] = None
+    corrected_audit_verdict: Optional[str] = None
     corrected_action: Optional[str] = None
     evidence_grounding_correct: Optional[bool] = None
     analyst_notes: Optional[str] = None

@@ -166,8 +166,11 @@ def _build_user_prompt(
         "- quoted_summary: copy the evidence summary character-for-character.\n"
         "  Do not paraphrase. Do not shorten. Do not rephrase. Do not reorder words.\n"
         "  Any deviation will automatically disqualify your entire hypothesis.\n"
-        "- role: set to \"supports\", \"contradicts\", or \"neutral\" based on how this\n"
-        "  evidence relates to your hypothesis.\n"
+        "- role: set to \"supports\", \"contradicts\", or \"neutral\".\n"
+        "  CRITICAL: \"supports\" means this evidence directly corroborates your specific mechanism_tag\n"
+        "  (e.g., payment logs for payment_gateway, marketing campaigns for external_factors).\n"
+        "  If evidence describes a separate or competing factor (e.g. marketing spend when proposing\n"
+        "  a payment gateway failure), mark it as \"neutral\" or \"contradicts\", NEVER \"supports\".\n"
         "- relevance_explanation: one sentence connecting this evidence to your\n"
         "  hypothesis. Do not repeat the summary. Do not reference other evidence IDs.\n\n"
         "In the reasoning field: write narrative prose explaining your hypothesis.\n"
@@ -182,6 +185,9 @@ def _build_user_prompt(
     if prompt_context:
         prompt_context = f"Domain Context:\n{prompt_context}\n\n"
         
+    valid_mechanisms = [m for m in domain_semantics.get("mechanisms", {}).keys() if m != "default"]
+    valid_mechanisms_str = ", ".join(f'"{m}"' for m in valid_mechanisms) + ', or "UNKNOWN"'
+
     output_instructions = (
         f"{prompt_context}"
         "Generate EXACTLY 3 distinct, competing candidate hypotheses (H1, H2, and H3) that explain the observed KPI movement.\n\n"
@@ -190,10 +196,17 @@ def _build_user_prompt(
         '  "hypotheses": [\n'
         "    {\n"
         '      "hypothesis_id": "H1",\n'
+        f'      "mechanism_tag": "<MUST be exactly one of: {valid_mechanisms_str}>",\n'
         '      "statement": "<qualitative causal statement for H1, NO numbers>",\n'
         '      "citations": [\n'
         "        {\n"
-        '          "evidence_id": "<exact_id_from_list_above>",\n'
+        '          "evidence_id": "<first_supporting_evidence_id>",\n'
+        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
+        '          "role": "supports",\n'
+        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
+        "        },\n"
+        "        {\n"
+        '          "evidence_id": "<second_supporting_or_corroborating_evidence_id>",\n'
         '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
         '          "role": "supports",\n'
         '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
@@ -203,6 +216,7 @@ def _build_user_prompt(
         "    },\n"
         "    {\n"
         '      "hypothesis_id": "H2",\n'
+        f'      "mechanism_tag": "<MUST be exactly one of: {valid_mechanisms_str}>",\n'
         '      "statement": "<qualitative competing statement for H2, NO numbers>",\n'
         '      "citations": [\n'
         "        {\n"
@@ -216,6 +230,7 @@ def _build_user_prompt(
         "    },\n"
         "    {\n"
         '      "hypothesis_id": "H3",\n'
+        f'      "mechanism_tag": "<MUST be exactly one of: {valid_mechanisms_str}>",\n'
         '      "statement": "<qualitative alternative statement for H3, NO numbers>",\n'
         '      "citations": [\n'
         "        {\n"
@@ -230,7 +245,9 @@ def _build_user_prompt(
         "  ]\n"
         "}\n\n"
         "CRITICAL REMINDER:\n"
-        "- Generate all 3 hypotheses: H1, H2, and H3.\n"
+        "- Generate all 3 hypotheses: H1, H2, and H3 with distinct mechanism tags (each hypothesis MUST choose a different mechanism from the valid mechanisms list).\n"
+        f"- The 'mechanism_tag' MUST exactly match one of these literal strings: {valid_mechanisms_str}.\n"
+        "- In 'citations', include ALL relevant evidence items from the evidence list above (include 2 or more citations per hypothesis where corroborating sources exist).\n"
         "- Do NOT put any digits, percentages, ratios, probabilities, scores, "
         "counts, or rankings in 'statement' or 'reasoning'.\n"
         "- Only reference evidence IDs from the list above in citations.\n"
@@ -389,6 +406,9 @@ def _parse_llm_hypotheses(response_text: str) -> list[dict]:
             continue
         h_id = id_match.group(1).upper() if id_match else f"H{len(recovered)+1}"
         stmt = stmt_match.group(1) if stmt_match else "Causal hypothesis under evaluation"
+        # Extract mechanism_tag
+        mech_match = re.search(r'"?mechanism_tag"?\s*:\s*"([^"]+)"', block)
+        m_tag = mech_match.group(1) if mech_match else "UNKNOWN"
         
         # Extract citations
         cits = []
@@ -406,6 +426,7 @@ def _parse_llm_hypotheses(response_text: str) -> list[dict]:
         
         recovered.append({
             "hypothesis_id": h_id,
+            "mechanism_tag": m_tag,
             "statement": stmt,
             "citations": cits,
             "reasoning": rsn,
@@ -437,6 +458,7 @@ _QUANTITATIVE_RE = re.compile(r'(?<![vV])\b\d+(\.\d+)?%?\b')
 def validate_hypothesis(
     raw_hyp: dict,
     valid_evidence_ids: frozenset[str],
+    domain_semantics: dict,
 ) -> tuple[bool, str]:
     """
     Validate a raw hypothesis dict produced by the LLM.
@@ -528,6 +550,16 @@ def validate_hypothesis(
     statement_for_check = re.sub(r'\bv\d+(\.\d+)*\b', '', statement, flags=re.IGNORECASE)
     if _QUANTITATIVE_RE.search(statement_for_check):
         return False, "statement contains quantitative-truth value"
+
+    # (h) Mechanism tag validation
+    mechanism_tag = raw_hyp.get("mechanism_tag")
+    if not mechanism_tag:
+        return False, "missing mechanism_tag"
+    if not isinstance(mechanism_tag, str):
+        return False, "mechanism_tag is not a string"
+    valid_mechanisms = [m for m in domain_semantics.get("mechanisms", {}).keys() if m != "default"]
+    if mechanism_tag != "UNKNOWN" and mechanism_tag not in valid_mechanisms:
+        return False, f"invalid mechanism_tag: {mechanism_tag!r}"
 
     return True, ""
 
@@ -627,7 +659,7 @@ def generate_hypotheses(
             user_prompt,
             model=getattr(provider, "model", getattr(provider, "_model", None)),
             system=system_prompt,
-            temperature=0.3,
+            temperature=0.0,
             max_tokens=3500,
             format_json=True,
         )
@@ -680,7 +712,7 @@ def generate_hypotheses(
             )
             continue
 
-        is_valid, reason = validate_hypothesis(raw, valid_evidence_ids)
+        is_valid, reason = validate_hypothesis(raw, valid_evidence_ids, domain_semantics)
 
         if not is_valid:
             rejected_count += 1
@@ -730,6 +762,7 @@ def generate_hypotheses(
         # Build the Hypothesis dataclass (Requirement 8.1, 8.6)
         hyp = Hypothesis(
             hypothesis_id=str(raw.get("hypothesis_id", f"H{len(validated) + 1}")),
+            mechanism_tag=str(raw.get("mechanism_tag", "UNKNOWN")),
             statement=raw["statement"],
             citations=citations,
             reasoning=raw["reasoning"],

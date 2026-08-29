@@ -353,91 +353,101 @@ def _assemble_unstructured(
 
     results = None
     try:
-        col_count = 5
+        # Step A: Apply query-level authorization metadata filter first via collection.get
+        # to determine the exact filtered candidate count.
+        get_res = collection.get(
+            where=where_filter,
+            include=["documents", "metadatas", "embeddings"],
+        )
+
+        filtered_ids = (get_res.get("ids") or []) if isinstance(get_res, dict) else []
+        filtered_count = len(filtered_ids)
+
+        if filtered_count == 0:
+            # Clean empty result when no authorized documents exist
+            return items, dropped
+
+        raw_docs = get_res.get("documents", []) or []
+        raw_metas = get_res.get("metadatas", []) or []
+        raw_embs = get_res.get("embeddings", None)
+        n_res = min(5, filtered_count)
+
+        if query_embedding is not None and raw_embs is not None and len(raw_embs) > 0:
+            # Exact Cosine Ranking Branch (ISSUE-009 permanent root-cause fix):
+            # Avoids approximate HNSW graph search and hnswlib contiguity errors under
+            # metadata authorization filtering by computing exact cosine distance in NumPy.
+            import numpy as np
+            q_vec = np.array(query_embedding, dtype=np.float32)
+            q_norm = np.linalg.norm(q_vec)
+            if q_norm > 0:
+                q_vec = q_vec / q_norm
+
+            doc_vecs = np.array(raw_embs, dtype=np.float32)
+            doc_norms = np.linalg.norm(doc_vecs, axis=1, keepdims=True)
+            doc_norms[doc_norms == 0] = 1.0
+            doc_vecs = doc_vecs / doc_norms
+
+            sims = np.dot(doc_vecs, q_vec)
+            # Cosine distance in [0.0, 2.0]
+            dists = np.clip(1.0 - sims, 0.0, 2.0).tolist()
+            sorted_idx = sorted(range(len(dists)), key=lambda i: dists[i])[:n_res]
+
+            results = {
+                "ids": [[filtered_ids[i] for i in sorted_idx]],
+                "documents": [[raw_docs[i] for i in sorted_idx]],
+                "metadatas": [[raw_metas[i] for i in sorted_idx]],
+                "distances": [[dists[i] for i in sorted_idx]],
+            }
+        else:
+            # Missing embeddings: return unranked metadata matches with neutral distance 0.5 (relevance 0.5)
+            logger.warning("_assemble_unstructured: embeddings unavailable for exact cosine ranking; returning unranked metadata matches with neutral distance 0.5.")
+            results = {
+                "ids": [filtered_ids[:n_res]],
+                "documents": [raw_docs[:n_res]],
+                "metadatas": [raw_metas[:n_res]],
+                "distances": [[0.5] * len(filtered_ids[:n_res])],
+            }
+    except Exception as exc:
+        logger.warning("_assemble_unstructured: query/retrieval branch failed (%s); attempting exact embedding fallback.", exc)
+        # Emergency fallback without synthetic 0.1 distances
         try:
-            raw_count = collection.count()
-            if isinstance(raw_count, int):
-                col_count = raw_count
-        except Exception:
-            col_count = 5
-        n_res = min(5, max(1, col_count))
+            get_fallback = collection.get(where=where_filter, include=["documents", "metadatas", "embeddings"])
+            if get_fallback and get_fallback.get("ids"):
+                fb_ids = get_fallback["ids"]
+                fb_docs = get_fallback.get("documents", []) or []
+                fb_metas = get_fallback.get("metadatas", []) or []
+                fb_embs = get_fallback.get("embeddings", None)
+                n_res = min(5, len(fb_ids))
 
-        # Small-Dataset Exact Cosine Branch (ISSUE-009 root-cause fix):
-        # When collection has <= 50 documents, avoid approximate HNSW graph search
-        # and array contiguity errors on small filtered sets by retrieving embeddings
-        # directly via get() and computing exact cosine distance in numpy.
-        if col_count <= 50:
-            get_res = collection.get(
-                where=where_filter,
-                limit=col_count,
-                include=["documents", "metadatas", "embeddings"],
-            )
-            if get_res and isinstance(get_res, dict) and get_res.get("ids"):
-                raw_ids = get_res["ids"]
-                raw_docs = get_res.get("documents", []) or []
-                raw_metas = get_res.get("metadatas", []) or []
-                raw_embs = get_res.get("embeddings", None)
-
-                if query_embedding is not None and raw_embs is not None and len(raw_embs) > 0:
+                if query_embedding is not None and fb_embs is not None and len(fb_embs) > 0:
                     import numpy as np
                     q_vec = np.array(query_embedding, dtype=np.float32)
                     q_norm = np.linalg.norm(q_vec)
                     if q_norm > 0:
                         q_vec = q_vec / q_norm
-
-                    doc_vecs = np.array(raw_embs, dtype=np.float32)
+                    doc_vecs = np.array(fb_embs, dtype=np.float32)
                     doc_norms = np.linalg.norm(doc_vecs, axis=1, keepdims=True)
                     doc_norms[doc_norms == 0] = 1.0
                     doc_vecs = doc_vecs / doc_norms
-
                     sims = np.dot(doc_vecs, q_vec)
-                    dists = (1.0 - sims).tolist()
+                    dists = np.clip(1.0 - sims, 0.0, 2.0).tolist()
                     sorted_idx = sorted(range(len(dists)), key=lambda i: dists[i])[:n_res]
-
                     results = {
-                        "ids": [[raw_ids[i] for i in sorted_idx]],
-                        "documents": [[raw_docs[i] for i in sorted_idx]],
-                        "metadatas": [[raw_metas[i] for i in sorted_idx]],
+                        "ids": [[fb_ids[i] for i in sorted_idx]],
+                        "documents": [[fb_docs[i] for i in sorted_idx]],
+                        "metadatas": [[fb_metas[i] for i in sorted_idx]],
                         "distances": [[dists[i] for i in sorted_idx]],
                     }
                 else:
                     results = {
-                        "ids": [raw_ids[:n_res]],
-                        "documents": [raw_docs[:n_res]],
-                        "metadatas": [raw_metas[:n_res]],
-                        "distances": [[0.1] * len(raw_ids[:n_res])],
+                        "ids": [fb_ids[:n_res]],
+                        "documents": [fb_docs[:n_res]],
+                        "metadatas": [fb_metas[:n_res]],
+                        "distances": [[0.5] * len(fb_ids[:n_res])],
                     }
-        else:
-            # Large collections (> 50 documents): use ChromaDB HNSW vector index
-            if query_embedding is not None:
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=n_res,
-                    where=where_filter,
-                    include=["documents", "metadatas", "distances"],
-                )
-            else:
-                results = collection.query(
-                    query_texts=[query_text],
-                    n_results=n_res,
-                    where=where_filter,
-                    include=["documents", "metadatas", "distances"],
-                )
-    except Exception as exc:
-        logger.warning("_assemble_unstructured: query/retrieval branch failed: %s", exc)
-
-    if results is None or not isinstance(results, dict) or not results.get("ids") or not results["ids"][0]:
-        try:
-            get_res = collection.get(where=where_filter, limit=5, include=["documents", "metadatas"])
-            if get_res and isinstance(get_res, dict) and get_res.get("ids"):
-                results = {
-                    "ids": [get_res["ids"]],
-                    "documents": [get_res.get("documents", [])],
-                    "metadatas": [get_res.get("metadatas", [])],
-                    "distances": [[0.1] * len(get_res["ids"])],
-                }
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("_assemble_unstructured: ChromaDB query fallback failed: %s", exc)
+        except Exception as fb_exc:  # noqa: BLE001
+            logger.error("_assemble_unstructured: ChromaDB retrieval fallback failed: %s", fb_exc)
+            results = None
 
 
     if not results or not results.get("ids") or not results["ids"][0]:

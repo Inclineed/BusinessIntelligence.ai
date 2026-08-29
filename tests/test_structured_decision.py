@@ -1,7 +1,7 @@
 import pytest
 import dataclasses
 from models import (
-    ConfidenceState,
+    AuditVerdict,
     Decision,
     MethodTag,
     Persona,
@@ -31,13 +31,13 @@ def test_structured_decision_valid_lever():
     """Test that a valid lever selection correctly builds the StructuredActionRecommendation."""
     sh = ScoredHypothesis(
         hypothesis_id="H1",
-        final_score=0.95,
-        confidence_state=ConfidenceState.HIGH,
+        final_audit_score=0.95,
+        audit_verdict=AuditVerdict.VERIFIED,
     )
     challenge_result = ChallengeResult(
         scored_hypotheses=[sh],
         winning_hypothesis_id="H1",
-        overall_confidence=ConfidenceState.HIGH,
+        overall_verdict=AuditVerdict.VERIFIED,
         abstained=False,
     )
     
@@ -84,13 +84,13 @@ def test_structured_decision_invalid_lever_abstains():
     """Test that if the LLM hallucinates a lever, E7 strictly abstains."""
     sh = ScoredHypothesis(
         hypothesis_id="H1",
-        final_score=0.95,
-        confidence_state=ConfidenceState.HIGH,
+        final_audit_score=0.95,
+        audit_verdict=AuditVerdict.VERIFIED,
     )
     challenge_result = ChallengeResult(
         scored_hypotheses=[sh],
         winning_hypothesis_id="H1",
-        overall_confidence=ConfidenceState.HIGH,
+        overall_verdict=AuditVerdict.VERIFIED,
         abstained=False,
     )
     

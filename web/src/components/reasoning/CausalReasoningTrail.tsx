@@ -16,8 +16,8 @@ export const CausalReasoningTrail: React.FC<CausalReasoningTrailProps> = ({ resu
 
   const winnerId = decision.winning_hypothesis_id
   const winningScored = scored.find((s) => s.hypothesis_id === winnerId)
-  const confState = (winningScored?.confidence_state || (decision.abstained ? "ABSTAIN" : "LOW")).toUpperCase()
-  const finalScore = winningScored?.final_score || 0
+  const confState = (winningScored?.audit_verdict || (decision.abstained ? "ABSTAIN" : "REJECTED")).toUpperCase()
+  const finalScore = winningScored?.final_audit_score || 0
 
   const steps = [
     {

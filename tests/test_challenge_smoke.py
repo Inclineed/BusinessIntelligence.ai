@@ -10,7 +10,7 @@ Also tests:
   - deterministic reproducibility: same inputs → same scores
   - abstention logic: gap too small → ABSTAIN
   - empty hypothesis list → ABSTAIN
-  - narrative non-mutation: final_score and confidence_state unchanged
+  - narrative non-mutation: final_audit_score and audit_verdict unchanged
 """
 
 import pytest
@@ -25,7 +25,7 @@ from engines.challenge import (
 )
 from models import (
     AnomalySignal,
-    ConfidenceState,
+    AuditVerdict,
     DimensionContribution,
     Evidence,
     EvidenceCitation,
@@ -160,6 +160,7 @@ def make_hypotheses():
     evidence_set = make_evidence_set()
     h1 = Hypothesis(
         hypothesis_id="H1",
+        mechanism_tag="payment_gateway",
         statement=(
             "The checkout and payment system experienced a significant degradation "
             "due to a recent deployment of the checkout service, causing elevated "
@@ -216,6 +217,7 @@ def make_hypotheses():
     )
     h3 = Hypothesis(
         hypothesis_id="H3",
+        mechanism_tag="inventory_stockout",
         statement=(
             "An inventory shortage reduced the availability of products, causing "
             "customers to abandon the checkout process."
@@ -249,59 +251,61 @@ class TestINC001Bands:
         self.contributions = make_contributions()
         self.hypotheses = make_hypotheses()
         self.thresholds = ChallengeThresholds()
+        from config.loader import load_domain_semantics
+        self.domain_semantics = load_domain_semantics("config/domain_semantics.yaml")
 
     def test_h1_is_high(self):
         result = challenge(
-            self.hypotheses, self.evidence_by_id, self.signals, self.contributions
+            self.hypotheses, self.evidence_by_id, self.signals, self.contributions, domain_semantics=self.domain_semantics
         )
         by_id = {sh.hypothesis_id: sh for sh in result.scored_hypotheses}
-        assert by_id["H1"].confidence_state == ConfidenceState.HIGH, (
-            f"H1 expected HIGH, got {by_id['H1'].confidence_state.value} "
-            f"(score={by_id['H1'].final_score:.4f})"
+        assert by_id["H1"].audit_verdict == AuditVerdict.VERIFIED, (
+            f"H1 expected VERIFIED, got {by_id['H1'].audit_verdict.value} "
+            f"(score={by_id['H1'].final_audit_score:.4f})"
         )
 
     def test_h3_is_low(self):
         result = challenge(
-            self.hypotheses, self.evidence_by_id, self.signals, self.contributions
+            self.hypotheses, self.evidence_by_id, self.signals, self.contributions, domain_semantics=self.domain_semantics
         )
         by_id = {sh.hypothesis_id: sh for sh in result.scored_hypotheses}
-        assert by_id["H3"].confidence_state == ConfidenceState.LOW, (
-            f"H3 expected LOW, got {by_id['H3'].confidence_state.value} "
-            f"(score={by_id['H3'].final_score:.4f})"
+        assert by_id["H3"].audit_verdict == AuditVerdict.REJECTED, (
+            f"H3 expected REJECTED, got {by_id['H3'].audit_verdict.value} "
+            f"(score={by_id['H3'].final_audit_score:.4f})"
         )
 
     def test_h2_not_high(self):
         result = challenge(
-            self.hypotheses, self.evidence_by_id, self.signals, self.contributions
+            self.hypotheses, self.evidence_by_id, self.signals, self.contributions, domain_semantics=self.domain_semantics
         )
         by_id = {sh.hypothesis_id: sh for sh in result.scored_hypotheses}
-        assert by_id["H2"].confidence_state != ConfidenceState.HIGH, (
-            f"H2 must not be HIGH, got {by_id['H2'].confidence_state.value} "
-            f"(score={by_id['H2'].final_score:.4f})"
+        assert by_id["H2"].audit_verdict != AuditVerdict.VERIFIED, (
+            f"H2 must not be VERIFIED, got {by_id['H2'].audit_verdict.value} "
+            f"(score={by_id['H2'].final_audit_score:.4f})"
         )
 
     def test_h1_wins(self):
         result = challenge(
-            self.hypotheses, self.evidence_by_id, self.signals, self.contributions
+            self.hypotheses, self.evidence_by_id, self.signals, self.contributions, domain_semantics=self.domain_semantics
         )
         assert result.winning_hypothesis_id == "H1"
         assert not result.abstained
 
     def test_ranking_h1_gt_h2_gt_h3(self):
         result = challenge(
-            self.hypotheses, self.evidence_by_id, self.signals, self.contributions
+            self.hypotheses, self.evidence_by_id, self.signals, self.contributions, domain_semantics=self.domain_semantics
         )
         by_id = {sh.hypothesis_id: sh for sh in result.scored_hypotheses}
-        assert by_id["H1"].final_score > by_id["H2"].final_score, "H1 must outscore H2"
-        assert by_id["H1"].final_score > by_id["H3"].final_score, "H1 must outscore H3"
+        assert by_id["H1"].final_audit_score > by_id["H2"].final_audit_score, "H1 must outscore H2"
+        assert by_id["H1"].final_audit_score > by_id["H3"].final_audit_score, "H1 must outscore H3"
 
     def test_scores_in_0_1(self):
         result = challenge(
-            self.hypotheses, self.evidence_by_id, self.signals, self.contributions
+            self.hypotheses, self.evidence_by_id, self.signals, self.contributions, domain_semantics=self.domain_semantics
         )
         for sh in result.scored_hypotheses:
-            assert 0.0 <= sh.final_score <= 1.0, (
-                f"{sh.hypothesis_id} final_score={sh.final_score} out of [0,1]"
+            assert 0.0 <= sh.final_audit_score <= 1.0, (
+                f"{sh.hypothesis_id} final_audit_score={sh.final_audit_score} out of [0,1]"
             )
 
 
@@ -321,11 +325,11 @@ class TestReproducibility:
 
         for sha, shb in zip(result_a.scored_hypotheses, result_b.scored_hypotheses):
             assert sha.hypothesis_id == shb.hypothesis_id
-            assert sha.final_score == shb.final_score, (
+            assert sha.final_audit_score == shb.final_audit_score, (
                 f"{sha.hypothesis_id}: score changed between runs "
-                f"({sha.final_score} vs {shb.final_score})"
+                f"({sha.final_audit_score} vs {shb.final_audit_score})"
             )
-            assert sha.confidence_state == shb.confidence_state
+            assert sha.audit_verdict == shb.audit_verdict
 
     def test_shuffled_evidence_order_same_scores(self):
         """Evidence dict order must not affect scores."""
@@ -340,8 +344,8 @@ class TestReproducibility:
         result_1 = challenge(hypotheses, evidence_by_id_1, signals, contributions)
         result_2 = challenge(hypotheses, evidence_by_id_2, signals, contributions)
 
-        scores_1 = {sh.hypothesis_id: sh.final_score for sh in result_1.scored_hypotheses}
-        scores_2 = {sh.hypothesis_id: sh.final_score for sh in result_2.scored_hypotheses}
+        scores_1 = {sh.hypothesis_id: sh.final_audit_score for sh in result_1.scored_hypotheses}
+        scores_2 = {sh.hypothesis_id: sh.final_audit_score for sh in result_2.scored_hypotheses}
         assert scores_1 == scores_2, f"Scores differ with reordered evidence: {scores_1} vs {scores_2}"
 
 
@@ -353,7 +357,7 @@ class TestAbstention:
     def test_empty_hypotheses_abstains(self):
         result = challenge([], {}, [], [])
         assert result.abstained
-        assert result.overall_confidence == ConfidenceState.ABSTAIN
+        assert result.overall_verdict == AuditVerdict.ABSTAIN
         assert result.winning_hypothesis_id is None
 
     def test_low_top_score_abstains(self):
@@ -373,7 +377,7 @@ class TestAbstention:
             thresholds=thresholds,
         )
         assert result.abstained
-        assert result.overall_confidence == ConfidenceState.ABSTAIN
+        assert result.overall_verdict == AuditVerdict.ABSTAIN
 
     def test_small_gap_abstains(self):
         """When top and runner-up are very close, should abstain."""
@@ -421,8 +425,8 @@ class TestAbstention:
         result = challenge([h_a, h_b], evidence_by_id, [], [], thresholds=thresholds)
         assert result.abstained
 
-    def test_abstention_does_not_mutate_final_score(self):
-        """final_score fields are unmodified even when ABSTAIN is set (Req 9.7)."""
+    def test_abstention_does_not_mutate_final_audit_score(self):
+        """final_audit_score fields are unmodified even when ABSTAIN is set (Req 9.7)."""
         thresholds = ChallengeThresholds(abstain_threshold=0.99)
         hypotheses = make_hypotheses()
         result_normal = challenge(
@@ -433,9 +437,9 @@ class TestAbstention:
             hypotheses, make_evidence_set(), make_signals(), make_contributions(),
             thresholds=thresholds,
         )
-        # Scores should be identical; only confidence_state differs
-        normal_by_id = {sh.hypothesis_id: sh.final_score for sh in result_normal.scored_hypotheses}
-        abstain_by_id = {sh.hypothesis_id: sh.final_score for sh in result_abstain.scored_hypotheses}
+        # Scores should be identical; only audit_verdict differs
+        normal_by_id = {sh.hypothesis_id: sh.final_audit_score for sh in result_normal.scored_hypotheses}
+        abstain_by_id = {sh.hypothesis_id: sh.final_audit_score for sh in result_abstain.scored_hypotheses}
         assert normal_by_id == abstain_by_id, (
             f"Final scores changed between normal and abstain runs: {normal_by_id} vs {abstain_by_id}"
         )
@@ -464,7 +468,7 @@ class TestHallucinatedIds:
         sh = score_hypothesis(h_hallucinated, evidence_by_id, signals, contributions, thresholds)
         # support_score should be 0.0 (hallucinated id skipped or gated with 0 score)
         assert sh.support_score == 0.0, f"Expected support_score=0.0, got {sh.support_score}"
-        assert 0.0 <= sh.final_score <= 1.0
+        assert 0.0 <= sh.final_audit_score <= 1.0
 
 
 # ---------------------------------------------------------------------------

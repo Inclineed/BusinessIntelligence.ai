@@ -25,7 +25,7 @@ from evaluation.evaluator import Evaluator
 from config.loader import load_domain_semantics
 from models import (
     AnomalySignal,
-    ConfidenceState,
+    AuditVerdict,
     Decision,
     DimensionContribution,
     Evidence,
@@ -190,7 +190,7 @@ class TestHeldOutScenarios:
             sc_gt = scenarios[sc_id]
             assert "name" in sc_gt
             assert "true_cause" in sc_gt
-            assert "expected_confidence_state" in sc_gt
+            assert "expected_audit_verdict" in sc_gt
             assert "evaluation_checks" in sc_gt
 
     def test_inc005_seasonality_held_out(self):
@@ -289,13 +289,13 @@ class TestHeldOutScenarios:
 
         scored_h1 = ScoredHypothesis(
             hypothesis_id="H1",
-            final_score=0.62,
-            confidence_state=ConfidenceState.HIGH,
+            final_audit_score=0.62,
+            audit_verdict=AuditVerdict.VERIFIED,
         )
         scored_h2 = ScoredHypothesis(
             hypothesis_id="H2",
-            final_score=0.55,
-            confidence_state=ConfidenceState.MEDIUM,
+            final_audit_score=0.55,
+            audit_verdict=AuditVerdict.MARGINAL,
         )
 
         result = InvestigationResult(
@@ -373,8 +373,8 @@ class TestHeldOutScenarios:
 
         scored_h1 = ScoredHypothesis(
             hypothesis_id="H1",
-            final_score=0.65,
-            confidence_state=ConfidenceState.HIGH,
+            final_audit_score=0.65,
+            audit_verdict=AuditVerdict.VERIFIED,
         )
 
         result = InvestigationResult(
@@ -478,8 +478,8 @@ class TestHeldOutScenarios:
 
         scored_h1 = ScoredHypothesis(
             hypothesis_id="H1",
-            final_score=0.92,
-            confidence_state=ConfidenceState.HIGH,
+            final_audit_score=0.92,
+            audit_verdict=AuditVerdict.VERIFIED,
         )
 
         result = InvestigationResult(
@@ -562,8 +562,8 @@ class TestHeldOutScenarios:
         scored = [
             ScoredHypothesis(
                 hypothesis_id="H1",
-                final_score=0.95,
-                confidence_state=ConfidenceState.HIGH,
+                final_audit_score=0.95,
+                audit_verdict=AuditVerdict.VERIFIED,
             )
         ]
         
@@ -671,7 +671,7 @@ class TestAdversarialPerturbation:
                 signals=signals,
                 contributions=contrib,
             )
-            scores.append(scored.final_score)
+            scores.append(scored.final_audit_score)
 
         # Monotonicity assertion: each subsequent score must be <= previous score
         for i in range(len(scores) - 1):
@@ -707,7 +707,7 @@ class TestAdversarialPerturbation:
                 signals=signals,
                 contributions=[],
             )
-            scores.append(scored.final_score)
+            scores.append(scored.final_audit_score)
 
         # Monotonicity assertion: each subsequent score must be >= previous score
         for i in range(len(scores) - 1):
@@ -742,7 +742,7 @@ class TestAdversarialPerturbation:
                 signals=signals,
                 contributions=[],
             )
-            scores.append(scored.final_score)
+            scores.append(scored.final_audit_score)
 
         for i in range(len(scores) - 1):
             assert scores[i] >= scores[i + 1], (
@@ -789,7 +789,7 @@ class TestAdversarialPerturbation:
 
         assert challenge_res.abstained is False
         assert challenge_res.winning_hypothesis_id == "H1"
-        assert challenge_res.overall_confidence == ConfidenceState.HIGH
+        assert challenge_res.overall_verdict == AuditVerdict.VERIFIED
 
 
 class TestEvaluatorExtensibility:
@@ -859,7 +859,7 @@ class TestEvaluatorExtensibility:
             
     def test_evaluator_dynamic_scenario_loading(self):
         from evaluation.evaluator import Evaluator, DimensionScore
-        from models import InvestigationResult, Telemetry, ConfidenceState, Decision, ScoredHypothesis, Hypothesis
+        from models import InvestigationResult, Telemetry, AuditVerdict, Decision, ScoredHypothesis, Hypothesis
         evaluator = Evaluator()
         
         gt = evaluator._gt()
@@ -869,12 +869,12 @@ class TestEvaluatorExtensibility:
                 "anomaly_detected": False,
                 "abstain_expected": False,
                 "winning_hypothesis_id": "HDYN",
-                "confidence_state": "HIGH"
+                "audit_verdict": "VERIFIED"
             }
         }
         
         scored = [
-            ScoredHypothesis(hypothesis_id="HDYN", final_score=0.9, confidence_state=ConfidenceState.HIGH)
+            ScoredHypothesis(hypothesis_id="HDYN", final_audit_score=0.9, audit_verdict=AuditVerdict.VERIFIED)
         ]
         
         result = InvestigationResult(

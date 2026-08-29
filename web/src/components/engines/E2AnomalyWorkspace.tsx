@@ -53,11 +53,11 @@ export const E2AnomalyWorkspace: React.FC<E2AnomalyWorkspaceProps> = ({ result }
     switch (tier) {
       case "CRITICAL":
         return "bg-[#D8453A]/20 text-[#E56B62] border-[#D8453A]/40"
-      case "HIGH":
+      case "VERIFIED":
         return "bg-[#C46830]/20 text-[#E88E52] border-[#C46830]/40"
-      case "MEDIUM":
+      case "MARGINAL":
         return "bg-[#A88232]/20 text-[#DEC06A] border-[#A88232]/40"
-      case "LOW":
+      case "REJECTED":
         return "bg-[#4E8569]/20 text-[#78AC91] border-[#4E8569]/40"
       default:
         return "bg-[#222222] text-[#9E9788] border-[#333333]"

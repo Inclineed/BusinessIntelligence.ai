@@ -1,5 +1,5 @@
 import React from "react"
-import { HypothesisItem, ScoredHypothesisItem, ConfidenceState } from "../../types/investigation"
+import { HypothesisItem, ScoredHypothesisItem, AuditVerdict } from "../../types/investigation"
 import { RuleScorecard } from "./RuleScorecard"
 import { Sparkles, Scale, CheckCircle2, AlertTriangle, ShieldAlert, Award } from "lucide-react"
 
@@ -27,21 +27,21 @@ export const HypothesisMatrix: React.FC<HypothesisMatrixProps> = ({
   // Build lookup map of raw statement by hypothesis_id
   const statementMap = new Map(hypotheses.map((h) => [h.hypothesis_id, h]))
 
-  const getConfidenceBadge = (confidence: ConfidenceState) => {
+  const getConfidenceBadge = (confidence: AuditVerdict) => {
     switch (confidence) {
-      case "HIGH":
+      case "VERIFIED":
         return (
           <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
             HIGH CONFIDENCE
           </span>
         )
-      case "MEDIUM":
+      case "MARGINAL":
         return (
           <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
             MEDIUM CONFIDENCE
           </span>
         )
-      case "LOW":
+      case "REJECTED":
         return (
           <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">
             LOW CONFIDENCE
@@ -83,7 +83,7 @@ export const HypothesisMatrix: React.FC<HypothesisMatrixProps> = ({
         {scoredHypotheses.map((sh, idx) => {
           const raw = statementMap.get(sh.hypothesis_id)
           const isWinning = sh.hypothesis_id === winningHypothesisId
-          const finalScorePct = Math.round(sh.final_score * 100)
+          const finalScorePct = Math.round(sh.final_audit_score * 100)
 
           return (
             <div
@@ -109,7 +109,7 @@ export const HypothesisMatrix: React.FC<HypothesisMatrixProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {getConfidenceBadge(sh.confidence_state)}
+                  {getConfidenceBadge(sh.audit_verdict)}
                   <div className="text-right">
                     <span className="text-xs font-mono font-bold text-neutral-200 tabular-nums">
                       {finalScorePct}%
@@ -139,14 +139,14 @@ export const HypothesisMatrix: React.FC<HypothesisMatrixProps> = ({
                 <div>
                   <span>Support Score: </span>
                   <span className="font-bold text-emerald-400 tabular-nums">
-                    {(sh.support_score * 100).toFixed(0)}%
+                    {Math.min(100, Math.round(sh.support_score * 100))}%
                   </span>
                 </div>
-                {sh.contradiction_penalty > 0 && (
+                {sh.contradiction_score > 0 && (
                   <div>
                     <span>Contradiction Penalty: </span>
                     <span className="font-bold text-red-400 tabular-nums">
-                      -{(sh.contradiction_penalty * 100).toFixed(0)}%
+                      -{Math.min(100, Math.round(sh.contradiction_score * 100))}%
                     </span>
                   </div>
                 )}

@@ -31,11 +31,11 @@ export const InvestigationHero: React.FC<InvestigationHeroProps> = ({ result, on
 
   // 3. Confidence & Metrics
   const abstained = Boolean(decision.abstained)
-  const score = winningScored?.final_score || 0
-  const confidenceState = (winningScored?.confidence_state || (abstained ? "ABSTAIN" : "LOW")).toUpperCase()
+  const score = winningScored?.final_audit_score || 0
+  const confidenceState = (winningScored?.audit_verdict || (abstained ? "ABSTAIN" : "REJECTED")).toUpperCase()
   
   // Calculate winner score gap
-  const sortedScores = [...scored].map((s) => s.final_score).sort((a, b) => b - a)
+  const sortedScores = [...scored].map((s) => s.final_audit_score).sort((a, b) => b - a)
   const winnerGap = sortedScores.length > 1 ? sortedScores[0] - sortedScores[1] : score
 
   // 4. Action Recommendation
@@ -69,9 +69,9 @@ export const InvestigationHero: React.FC<InvestigationHeroProps> = ({ result, on
   let confBadgeClass = "bg-semantic-positive-bg text-semantic-positive border-semantic-positive-border"
   if (abstained || confidenceState === "ABSTAIN") {
     confBadgeClass = "bg-semantic-warning-bg text-semantic-warning border-semantic-warning-border"
-  } else if (confidenceState === "MEDIUM") {
+  } else if (confidenceState === "MARGINAL") {
     confBadgeClass = "bg-semantic-warning-bg text-semantic-warning border-semantic-warning-border"
-  } else if (confidenceState === "LOW") {
+  } else if (confidenceState === "REJECTED") {
     confBadgeClass = "bg-semantic-critical-bg text-semantic-critical border-semantic-critical-border"
   }
 
@@ -168,7 +168,7 @@ export const InvestigationHero: React.FC<InvestigationHeroProps> = ({ result, on
                   "h-full rounded-full transition-all duration-500",
                   abstained || confidenceState === "ABSTAIN"
                     ? "bg-semantic-warning w-[35%]"
-                    : confidenceState === "HIGH"
+                    : confidenceState === "VERIFIED"
                     ? "bg-semantic-positive w-[92%]"
                     : "bg-semantic-neutral w-[60%]"
                 )}

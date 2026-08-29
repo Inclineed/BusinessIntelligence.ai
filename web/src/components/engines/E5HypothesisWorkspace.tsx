@@ -79,10 +79,10 @@ export const E5HypothesisWorkspace: React.FC<E5HypothesisWorkspaceProps> = ({ re
         </div>
       ) : (
         <div className="space-y-4">
-          {(scored.length > 0 ? scored : (result.hypotheses || []).map((h) => ({ hypothesis_id: h.hypothesis_id, final_score: 0.5, support_score: 0.5, contradiction_penalty: 0, rule_results: [], narrative: h.reasoning }))).map((sh) => {
+          {(scored.length > 0 ? scored : (result.hypotheses || []).map((h) => ({ hypothesis_id: h.hypothesis_id, rule_score: 0.5, final_audit_score: 0.5, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG', support_score: 0.5, contradiction_score: 0, rule_results: [], narrative: h.reasoning }))).map((sh) => {
             const raw = statementMap.get(sh.hypothesis_id)
             const isWinning = sh.hypothesis_id === winningId
-            const scorePct = Math.round(sh.final_score * 100)
+            const scorePct = Math.round(sh.final_audit_score * 100)
 
             const hasSupport = raw?.supporting_evidence_ids && raw.supporting_evidence_ids.length > 0
             const hasContradiction = raw?.contradictory_evidence_ids && raw.contradictory_evidence_ids.length > 0
@@ -110,7 +110,7 @@ export const E5HypothesisWorkspace: React.FC<E5HypothesisWorkspaceProps> = ({ re
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-[#9E9788]">Support Score:</span>
+                    <span className="text-xs text-[#9E9788]">Final Audit Score:</span>
                     <span className="text-sm font-bold text-[#F4EEE0] tabular-nums">{scorePct}/100</span>
                   </div>
                 </div>

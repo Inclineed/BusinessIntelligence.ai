@@ -62,7 +62,7 @@ class TestStructuredFeedbackSubmission(unittest.TestCase):
             verdict=FeedbackVerdict.INCORRECT,
             persona="analyst",
             corrected_hypothesis_id="H2",
-            corrected_confidence_state="HIGH",
+            corrected_audit_verdict="VERIFIED",
             corrected_action="Investigate marketing campaign instead",
             evidence_grounding_correct=False,
             analyst_notes="Payment pool was transient; marketing was the real driver",
@@ -145,7 +145,7 @@ class TestMarkValidatedWithFeedbackId(unittest.TestCase):
             "ids": ["INC_TEST"],
             "metadatas": [{
                 "scenario_id": "INC_TEST",
-                "confidence_state": "HIGH",
+                "audit_verdict": "VERIFIED",
                 "human_validated": False,
                 "validated_at": "",
             }],

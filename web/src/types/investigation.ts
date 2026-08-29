@@ -1,7 +1,8 @@
 export type PersonaType = "analyst" | "cfo" | "manager"
-export type ConfidenceState = "HIGH" | "MEDIUM" | "LOW" | "ABSTAIN"
+export type AuditVerdict = "VERIFIED" | "MARGINAL" | "REJECTED" | "ABSTAIN"
+export type EvidenceSufficiencyLevel = "STRONG" | "SUFFICIENT" | "LIMITED" | "INSUFFICIENT"
 export type RuleVerdict = "pass" | "partial" | "fail" | "n/a"
-export type BusinessMateriality = "NEGLIGIBLE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+export type BusinessMateriality = "NEGLIGIBLE" | "REJECTED" | "MARGINAL" | "VERIFIED" | "CRITICAL"
 
 export interface AnomalySignal {
   kpi_id: string
@@ -59,6 +60,7 @@ export interface EvidenceItem {
 
 export interface HypothesisItem {
   hypothesis_id: string
+  mechanism_tag: string
   statement: string
   reasoning?: string
   supporting_evidence_ids: string[]
@@ -74,9 +76,12 @@ export interface RuleResult {
 export interface ScoredHypothesisItem {
   hypothesis_id: string
   support_score: number
-  contradiction_penalty: number
-  final_score: number
-  confidence_state: ConfidenceState
+  contradiction_score: number
+  rule_score: number
+  final_audit_score: number
+  audit_verdict: AuditVerdict
+  evidence_sufficiency_score: number
+  evidence_sufficiency_level: EvidenceSufficiencyLevel
   rule_results: RuleResult[]
   narrative?: string
 }
@@ -99,6 +104,7 @@ export interface DecisionPayload {
   abstention_reason?: string
   verification_metric?: string
   persona_narrative?: string
+  overall_verdict?: AuditVerdict
   structured_recommendation?: StructuredActionRecommendation
 }
 
@@ -119,8 +125,8 @@ export interface PrecedentItem {
   relevance?: number
   retrieval_score?: number
   retrieval_weight?: number
-  confidence_state?: string
-  original_confidence_state?: string
+  audit_verdict?: string
+  original_audit_verdict?: string
   outcome_type?: string
   winning_hypothesis?: string
   recommendation?: string
@@ -189,7 +195,7 @@ export interface StructuredFeedbackSubmission {
   persona?: string
   verdict: FeedbackVerdict
   corrected_hypothesis_id?: string
-  corrected_confidence_state?: string
+  corrected_audit_verdict?: string
   corrected_action?: string
   evidence_grounding_correct?: boolean
   analyst_notes?: string
@@ -209,7 +215,7 @@ export interface FeedbackRecord {
   persona: string
   verdict: FeedbackVerdict
   corrected_hypothesis_id?: string
-  corrected_confidence_state?: string
+  corrected_audit_verdict?: string
   corrected_action?: string
   evidence_grounding_correct?: boolean
   analyst_notes?: string

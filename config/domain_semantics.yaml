@@ -2,29 +2,40 @@ domain: E-Commerce Retail
 
 mechanisms:
   payment_gateway:
+    direct_source: "payment_gateway"
+    compatible_sources: ["payment_gateway", "deployment_log", "release_notes", "orders", "support_tickets"]
     keywords: ["payment", "gateway", "stripe", "adyen", "auth", "checkout"]
-    associated_kpis: ["gateway_latency_15min", "payment_failure_rate_15min"]
+    associated_kpis: ["gateway_latency_15min", "payment_failure_rate_15min", "hourly_conversion"]
     verification_steps:
       - payment_success_rate
       - conversion_rate_recovery
   inventory_system:
+    direct_source: "inventory"
+    compatible_sources: ["inventory", "orders", "support_tickets"]
     keywords: ["inventory", "stock", "warehouse", "depletion", "out of stock"]
     associated_kpis: ["inventory_fill_rate_daily"]
     verification_steps:
       - inventory_fill_rate
       - product_availability
   external_factors:
-    keywords: ["competitor", "market", "pricing", "macro", "holiday"]
+    direct_source: "marketing"
+    compatible_sources: ["marketing", "orders"]
+    keywords: ["competitor", "market", "pricing", "macro", "holiday", "marketing", "campaign", "promotion", "spend", "impressions"]
     verification_steps:
       - market_share_indicators
       - competitor_pricing_monitoring
   device_performance:
+    direct_source: "device_performance"
+    compatible_sources: ["support_tickets", "orders"]
     keywords: ["device", "mobile", "ios", "android", "web", "app crash"]
     verification_steps:
       - app_crash_rate
       - device_specific_conversion
   deployment_issues:
-    keywords: ["deploy", "release", "rollback", "v4.3", "v4.2", "frontend", "backend"]
+    direct_source: "deployment_log"
+    compatible_sources: ["deployment_log", "release_notes", "payment_gateway", "support_tickets", "orders"]
+    keywords: ["deploy", "release", "rollback", "v4.3", "v4.2", "frontend", "backend", "connection", "pool", "exhaustion", "latency", "failure"]
+    associated_kpis: ["gateway_latency_15min", "payment_failure_rate_15min", "hourly_conversion"]
     verification_steps:
       - error_rate
       - latency_p95

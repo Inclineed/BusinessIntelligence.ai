@@ -44,7 +44,7 @@ export const PrecedentExplorer: React.FC<PrecedentExplorerProps> = ({ precedents
         {precedents.map((item, index) => {
           let sid = `PRECEDENT-${index + 1}`
           let similarity = 0.88 - index * 0.05
-          let conf = "HIGH"
+          let conf = "VERIFIED"
           let otype = "OBSERVED"
           let humanVal = index === 0
           let summary = typeof item === "string" ? item : ""
@@ -54,7 +54,7 @@ export const PrecedentExplorer: React.FC<PrecedentExplorerProps> = ({ precedents
           if (typeof item === "object" && item !== null) {
             sid = item.scenario_id || sid
             similarity = item.similarity || item.relevance || similarity
-            conf = (item.confidence_state || item.original_confidence_state || conf).toUpperCase()
+            conf = (item.audit_verdict || item.original_audit_verdict || conf).toUpperCase()
             otype = (item.outcome_type || "observed").toUpperCase()
             humanVal = Boolean(item.human_validated)
             summary = item.summary || item.recommendation || ""
@@ -63,9 +63,9 @@ export const PrecedentExplorer: React.FC<PrecedentExplorerProps> = ({ precedents
           }
 
           let confColor = "text-semantic-positive bg-semantic-positive-bg border-semantic-positive-border"
-          if (conf === "MEDIUM") {
+          if (conf === "MARGINAL") {
             confColor = "text-semantic-warning bg-semantic-warning-bg border-semantic-warning-border"
-          } else if (conf === "LOW") {
+          } else if (conf === "REJECTED") {
             confColor = "text-semantic-critical bg-semantic-critical-bg border-semantic-critical-border"
           }
 

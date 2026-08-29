@@ -27,7 +27,7 @@ def _make_mock_investigation(
     persona: str = "analyst",
     latency_ms: float = 2500.0,
     abstained: bool = False,
-    confidence_state: str = "high",
+    audit_verdict: str = "high",
     has_violation: bool = False,
     precedent_relevance: float | None = 0.78,
 ) -> dict:
@@ -53,8 +53,8 @@ def _make_mock_investigation(
         "scored": [
             {
                 "hypothesis_id": "H1",
-                "final_score": 0.85,
-                "confidence_state": confidence_state,
+                "final_audit_score": 0.85,
+                "audit_verdict": audit_verdict,
                 "violations": violations,
             }
         ],
@@ -141,8 +141,8 @@ def test_full_comparison_100_plus_runs():
 
 def test_all_healthy_metrics():
     """5. Test that stable metrics across windows evaluate to HEALTHY."""
-    recent = [_make_mock_investigation(latency_ms=2500.0, abstained=False, confidence_state="high") for _ in range(50)]
-    baseline = [_make_mock_investigation(latency_ms=2400.0, abstained=False, confidence_state="high") for _ in range(50)]
+    recent = [_make_mock_investigation(latency_ms=2500.0, abstained=False, audit_verdict="high") for _ in range(50)]
+    baseline = [_make_mock_investigation(latency_ms=2400.0, abstained=False, audit_verdict="high") for _ in range(50)]
 
     m_lat = evaluate_e2e_latency(recent, baseline)
     assert m_lat.status == MetricHealthStatus.HEALTHY

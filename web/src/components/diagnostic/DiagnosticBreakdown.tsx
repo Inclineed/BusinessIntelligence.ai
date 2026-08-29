@@ -5,9 +5,10 @@ import { Layers, AlertTriangle, PieChart, Sparkles, Filter } from "lucide-react"
 
 interface DiagnosticBreakdownProps {
   contributions: DimensionContribution[]
+  targetKpiId?: string
 }
 
-export const DiagnosticBreakdown: React.FC<DiagnosticBreakdownProps> = ({ contributions }) => {
+export const DiagnosticBreakdown: React.FC<DiagnosticBreakdownProps> = ({ contributions, targetKpiId }) => {
   if (!contributions || contributions.length === 0) {
     return (
       <div className="p-6 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] text-center text-xs font-mono text-[#9E9788]">
@@ -28,7 +29,7 @@ export const DiagnosticBreakdown: React.FC<DiagnosticBreakdownProps> = ({ contri
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-[#6B9BB0]" />
             <span className="text-xs font-mono font-bold text-[#F4EEE0] uppercase tracking-wider">
-              Dimensional Concentration Analysis
+              Dimensional Concentration Analysis {targetKpiId ? `(${targetKpiId.replace(/_/g, " ")})` : ""}
             </span>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#181818] text-[#9E9788] border border-[#2E2E2E]">
@@ -71,10 +72,10 @@ export const DiagnosticBreakdown: React.FC<DiagnosticBreakdownProps> = ({ contri
         <div className="flex items-center justify-between">
           <div>
             <h4 className="font-mono text-xs font-bold text-[#F4EEE0] uppercase tracking-wider">
-              Segment Attribution Breakdown
+              Segment Attribution Breakdown {targetKpiId ? `· ${targetKpiId.replace(/_/g, " ")}` : ""}
             </h4>
             <p className="text-[11px] text-[#9E9788] font-mono mt-0.5">
-              Comparing how much each slice surged locally vs. its contribution to the overall company drop.
+              Comparing how much each slice surged locally vs. its contribution to the {targetKpiId ? `'${targetKpiId.replace(/_/g, " ")}'` : "target KPI"} anomaly.
             </p>
           </div>
         </div>

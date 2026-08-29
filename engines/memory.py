@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from models import (
-    ConfidenceState,
+    AuditVerdict,
     InvestigationResult,
     MethodTag,
     OutcomeType,
@@ -44,11 +44,11 @@ DEFAULT_CANDIDATE_MULTIPLIER = int(os.environ.get("E9_CANDIDATE_MULTIPLIER", "5"
 
 # Explicit retrieval weights for confidence states (ISSUE-002 Phase 1)
 # Preserves the strict invariant: HIGH > MEDIUM > ABSTAIN > LOW for equivalent semantic relevance
-RETRIEVAL_WEIGHTS: dict[ConfidenceState, float] = {
-    ConfidenceState.HIGH: 1.0,
-    ConfidenceState.MEDIUM: 0.6,
-    ConfidenceState.ABSTAIN: 0.2,
-    ConfidenceState.LOW: 0.1,
+RETRIEVAL_WEIGHTS: dict[AuditVerdict, float] = {
+    AuditVerdict.VERIFIED: 1.0,
+    AuditVerdict.MARGINAL: 0.6,
+    AuditVerdict.ABSTAIN: 0.2,
+    AuditVerdict.REJECTED: 0.1,
 }
 
 # Retrieval score boost for human-validated precedents (ISSUE-002 Phase 3)
@@ -85,8 +85,8 @@ def _build_fallback_summary(result: InvestigationResult) -> str:
         winning_action = result.decision.recommended_action
 
     if result.scored:
-        top = max(result.scored, key=lambda s: s.final_score)
-        confidence = top.confidence_state.value
+        top = max(result.scored, key=lambda s: s.final_audit_score)
+        confidence = top.audit_verdict.value
 
     parts = [f"Investigation {result.scenario_id} for persona {result.persona.value}."]
     if winning_id:
@@ -134,7 +134,7 @@ class MemoryEngine:
     MAX_RESULTS: int = _MAX_RESULTS
     MAX_RETRY_ATTEMPTS: int = _MAX_RETRY_ATTEMPTS
     CANDIDATE_MULTIPLIER: int = DEFAULT_CANDIDATE_MULTIPLIER
-    RETRIEVAL_WEIGHTS: dict[ConfidenceState, float] = RETRIEVAL_WEIGHTS
+    RETRIEVAL_WEIGHTS: dict[AuditVerdict, float] = RETRIEVAL_WEIGHTS
 
     def __init__(
         self,
@@ -170,7 +170,11 @@ class MemoryEngine:
             raise RuntimeError("chroma_client is not configured.")
         return self._chroma.get_or_create_collection(
             name=self.COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
+            metadata={
+                "hnsw:space": "cosine",
+                "hnsw:search_ef": 64,
+                "hnsw:M": 32,
+            },
         )
 
     # ------------------------------------------------------------------
@@ -198,12 +202,12 @@ class MemoryEngine:
             else None
         )
         if result.decision and result.decision.abstained:
-            confidence = ConfidenceState.ABSTAIN.value
+            confidence = AuditVerdict.ABSTAIN.value
         elif result.scored:
-            top = max(result.scored, key=lambda s: s.final_score)
-            confidence = top.confidence_state.value
+            top = max(result.scored, key=lambda s: s.final_audit_score)
+            confidence = top.audit_verdict.value
         else:
-            confidence = ConfidenceState.ABSTAIN.value
+            confidence = AuditVerdict.ABSTAIN.value
 
         system_prompt = (
             "You are a concise business intelligence analyst. "
@@ -216,7 +220,7 @@ class MemoryEngine:
             f"  scenario_id: {result.scenario_id}\n"
             f"  persona: {result.persona.value}\n"
             f"  winning_hypothesis: {winning_id or 'none'}\n"
-            f"  confidence_state: {confidence or 'unknown'}\n"
+            f"  audit_verdict: {confidence or 'unknown'}\n"
             f"  recommended_action: {recommended_action or 'none (abstained)'}\n\n"
             "Write 2-3 sentences suitable for semantic search indexing."
         )
@@ -312,12 +316,12 @@ class MemoryEngine:
                 else None
             )
             if result.decision and result.decision.abstained:
-                confidence_state_val = ConfidenceState.ABSTAIN.value
+                confidence_state_val = AuditVerdict.ABSTAIN.value
             elif result.scored:
-                top = max(result.scored, key=lambda s: s.final_score)
-                confidence_state_val = top.confidence_state.value
+                top = max(result.scored, key=lambda s: s.final_audit_score)
+                confidence_state_val = top.audit_verdict.value
             else:
-                confidence_state_val = ConfidenceState.ABSTAIN.value
+                confidence_state_val = AuditVerdict.ABSTAIN.value
 
             ot_val = outcome_type.value if hasattr(outcome_type, "value") else str(outcome_type)
             iso_now = datetime.now(tz=timezone.utc).isoformat()
@@ -335,7 +339,7 @@ class MemoryEngine:
                 "source_ids": source_ids_str,
                 "winning_hypothesis": winning_id or "",
                 "recommendation": (recommended_action or "")[:500],
-                "confidence_state": confidence_state_val,
+                "audit_verdict": confidence_state_val,
                 "original_confidence_state": confidence_state_val,
                 "outcome_type": ot_val,
                 "created_at": iso_now,
@@ -479,7 +483,7 @@ class MemoryEngine:
         validated_at to the given (or current UTC) ISO timestamp, and
         optionally links the validation to the originating feedback_id.
 
-        Does NOT alter confidence_state or original_confidence_state.
+        Does NOT alter audit_verdict or original_confidence_state.
 
         Returns True on success, False if the record is not found or update fails.
         """
@@ -553,7 +557,7 @@ class MemoryEngine:
             scenario_id       : str
             summary           : str
             relevance         : float  in [0, 1]
-            confidence_state  : str
+            audit_verdict  : str
             original_confidence_state : str
             retrieval_weight  : float
             retrieval_score   : float
@@ -596,21 +600,57 @@ class MemoryEngine:
             # Candidate oversampling compensates for post-retrieval authorization/provenance filtering.
             candidate_results = min(desired_results * max(1, multiplier), count)
 
-            # ARCHITECTURAL DECISION (Round 2 E9 Scalability Optimization):
-            # -------------------------------------------------------------
-            # 1. ChromaDB local SQLite metadata filtering (where={"outcome_type": "observed"})
-            #    was benchmarked as a severe bottleneck causing full-table scans & SQLite lock contention (9.4s+).
-            # 2. Raw HNSW vector search is used strictly for candidate generation (sub-30ms at 100k scale).
-            # 3. Python is the authoritative provenance, security, and authorization boundary (<1ms).
-            # 4. Oversampling (candidate_multiplier=5 by default) is necessary because simulated or unauthorized
-            #    precedents can occupy raw vector top-K slots before post-retrieval filtering drops them.
-            # 5. The multiplier (5x) is benchmark-derived from controlled fixtures (yielding 100% recall) and must
-            #    be periodically revalidated when corpus size or simulation distribution shifts materially.
-            query_result = collection.query(
-                query_embeddings=[query_vector],
-                n_results=candidate_results,
-                include=["documents", "metadatas", "distances"],
-            )
+            # Small-Dataset Exact Cosine Branch (ISSUE-009 E9 fix):
+            # For precedent collections with <= 50 documents, compute exact cosine similarity in NumPy
+            # to avoid HNSW graph contiguity exceptions on small candidate graphs.
+            if count <= 50:
+                get_res = collection.get(
+                    include=["documents", "metadatas", "embeddings"],
+                )
+                if get_res and get_res.get("ids"):
+                    raw_ids = get_res["ids"]
+                    raw_docs = get_res.get("documents", []) or []
+                    raw_metas = get_res.get("metadatas", []) or []
+                    raw_embs = get_res.get("embeddings", None)
+
+                    if query_vector is not None and raw_embs is not None and len(raw_embs) > 0:
+                        import numpy as np
+                        q_vec = np.array(query_vector, dtype=np.float32)
+                        q_norm = np.linalg.norm(q_vec)
+                        if q_norm > 0:
+                            q_vec = q_vec / q_norm
+
+                        doc_vecs = np.array(raw_embs, dtype=np.float32)
+                        doc_norms = np.linalg.norm(doc_vecs, axis=1, keepdims=True)
+                        doc_norms[doc_norms == 0] = 1.0
+                        doc_vecs = doc_vecs / doc_norms
+
+                        sims = np.dot(doc_vecs, q_vec)
+                        dists = np.clip(1.0 - sims, 0.0, 2.0).tolist()
+                        sorted_idx = sorted(range(len(dists)), key=lambda i: dists[i])[:candidate_results]
+
+                        query_result = {
+                            "ids": [[raw_ids[i] for i in sorted_idx]],
+                            "documents": [[raw_docs[i] for i in sorted_idx]],
+                            "metadatas": [[raw_metas[i] for i in sorted_idx]],
+                            "distances": [[dists[i] for i in sorted_idx]],
+                        }
+                    else:
+                        query_result = {
+                            "ids": [raw_ids[:candidate_results]],
+                            "documents": [raw_docs[:candidate_results]],
+                            "metadatas": [raw_metas[:candidate_results]],
+                            "distances": [[0.5] * len(raw_ids[:candidate_results])],
+                        }
+                else:
+                    return []
+            else:
+                # Large collections (> 50 documents): use ChromaDB HNSW vector index
+                query_result = collection.query(
+                    query_embeddings=[query_vector],
+                    n_results=candidate_results,
+                    include=["documents", "metadatas", "distances"],
+                )
 
         except Exception as exc:  # noqa: BLE001
             logger.error(
@@ -727,13 +767,19 @@ class MemoryEngine:
             # ----------------------------------------------------------------
             # 4. Confidence Weighting
             # ----------------------------------------------------------------
-            conf_state_str = meta.get("confidence_state") or meta.get("original_confidence_state") or ""
-            try:
-                conf_state = ConfidenceState(conf_state_str.lower()) if conf_state_str else None
-                conf_weight = self.RETRIEVAL_WEIGHTS.get(conf_state, 0.1) if conf_state else 0.1
-            except (ValueError, KeyError, AttributeError):
-                conf_weight = 0.1
-                conf_state = None
+            conf_state_str = meta.get("audit_verdict") or meta.get("original_confidence_state") or ""
+            val = conf_state_str.lower().strip()
+            legacy_map = {
+                "high": AuditVerdict.VERIFIED,
+                "medium": AuditVerdict.MARGINAL,
+                "low": AuditVerdict.REJECTED,
+                "verified": AuditVerdict.VERIFIED,
+                "marginal": AuditVerdict.MARGINAL,
+                "rejected": AuditVerdict.REJECTED,
+                "abstain": AuditVerdict.ABSTAIN,
+            }
+            conf_state = legacy_map.get(val)
+            conf_weight = self.RETRIEVAL_WEIGHTS.get(conf_state, 0.1) if conf_state else 0.1
 
             retrieval_score = round(relevance * conf_weight, 4)
 
@@ -750,7 +796,8 @@ class MemoryEngine:
                 "scenario_id": meta.get("scenario_id", doc_id),
                 "summary": meta.get("summary") or document,
                 "relevance": round(relevance, 4),
-                "confidence_state": conf_state_str or (conf_state.value if conf_state else "unknown"),
+                "audit_verdict": conf_state_str or (conf_state.value if conf_state else "unknown"),
+                "original_audit_verdict": meta.get("original_audit_verdict", meta.get("original_confidence_state", conf_state_str or "unknown")),
                 "original_confidence_state": meta.get("original_confidence_state", conf_state_str or "unknown"),
                 "retrieval_weight": conf_weight,
                 "retrieval_score": retrieval_score,

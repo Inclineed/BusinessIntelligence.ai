@@ -39,7 +39,7 @@ export const RuleVerdictMatrix: React.FC<RuleVerdictMatrixProps> = ({ scored }) 
                 <td className="py-3 px-3 font-bold text-white flex items-center gap-2">
                   <span>{sh.hypothesis_id}</span>
                   <span className="text-[10px] text-muted-foreground font-normal">
-                    ({sh.final_score.toFixed(2)})
+                    ({sh.final_audit_score.toFixed(2)})
                   </span>
                 </td>
                 {RULES.map((r) => {

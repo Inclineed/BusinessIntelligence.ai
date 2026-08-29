@@ -423,37 +423,29 @@ async def investigate_endpoint(
     print(f"\033[96m| Provider: {p_name:<10} | Model: {p_model:<34} |\033[0m")
     print(f"\033[96m+------------------------------------------------------------------+\033[0m")
 
-    kpi_contract = getattr(state, "kpi_contract", None)
-    if kpi_contract is None:
-        try:
-            kpi_contract = load_kpi_contract(_CONFIG_DIR / "kpi_contracts.yaml")
-            state.kpi_contract = kpi_contract
-        except Exception:
-            kpi_contract = None
+    try:
+        kpi_contract = load_kpi_contract(_CONFIG_DIR / "kpi_contracts.yaml")
+        state.kpi_contract = kpi_contract
+    except Exception:
+        kpi_contract = getattr(state, "kpi_contract", None)
 
-    sources_config = getattr(state, "sources_config", None)
-    if sources_config is None:
-        try:
-            sources_config = load_sources(_CONFIG_DIR / "sources.yaml")
-            state.sources_config = sources_config
-        except Exception:
-            sources_config = []
+    try:
+        sources_config = load_sources(_CONFIG_DIR / "sources.yaml")
+        state.sources_config = sources_config
+    except Exception:
+        sources_config = getattr(state, "sources_config", [])
 
-    domain_semantics = getattr(state, "domain_semantics", None)
-    if domain_semantics is None:
-        try:
-            domain_semantics = load_domain_semantics(_CONFIG_DIR / "domain_semantics.yaml")
-            state.domain_semantics = domain_semantics
-        except Exception:
-            domain_semantics = {}
+    try:
+        domain_semantics = load_domain_semantics(_CONFIG_DIR / "domain_semantics.yaml")
+        state.domain_semantics = domain_semantics
+    except Exception:
+        domain_semantics = getattr(state, "domain_semantics", {})
             
-    scenarios_config = getattr(state, "scenarios_config", None)
-    if scenarios_config is None:
-        try:
-            scenarios_config = load_scenarios(_CONFIG_DIR / "scenarios.yaml")
-            state.scenarios_config = scenarios_config
-        except Exception:
-            scenarios_config = {"scenarios": []}
+    try:
+        scenarios_config = load_scenarios(_CONFIG_DIR / "scenarios.yaml")
+        state.scenarios_config = scenarios_config
+    except Exception:
+        scenarios_config = getattr(state, "scenarios_config", {"scenarios": []})
 
     deps = Dependencies(
         db_conn=db_conn,

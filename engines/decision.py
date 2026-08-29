@@ -8,9 +8,9 @@ LLM unavailability → abstain with stated reason (Req 10.5).
 
 Key invariants
 --------------
-- This engine NEVER recomputes confidence.  It reads confidence_state from
+- This engine NEVER recomputes confidence.  It reads audit_verdict from
   the ChallengeResult produced by E6 and acts on it.
-- If challenge_result.abstained == True  OR  the top confidence_state == ABSTAIN,
+- If challenge_result.abstained == True  OR  the top audit_verdict == ABSTAIN,
   the Decision MUST be abstained=True and recommended_action MUST be None.
   (_verify_decision_property_6 asserts this at construction time.)
 - If the LLMProvider raises LLMUnavailableError after both model attempts,
@@ -54,7 +54,7 @@ import re
 from typing import Optional
 
 from models import (
-    ConfidenceState,
+    AuditVerdict,
     Decision,
     MethodTag,
     Persona,
@@ -179,7 +179,10 @@ def _build_decision_prompt(
         "6. Keep persona_narrative under 300 words and recommended_action under 150 words."
     )
 
-    confidence_str = top.confidence_state.value.upper()
+    if top:
+        confidence_str = top.audit_verdict.value.upper()
+    else:
+        confidence_str = challenge_result.overall_verdict.value.upper()
     winning_id = challenge_result.winning_hypothesis_id or "unknown"
 
     # Summarise the top-ranked hypothesis rule verdicts concisely
@@ -329,7 +332,7 @@ def decide(
     - LLMUnavailableError after fallback  →  Decision.abstained=True,
       abstention_reason="provider_unavailable", winning_hypothesis_id preserved
       (Req 10.5)
-    - This engine NEVER recomputes confidence_state; it reads it from E6.
+    - This engine NEVER recomputes audit_verdict; it reads it from E6.
 
     Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 11.3, 12.6
     """
@@ -348,13 +351,13 @@ def decide(
     # CASE A — Abstain (from E6 or empty hypothesis list)
     # -----------------------------------------------------------------------
     if challenge_result.abstained or (
-        challenge_result.overall_confidence == ConfidenceState.ABSTAIN
+        challenge_result.overall_verdict == AuditVerdict.ABSTAIN
     ):
         logger.info(
-            "decide: E6 signalled ABSTAIN (abstained=%s, confidence=%s). "
+            "decide: E6 signalled ABSTAIN (abstained=%s, verdict=%s). "
             "Returning abstained Decision.",
             challenge_result.abstained,
-            challenge_result.overall_confidence.value,
+            challenge_result.overall_verdict.value,
         )
         verification_steps = default_verification_steps
         narrative = _abstain_narrative("low_confidence", verification_steps)
@@ -432,8 +435,8 @@ def decide(
             persona_narrative = parsed.get("monitoring_plan", "")
         if not persona_narrative:
             persona_narrative = (
-                f"Action recommended based on {challenge_result.overall_confidence.value.upper()} "
-                "confidence hypothesis. Please refer to the evidence panel for full details."
+                f"Action recommended based on {challenge_result.overall_verdict.value.upper()} "
+                "verdict hypothesis. Please refer to the evidence panel for full details."
             )
 
         # Enforce Lever Authorization (Unknown Lever Guard)
@@ -472,7 +475,7 @@ def decide(
             action=recommended_action,
             expected_impact="Pending E8 Simulation",
             owner=lever_cfg.get("owner", "Unknown"),
-            confidence=challenge_result.scored_hypotheses[0].final_score,
+            confidence=challenge_result.scored_hypotheses[0].final_audit_score if challenge_result.scored_hypotheses else 0.0,
             monitoring_plan=monitoring_plan,
             authorized_personas=lever_cfg.get("authorized_personas", []),
         )
@@ -490,10 +493,10 @@ def decide(
         _verify_decision_property_6(decision)
 
         logger.info(
-            "decide: Decision generated for persona=%s, winner=%s, confidence=%s.",
+            "decide: Decision generated for persona=%s, winner=%s, verdict=%s.",
             persona.value,
             winning_id,
-            challenge_result.overall_confidence.value,
+            challenge_result.overall_verdict.value,
         )
         return decision
 

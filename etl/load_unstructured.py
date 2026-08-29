@@ -1,4 +1,4 @@
-﻿"""
+"""
 etl/load_unstructured.py â€” Embed and load unstructured evidence into ChromaDB.
 
 Documents: support tickets (support_tickets.csv), deployment events
@@ -74,7 +74,11 @@ def _get_collection(
     return chroma_client.get_or_create_collection(
         name=collection_name,
         embedding_function=embedding_fn,
-        metadata={"hnsw:space": "cosine"},
+        metadata={
+            "hnsw:space": "cosine",
+            "hnsw:search_ef": 64,
+            "hnsw:M": 32,
+        },
     )
 
 

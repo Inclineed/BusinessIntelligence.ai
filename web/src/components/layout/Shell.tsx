@@ -76,8 +76,8 @@ export const Shell: React.FC<ShellProps> = ({
     } else {
       const winner = result.decision?.winning_hypothesis_id
       const winScored = result.scored?.find((s) => s.hypothesis_id === winner)
-      const conf = winScored?.confidence_state || "HIGH"
-      if (conf === "HIGH") {
+      const conf = winScored?.audit_verdict || "VERIFIED"
+      if (conf === "VERIFIED") {
         statusBadge = { label: "RESOLVED · HIGH CONFIDENCE", color: "text-semantic-positive", bg: "bg-semantic-positive-bg" }
       } else {
         statusBadge = { label: `EVALUATED · ${conf}`, color: "text-semantic-neutral", bg: "bg-semantic-neutral-bg" }

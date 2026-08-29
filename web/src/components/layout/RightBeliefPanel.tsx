@@ -33,8 +33,8 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
   const winningHypothesis = result.decision?.winning_hypothesis_id || "H1"
   const leadingScored =
     result.scored?.find((s) => s.hypothesis_id === winningHypothesis) || result.scored?.[0]
-  const confidenceScore = leadingScored?.final_score
-    ? Math.round(leadingScored.final_score * 100)
+  const confidenceScore = leadingScored?.final_audit_score
+    ? Math.round(leadingScored.final_audit_score * 100)
     : 85
 
   // SVG Circular Dash math (r=48 => circumference ~ 301.59)

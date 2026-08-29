@@ -194,20 +194,17 @@ export const DEFAULT_INC_001: InvestigationResult = {
   ],
   hypotheses: [
     {
-      hypothesis_id: "H1",
-      statement: "Payment gateway latency spike is driven by connection pool exhaustion introduced in the Checkout Service v4.3 release at 14:15 UTC.",
+      hypothesis_id: "H1", mechanism_tag: 'system_error', statement: "Payment gateway latency spike is driven by connection pool exhaustion introduced in the Checkout Service v4.3 release at 14:15 UTC.",
       supporting_evidence_ids: ["EV_v43_deployment", "EV_payment_pool_exhaustion", "EV_checkout_timeout_tickets"],
       contradictory_evidence_ids: [],
     },
     {
-      hypothesis_id: "H2",
-      statement: "Upstream third-party payment provider infrastructure outage is degrading global transaction response times.",
+      hypothesis_id: "H2", mechanism_tag: 'system_error', statement: "Upstream third-party payment provider infrastructure outage is degrading global transaction response times.",
       supporting_evidence_ids: [],
       contradictory_evidence_ids: ["EV_payment_pool_exhaustion"],
     },
     {
-      hypothesis_id: "H3",
-      statement: "Organic seasonal traffic surge overwhelmed database read replicas during an uncoordinated flash marketing campaign.",
+      hypothesis_id: "H3", mechanism_tag: 'system_error', statement: "Organic seasonal traffic surge overwhelmed database read replicas during an uncoordinated flash marketing campaign.",
       supporting_evidence_ids: [],
       contradictory_evidence_ids: ["EV_v43_deployment"],
     },
@@ -216,9 +213,9 @@ export const DEFAULT_INC_001: InvestigationResult = {
     {
       hypothesis_id: "H1",
       support_score: 0.90,
-      contradiction_penalty: 0.0,
-      final_score: 0.90,
-      confidence_state: "HIGH",
+      contradiction_score: 0.0,
+      rule_score: 0.90, final_audit_score: 0.90, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "VERIFIED",
       rule_results: [
         { rule_name: "timeline", verdict: "pass", rationale: "Deploy at 14:15 strictly precedes 14:18 latency spike." },
         { rule_name: "segment_alignment", verdict: "pass", rationale: "Pool exhaustion affects all checkout traffic uniformly across segments." },
@@ -230,9 +227,9 @@ export const DEFAULT_INC_001: InvestigationResult = {
     {
       hypothesis_id: "H2",
       support_score: 0.49,
-      contradiction_penalty: 0.35,
-      final_score: 0.14,
-      confidence_state: "LOW",
+      contradiction_score: 0.35,
+      rule_score: 0.14, final_audit_score: 0.14, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "REJECTED",
       rule_results: [
         { rule_name: "timeline", verdict: "partial", rationale: "External status page reported green across all availability zones." },
         { rule_name: "contradiction", verdict: "fail", rationale: "Contradicted by local pool saturation errors." },
@@ -241,9 +238,9 @@ export const DEFAULT_INC_001: InvestigationResult = {
     {
       hypothesis_id: "H3",
       support_score: 0.32,
-      contradiction_penalty: 0.25,
-      final_score: 0.07,
-      confidence_state: "LOW",
+      contradiction_score: 0.25,
+      rule_score: 0.07, final_audit_score: 0.07, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "REJECTED",
       rule_results: [
         { rule_name: "mechanism_consistency", verdict: "fail", rationale: "Total platform order volume is flat (-1.2%) compared to expected baseline." },
       ],
@@ -268,8 +265,8 @@ export const DEFAULT_INC_001: InvestigationResult = {
       scenario_id: "INC_001_HIST_Q3",
       relevance: 0.92,
       retrieval_score: 0.92,
-      confidence_state: "HIGH",
-      original_confidence_state: "HIGH",
+      audit_verdict: "VERIFIED",
+      original_audit_verdict: "VERIFIED",
       outcome_type: "OBSERVED",
       human_validated: true,
       summary: "Prior connection pool saturation following payment SDK upgrade resolved via pod scaling and max_connections tuning.",
@@ -281,8 +278,8 @@ export const DEFAULT_INC_001: InvestigationResult = {
       scenario_id: "INC_003_DEGRADE_Q2",
       relevance: 0.81,
       retrieval_score: 0.486,
-      confidence_state: "MEDIUM",
-      original_confidence_state: "MEDIUM",
+      audit_verdict: "MARGINAL",
+      original_audit_verdict: "MARGINAL",
       outcome_type: "OBSERVED",
       human_validated: false,
       summary: "Connection timeout spike during holiday campaign mitigated via connection pool doubling.",
@@ -379,14 +376,12 @@ export const DEFAULT_INC_002: InvestigationResult = {
   ],
   hypotheses: [
     {
-      hypothesis_id: "H1",
-      statement: "Checkout revenue loss is primarily driven by intermittent payment provider HTTP 500 errors.",
+      hypothesis_id: "H1", mechanism_tag: 'system_error', statement: "Checkout revenue loss is primarily driven by intermittent payment provider HTTP 500 errors.",
       supporting_evidence_ids: ["EV_gateway_intermittent_500"],
       contradictory_evidence_ids: ["EV_competitor_pricing_campaign"],
     },
     {
-      hypothesis_id: "H2",
-      statement: "Checkout revenue drop is primarily caused by competitor pricing campaign diverting paid acquisition traffic.",
+      hypothesis_id: "H2", mechanism_tag: 'system_error', statement: "Checkout revenue drop is primarily caused by competitor pricing campaign diverting paid acquisition traffic.",
       supporting_evidence_ids: ["EV_competitor_pricing_campaign"],
       contradictory_evidence_ids: ["EV_gateway_intermittent_500"],
     },
@@ -395,9 +390,9 @@ export const DEFAULT_INC_002: InvestigationResult = {
     {
       hypothesis_id: "H1",
       support_score: 0.62,
-      contradiction_penalty: 0.25,
-      final_score: 0.37,
-      confidence_state: "MEDIUM",
+      contradiction_score: 0.25,
+      rule_score: 0.37, final_audit_score: 0.37, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "MARGINAL",
       rule_results: [
         { rule_name: "timeline", verdict: "pass", rationale: "Matches start of error elevation." },
         { rule_name: "contradiction", verdict: "partial", rationale: "Competitor campaign explains drop in add-to-cart volume." },
@@ -406,9 +401,9 @@ export const DEFAULT_INC_002: InvestigationResult = {
     {
       hypothesis_id: "H2",
       support_score: 0.58,
-      contradiction_penalty: 0.22,
-      final_score: 0.36,
-      confidence_state: "MEDIUM",
+      contradiction_score: 0.22,
+      rule_score: 0.36, final_audit_score: 0.36, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "MARGINAL",
       rule_results: [
         { rule_name: "timeline", verdict: "pass", rationale: "Campaign launch at 12:00 matches traffic dip." },
         { rule_name: "contradiction", verdict: "partial", rationale: "Gateway errors are also elevated simultaneously." },
@@ -571,8 +566,7 @@ export const DEFAULT_INC_006: InvestigationResult = {
   ],
   hypotheses: [
     {
-      hypothesis_id: "H1",
-      statement: "Compound failure: Upstream WAN packet loss triggered an un-jittered client retry storm that saturated the internal auth-proxy service mesh.",
+      hypothesis_id: "H1", mechanism_tag: 'system_error', statement: "Compound failure: Upstream WAN packet loss triggered an un-jittered client retry storm that saturated the internal auth-proxy service mesh.",
       supporting_evidence_ids: ["EV_upstream_packet_loss", "EV_auth_retry_storm"],
       contradictory_evidence_ids: [],
     },
@@ -581,9 +575,9 @@ export const DEFAULT_INC_006: InvestigationResult = {
     {
       hypothesis_id: "H1",
       support_score: 0.92,
-      contradiction_penalty: 0.0,
-      final_score: 0.92,
-      confidence_state: "HIGH",
+      contradiction_score: 0.0,
+      rule_score: 0.92, final_audit_score: 0.92, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "VERIFIED",
       rule_results: [
         { rule_name: "timeline", verdict: "pass", rationale: "WAN drop at 10:05 preceded auth retry storm at 10:08." },
         { rule_name: "mechanism_consistency", verdict: "pass", rationale: "Corroborated by thread pool saturation logs." },
@@ -646,8 +640,7 @@ export const DEFAULT_INC_007: InvestigationResult = {
   ],
   hypotheses: [
     {
-      hypothesis_id: "H1",
-      statement: "Worker memory exhaustion is driven by an unreleased byte buffer leak in the background event ingestion pipeline.",
+      hypothesis_id: "H1", mechanism_tag: 'system_error', statement: "Worker memory exhaustion is driven by an unreleased byte buffer leak in the background event ingestion pipeline.",
       supporting_evidence_ids: ["EV_buffer_leak_telemetry"],
       contradictory_evidence_ids: [],
     },
@@ -656,9 +649,9 @@ export const DEFAULT_INC_007: InvestigationResult = {
     {
       hypothesis_id: "H1",
       support_score: 0.95,
-      contradiction_penalty: 0.0,
-      final_score: 0.95,
-      confidence_state: "HIGH",
+      contradiction_score: 0.0,
+      rule_score: 0.95, final_audit_score: 0.95, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "VERIFIED",
       rule_results: [
         { rule_name: "timeline", verdict: "pass", rationale: "Steady heap growth over 48 hours matches unreleased buffer leak profile." },
         { rule_name: "mechanism_consistency", verdict: "pass", rationale: "GC thrashing directly produces worker execution slowdown." },
@@ -721,8 +714,7 @@ export const DEFAULT_INC_008: InvestigationResult = {
   ],
   hypotheses: [
     {
-      hypothesis_id: "H1",
-      statement: "Enterprise SSO outage is caused by an expired SAML signing certificate on the service provider assertion consumer endpoint.",
+      hypothesis_id: "H1", mechanism_tag: 'system_error', statement: "Enterprise SSO outage is caused by an expired SAML signing certificate on the service provider assertion consumer endpoint.",
       supporting_evidence_ids: ["EV_saml_cert_expiry"],
       contradictory_evidence_ids: [],
     },
@@ -731,9 +723,9 @@ export const DEFAULT_INC_008: InvestigationResult = {
     {
       hypothesis_id: "H1",
       support_score: 0.98,
-      contradiction_penalty: 0.0,
-      final_score: 0.98,
-      confidence_state: "HIGH",
+      contradiction_score: 0.0,
+      rule_score: 0.98, final_audit_score: 0.98, evidence_sufficiency_score: 1.0, evidence_sufficiency_level: 'STRONG',
+      audit_verdict: "VERIFIED",
       rule_results: [
         { rule_name: "timeline", verdict: "pass", rationale: "Certificate expiry at 00:00 matches immediate 100% rejection." },
         { rule_name: "mechanism_consistency", verdict: "pass", rationale: "Crypto verification failure halts token issuance." },

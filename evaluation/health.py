@@ -323,8 +323,8 @@ def evaluate_high_confidence_rate(
         for r in records:
             scored = r.get("scored", [])
             if scored:
-                top = max(scored, key=lambda s: s.get("final_score", 0.0))
-                if str(top.get("confidence_state", "")).lower() == "high":
+                top = max(scored, key=lambda s: s.get("final_audit_score", 0.0))
+                if str(top.get("audit_verdict", "")).lower() == "high":
                     cnt += 1
         return cnt
 

@@ -65,7 +65,6 @@ This document serves as the central tracking register for all architectural issu
 - **Summary**: Scripted recovery curves in E8 should not be stored as factual historical outcomes in E9 memory.
 - **Current State**: `outcome_type: SIMULATED` provenance tags enforced; excluded from factual summary retrieval.
 
-### [`ISSUE-009`](./ISSUE-009-chromadb-hnsw-small-dataset-fallback.md): ChromaDB HNSW Index Array Contiguity
-- **Summary**: `collection.query()` in ChromaDB can throw `RuntimeError('Cannot return the results in a contigious 2D array')` when querying small collections ($N \le 15$) with `$in` metadata filters.
-- **Current State**: Operationally mitigated with fallback to `collection.get()`.
-- **Future Action**: Implement small-dataset exact cosine distance branch for collections with $N \le 50$ documents to eliminate the issue at source.
+### [`ISSUE-009`](./ISSUE-009-chromadb-hnsw-small-dataset-fallback.md): ChromaDB HNSW Index Array Contiguity on Filtered Subsets
+- **Summary**: `collection.query()` in ChromaDB threw `RuntimeError('Cannot return the results in a contigious 2D array')` when querying small collections or small filtered subsets under metadata `$in` filters.
+- **Resolution**: Implemented filtered-candidate exact-cosine branch ($\le 100$ items) in E4 and small-collection exact-cosine branch ($\le 50$ items) in E9. Completely eliminated synthetic 0.1 distances and HNSW contiguity exceptions. Verified across automated test suite and live ChromaDB instance.

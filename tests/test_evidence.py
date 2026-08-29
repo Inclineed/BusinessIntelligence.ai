@@ -704,11 +704,18 @@ class TestAssembleEvidenceUnstructured:
         chroma.get_collection.return_value = collection
 
         doc_ids = [f"doc_{i}" for i in range(n)]
-        collection.query.return_value = {
+        query_result = {
             "ids": [doc_ids],
             "documents": [[f"Support ticket about payment failure {i}" for i in range(n)]],
             "metadatas": [[{"source": source_id}] * n],
             "distances": [[0.1 * i for i in range(n)]],
+        }
+        collection.query.return_value = query_result
+        collection.get.return_value = {
+            "ids": doc_ids,
+            "documents": [f"Support ticket about payment failure {i}" for i in range(n)],
+            "metadatas": [{"source": source_id}] * n,
+            "embeddings": None,
         }
         return chroma
 
@@ -785,6 +792,12 @@ class TestAssembleEvidenceUnstructured:
             "documents": [["some text"]],
             "metadatas": [[{"source": "ghost"}]],
             "distances": [[0.1]],
+        }
+        collection.get.return_value = {
+            "ids": ["d1"],
+            "documents": ["some text"],
+            "metadatas": [{"source": "ghost"}],
+            "embeddings": None,
         }
 
         result = assemble_evidence(

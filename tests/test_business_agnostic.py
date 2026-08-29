@@ -21,7 +21,7 @@ from models import (
     AnomalySignal,
     BusinessMateriality,
     CanonicalEvidenceRecord,
-    ConfidenceState,
+    AuditVerdict,
     DimensionContribution,
     EvidenceCitation,
     ExtractionResult,
@@ -256,10 +256,10 @@ def test_synthetic_non_retail_scenario_structural_equivalence() -> None:
     assert mat.priority_rank == 1
 
     # 8. Assert structural equivalence
-    assert hasattr(challenge_result, "final_score")
-    assert hasattr(challenge_result, "confidence_state")
+    assert hasattr(challenge_result, "final_audit_score")
+    assert hasattr(challenge_result, "audit_verdict")
     assert hasattr(challenge_result, "rule_results")
-    assert isinstance(challenge_result.confidence_state, ConfidenceState)
+    assert isinstance(challenge_result.audit_verdict, AuditVerdict)
     assert len(challenge_result.rule_results) == 5
     for r in challenge_result.rule_results:
         assert isinstance(r.verdict, RuleVerdict)

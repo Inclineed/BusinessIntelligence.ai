@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 from models import (
     AnomalySignal,
-    ConfidenceState,
+    AuditVerdict,
     DimensionContribution,
     Evidence,
     Hypothesis,
@@ -530,7 +530,9 @@ def investigate(
                     window_end=window_end,
                 )
                 contributions = diagnostic_result.contributions
-                safe_print(f"\033[95m[E3 DIAGNOSTIC]\033[0m Decomposed primary anomaly '{primary_sig.kpi_id}' into {len(contributions)} segment(s)")
+                pri_rank = next((m.priority_rank for m in materiality if m.kpi_id == primary_sig.kpi_id), None)
+                pri_str = f" (Materiality Priority #{pri_rank})" if pri_rank is not None else ""
+                safe_print(f"\033[95m[E3 DIAGNOSTIC]\033[0m Decomposed segmentable anomaly '{primary_sig.kpi_id}'{pri_str} into {len(contributions)} segment(s)")
                 if diagnostic_result.errors:
                     for err in diagnostic_result.errors:
                         logger.warning("investigate [E3] error: %s", err)
@@ -672,13 +674,13 @@ def investigate(
                 telemetry=telemetry_svc.live_telemetry,
             )
         safe_print(f"\033[93m[E6 CHALLENGE]\033[0m Scored {len(challenge_result.scored_hypotheses)} hypothesis/hypotheses across 5 verification rules")
-        safe_print(f"   * Confidence: {challenge_result.overall_confidence.value.upper()} | Winner: {challenge_result.winning_hypothesis_id} | Abstained: {challenge_result.abstained}")
+        safe_print(f"   * Verdict: {challenge_result.overall_verdict.value.upper()} | Winner: {challenge_result.winning_hypothesis_id} | Abstained: {challenge_result.abstained}")
     else:
         from engines.challenge import ChallengeResult
         challenge_result = ChallengeResult(
             scored_hypotheses=[],
             winning_hypothesis_id=None,
-            overall_confidence=ConfidenceState.ABSTAIN,
+            overall_verdict=AuditVerdict.ABSTAIN,
             abstained=True,
         )
 
@@ -691,7 +693,7 @@ def investigate(
         _check_deterministic_engine_output(
             "challenge",
             sh.method,
-            {"final_score": sh.final_score, "support_score": sh.support_score},
+            {"final_audit_score": sh.final_audit_score, "support_score": sh.support_score},
             method_violations,
         )
 

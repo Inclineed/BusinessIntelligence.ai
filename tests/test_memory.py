@@ -32,7 +32,7 @@ from engines.memory import (
     retrieve_precedents,
 )
 from models import (
-    ConfidenceState,
+    AuditVerdict,
     Decision,
     InvestigationResult,
     MethodTag,
@@ -64,8 +64,8 @@ def _make_result(
     )
     scored = ScoredHypothesis(
         hypothesis_id="H1",
-        final_score=0.85,
-        confidence_state=ConfidenceState.HIGH,
+        final_audit_score=0.85,
+        audit_verdict=AuditVerdict.VERIFIED,
     )
     return InvestigationResult(
         scenario_id=scenario_id,
@@ -99,8 +99,10 @@ def _make_chroma_client(
     """
     Return a mock ChromaDB client.
 
-    The collection's query() returns the given ids/distances/metadatas/documents.
+    The collection's query() and get() return the given ids/distances/metadatas/documents.
     """
+    import numpy as np
+
     collection = MagicMock()
     collection.count.return_value = count
 
@@ -109,13 +111,42 @@ def _make_chroma_client(
     else:
         collection.upsert.return_value = None
 
+    ids_list = query_ids or []
+    distances_list = query_distances or [0.1 * i for i in range(len(ids_list))]
+    metadatas_list = query_metadatas or [{}] * len(ids_list)
+    documents_list = query_documents or [f"Doc {i}" for i in range(len(ids_list))]
+
+    # Generate synthetic embeddings that produce exact query_distances when dotted with q_vec=[0.1, 0.2, 0.3]
+    q_raw = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+    q = q_raw / np.linalg.norm(q_raw)
+    rand_vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    if abs(np.dot(rand_vec, q)) > 0.9:
+        rand_vec = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    u = rand_vec - np.dot(rand_vec, q) * q
+    u = u / np.linalg.norm(u)
+
+    embeddings_list = []
+    for d in distances_list:
+        s = 1.0 - float(d)
+        y = float(np.sqrt(max(0.0, 1.0 - s**2)))
+        doc_vec = (s * q + y * u).tolist()
+        embeddings_list.append(doc_vec)
+
     query_result = {
-        "ids": [query_ids or []],
-        "distances": [query_distances or []],
-        "metadatas": [query_metadatas or []],
-        "documents": [query_documents or []],
+        "ids": [ids_list],
+        "distances": [distances_list],
+        "metadatas": [metadatas_list],
+        "documents": [documents_list],
     }
     collection.query.return_value = query_result
+
+    get_result = {
+        "ids": ids_list,
+        "metadatas": metadatas_list,
+        "documents": documents_list,
+        "embeddings": embeddings_list,
+    }
+    collection.get.return_value = get_result
 
     client = MagicMock()
     client.get_or_create_collection.return_value = collection
@@ -311,7 +342,7 @@ def test_retrieve_precedents_filters_below_threshold():
             "scenario_id": "OLD_001",
             "winning_hypothesis": "H1",
             "recommendation": "Fix it.",
-            "confidence_state": "high",
+            "audit_verdict": "high",
             "timestamp": "2024-01-01T00:00:00+00:00",
             "summary": "Old scenario.",
         }],
@@ -336,7 +367,7 @@ def test_retrieve_precedents_includes_above_threshold():
             "scenario_id": "PREV_001",
             "winning_hypothesis": "H1",
             "recommendation": "Roll back v4.3.",
-            "confidence_state": "high",
+            "audit_verdict": "high",
             "outcome_type": "observed",
             "timestamp": "2024-01-01T00:00:00+00:00",
             "summary": "Previous payment degradation.",
@@ -367,7 +398,7 @@ def test_retrieve_precedents_stamps_retrieval_tag():
             "scenario_id": "PREV_001",
             "winning_hypothesis": "H1",
             "recommendation": "Rollback.",
-            "confidence_state": "high",
+            "audit_verdict": "high",
             "outcome_type": "observed",
             "timestamp": "2024-01-01T00:00:00+00:00",
             "summary": "Prior investigation.",
@@ -395,11 +426,11 @@ def test_retrieve_precedents_sorted_by_relevance_descending():
         query_distances=[0.5, 0.1, 0.3],  # relevances: 0.75, 0.95, 0.85
         query_metadatas=[
             {"scenario_id": "A", "winning_hypothesis": "", "recommendation": "",
-             "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": "A"},
+             "audit_verdict": "", "outcome_type": "observed", "timestamp": "", "summary": "A"},
             {"scenario_id": "B", "winning_hypothesis": "", "recommendation": "",
-             "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": "B"},
+             "audit_verdict": "", "outcome_type": "observed", "timestamp": "", "summary": "B"},
             {"scenario_id": "C", "winning_hypothesis": "", "recommendation": "",
-             "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": "C"},
+             "audit_verdict": "", "outcome_type": "observed", "timestamp": "", "summary": "C"},
         ],
         query_documents=["A", "B", "C"],
     )
@@ -424,7 +455,7 @@ def test_retrieve_precedents_respects_max_results():
     distances = [0.1] * n  # all above threshold
     metadatas = [
         {"scenario_id": s, "winning_hypothesis": "", "recommendation": "",
-         "confidence_state": "", "outcome_type": "observed", "timestamp": "", "summary": s}
+         "audit_verdict": "", "outcome_type": "observed", "timestamp": "", "summary": s}
         for s in ids
     ]
     documents = ids
@@ -486,8 +517,8 @@ class TestMemoryContaminationRemediation:
     def setup_method(self):
         self.provider = _make_llm_provider("Investigation summary.")
 
-    def _make_result_with_state(self, scenario_id: str, state: ConfidenceState) -> InvestigationResult:
-        abstained = (state == ConfidenceState.ABSTAIN)
+    def _make_result_with_state(self, scenario_id: str, state: AuditVerdict) -> InvestigationResult:
+        abstained = (state == AuditVerdict.ABSTAIN)
         decision = Decision(
             abstained=abstained,
             recommended_action=None if abstained else "Action",
@@ -498,8 +529,8 @@ class TestMemoryContaminationRemediation:
         scored = [
             ScoredHypothesis(
                 hypothesis_id="H1",
-                final_score=0.9 if state == ConfidenceState.HIGH else (0.6 if state == ConfidenceState.MEDIUM else (0.2 if state == ConfidenceState.LOW else 0.0)),
-                confidence_state=state,
+                final_audit_score=0.9 if state == AuditVerdict.VERIFIED else (0.6 if state == AuditVerdict.MARGINAL else (0.2 if state == AuditVerdict.REJECTED else 0.0)),
+                audit_verdict=state,
             )
         ]
         return InvestigationResult(
@@ -511,47 +542,47 @@ class TestMemoryContaminationRemediation:
         )
 
     def test_a_high_outcomes_are_stored(self):
-        """Test A: HIGH confidence outcomes are stored with confidence_state=high."""
+        """Test A: HIGH confidence outcomes are stored with audit_verdict=verified."""
         chroma = _make_chroma_client()
         engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
-        res = self._make_result_with_state("INC_HIGH", ConfidenceState.HIGH)
+        res = self._make_result_with_state("INC_HIGH", AuditVerdict.VERIFIED)
         assert engine.store_precedent(res) is True
         col = chroma.get_or_create_collection.return_value
         meta = col.upsert.call_args.kwargs["metadatas"][0]
-        assert meta["confidence_state"] == "high"
+        assert meta["audit_verdict"] == "verified"
         assert meta["outcome_type"] == "observed"
 
     def test_b_medium_outcomes_are_stored(self):
-        """Test B: MEDIUM confidence outcomes are stored with confidence_state=medium."""
+        """Test B: MEDIUM confidence outcomes are stored with audit_verdict=marginal."""
         chroma = _make_chroma_client()
         engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
-        res = self._make_result_with_state("INC_MED", ConfidenceState.MEDIUM)
+        res = self._make_result_with_state("INC_MED", AuditVerdict.MARGINAL)
         assert engine.store_precedent(res) is True
         col = chroma.get_or_create_collection.return_value
         meta = col.upsert.call_args.kwargs["metadatas"][0]
-        assert meta["confidence_state"] == "medium"
+        assert meta["audit_verdict"] == "marginal"
 
     def test_c_low_outcomes_are_stored(self):
-        """Test C: LOW confidence outcomes are stored with confidence_state=low."""
+        """Test C: LOW confidence outcomes are stored with audit_verdict=rejected."""
         chroma = _make_chroma_client()
         engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
-        res = self._make_result_with_state("INC_LOW", ConfidenceState.LOW)
+        res = self._make_result_with_state("INC_LOW", AuditVerdict.REJECTED)
         assert engine.store_precedent(res) is True
         col = chroma.get_or_create_collection.return_value
         meta = col.upsert.call_args.kwargs["metadatas"][0]
-        assert meta["confidence_state"] == "low"
+        assert meta["audit_verdict"] == "rejected"
 
     def test_d_abstain_outcomes_are_stored(self):
-        """Test D: ABSTAIN outcomes are stored with confidence_state=abstain."""
+        """Test D: ABSTAIN outcomes are stored with audit_verdict=abstain."""
         chroma = _make_chroma_client()
         engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
-        res = self._make_result_with_state("INC_ABSTAIN", ConfidenceState.ABSTAIN)
+        res = self._make_result_with_state("INC_ABSTAIN", AuditVerdict.ABSTAIN)
         assert engine.store_precedent(res) is True
         col = chroma.get_or_create_collection.return_value
         meta = col.upsert.call_args.kwargs["metadatas"][0]
-        assert meta["confidence_state"] == "abstain"
+        assert meta["audit_verdict"] == "abstain"
 
-    def test_e_retrieved_precedents_preserve_original_confidence_state(self):
+    def test_e_retrieved_precedents_preserve_original_audit_verdict(self):
         """Test E: Retrieved precedents preserve their original confidence state and retrieval weight."""
         chroma = _make_chroma_client(
             count=1,
@@ -559,8 +590,8 @@ class TestMemoryContaminationRemediation:
             query_distances=[0.2],  # relevance 0.9
             query_metadatas=[{
                 "scenario_id": "INC_002",
-                "confidence_state": "abstain",
-                "original_confidence_state": "abstain",
+                "audit_verdict": "abstain",
+                "original_audit_verdict": "abstain",
                 "outcome_type": "observed",
                 "summary": "Simultaneous causes caused abstention.",
             }],
@@ -570,8 +601,8 @@ class TestMemoryContaminationRemediation:
         results = engine.retrieve_precedents("INC_002")
         assert len(results) == 1
         p = results[0]
-        assert p["confidence_state"] == "abstain"
-        assert p["original_confidence_state"] == "abstain"
+        assert p["audit_verdict"] == "abstain"
+        assert p["original_audit_verdict"] == "abstain"
         assert p["retrieval_weight"] == 0.2
         assert p["retrieval_score"] == round(0.9 * 0.2, 4)
 
@@ -582,10 +613,10 @@ class TestMemoryContaminationRemediation:
             query_ids=["P_LOW", "P_HIGH", "P_ABSTAIN", "P_MED"],
             query_distances=[0.2, 0.2, 0.2, 0.2],  # identical distance / relevance = 0.9
             query_metadatas=[
-                {"scenario_id": "P_LOW", "confidence_state": "low", "outcome_type": "observed"},
-                {"scenario_id": "P_HIGH", "confidence_state": "high", "outcome_type": "observed"},
-                {"scenario_id": "P_ABSTAIN", "confidence_state": "abstain", "outcome_type": "observed"},
-                {"scenario_id": "P_MED", "confidence_state": "medium", "outcome_type": "observed"},
+                {"scenario_id": "P_LOW", "audit_verdict": "low", "outcome_type": "observed"},
+                {"scenario_id": "P_HIGH", "audit_verdict": "high", "outcome_type": "observed"},
+                {"scenario_id": "P_ABSTAIN", "audit_verdict": "abstain", "outcome_type": "observed"},
+                {"scenario_id": "P_MED", "audit_verdict": "medium", "outcome_type": "observed"},
             ],
             query_documents=["Low", "High", "Abstain", "Med"],
         )
@@ -603,14 +634,14 @@ class TestMemoryContaminationRemediation:
             count=1,
             query_ids=["P_ABSTAIN"],
             query_distances=[0.1],  # relevance 0.95
-            query_metadatas=[{"scenario_id": "P_ABSTAIN", "confidence_state": "abstain", "outcome_type": "observed"}],
+            query_metadatas=[{"scenario_id": "P_ABSTAIN", "audit_verdict": "abstain", "outcome_type": "observed"}],
             query_documents=["Ambiguous scenario text"],
         )
         engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
         results = engine.retrieve_precedents("QUERY")
         assert len(results) == 1
         assert results[0]["scenario_id"] == "P_ABSTAIN"
-        assert results[0]["confidence_state"] == "abstain"
+        assert results[0]["audit_verdict"] == "abstain"
 
     def test_h_simulated_outcomes_excluded_from_normal_precedent_retrieval(self):
         """Test H: SIMULATED outcomes are excluded from standard observed precedent retrieval."""
@@ -620,8 +651,8 @@ class TestMemoryContaminationRemediation:
             query_ids=["OBS_1", "SIM_1"],
             query_distances=[0.1, 0.1],
             query_metadatas=[
-                {"scenario_id": "OBS_1", "confidence_state": "high", "outcome_type": OutcomeType.OBSERVED.value},
-                {"scenario_id": "SIM_1", "confidence_state": "high", "outcome_type": OutcomeType.SIMULATED.value},
+                {"scenario_id": "OBS_1", "audit_verdict": "high", "outcome_type": OutcomeType.OBSERVED.value},
+                {"scenario_id": "SIM_1", "audit_verdict": "high", "outcome_type": OutcomeType.SIMULATED.value},
             ],
             query_documents=["Observed", "Simulated projection"],
         )
@@ -734,18 +765,18 @@ class TestMemoryContaminationRemediation:
             query_metadatas=[
                 {
                     "scenario_id": "LEGACY_NO_KEY",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "summary": "Legacy record without outcome_type key.",
                 },
                 {
                     "scenario_id": "LEGACY_UNKNOWN",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "unknown",
                     "summary": "Record with unknown outcome_type.",
                 },
                 {
                     "scenario_id": "VALID_OBSERVED",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "summary": "Properly tagged observed precedent.",
                 },
@@ -764,10 +795,10 @@ class TestMemoryContaminationRemediation:
         assert results[0]["scenario_id"] == "VALID_OBSERVED"
         assert results[0]["outcome_type"] == "observed"
 
-        # Verify ChromaDB query does NOT use where filter (eliminated for performance)
+        # Verify ChromaDB small-collection exact-cosine branch calls get() without where filter
         collection = chroma.get_or_create_collection.return_value
-        collection.query.assert_called_once()
-        assert collection.query.call_args.kwargs.get("where") is None
+        collection.get.assert_called_once()
+        assert collection.get.call_args.kwargs.get("where") is None
 
 
 # ---------------------------------------------------------------------------
@@ -780,8 +811,8 @@ class TestPhase3HumanValidation:
     def setup_method(self):
         self.provider = _make_llm_provider("Investigation summary.")
 
-    def _make_result_with_state(self, scenario_id: str, state: ConfidenceState) -> InvestigationResult:
-        abstained = (state == ConfidenceState.ABSTAIN)
+    def _make_result_with_state(self, scenario_id: str, state: AuditVerdict) -> InvestigationResult:
+        abstained = (state == AuditVerdict.ABSTAIN)
         decision = Decision(
             abstained=abstained,
             recommended_action=None if abstained else "Action",
@@ -792,8 +823,8 @@ class TestPhase3HumanValidation:
         scored = [
             ScoredHypothesis(
                 hypothesis_id="H1",
-                final_score=0.9 if state == ConfidenceState.HIGH else 0.5,
-                confidence_state=state,
+                final_audit_score=0.9 if state == AuditVerdict.VERIFIED else 0.5,
+                audit_verdict=state,
             )
         ]
         return InvestigationResult(
@@ -808,7 +839,7 @@ class TestPhase3HumanValidation:
         """Test L: Stored precedents default to human_validated=False, validated_at=''."""
         chroma = _make_chroma_client()
         engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
-        res = self._make_result_with_state("INC_VAL_L", ConfidenceState.HIGH)
+        res = self._make_result_with_state("INC_VAL_L", AuditVerdict.VERIFIED)
         assert engine.store_precedent(res) is True
         col = chroma.get_or_create_collection.return_value
         meta = col.upsert.call_args.kwargs["metadatas"][0]
@@ -824,8 +855,8 @@ class TestPhase3HumanValidation:
             "ids": ["INC_VAL_M"],
             "metadatas": [{
                 "scenario_id": "INC_VAL_M",
-                "confidence_state": "high",
-                "original_confidence_state": "high",
+                "audit_verdict": "high",
+                "original_audit_verdict": "high",
                 "human_validated": False,
                 "validated_at": "",
             }],
@@ -839,8 +870,8 @@ class TestPhase3HumanValidation:
         assert updated_meta["human_validated"] is True
         assert updated_meta["validated_at"] == ts.isoformat()
         # Confidence NOT altered
-        assert updated_meta["confidence_state"] == "high"
-        assert updated_meta["original_confidence_state"] == "high"
+        assert updated_meta["audit_verdict"] == "high"
+        assert updated_meta["original_audit_verdict"] == "high"
 
     def test_n_human_validated_ranks_higher_than_unvalidated(self):
         """Test N: Human-validated precedent ranks above unvalidated with identical relevance/confidence."""
@@ -851,14 +882,14 @@ class TestPhase3HumanValidation:
             query_metadatas=[
                 {
                     "scenario_id": "VALIDATED",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "human_validated": True,
                     "validated_at": "2026-06-01T00:00:00+00:00",
                 },
                 {
                     "scenario_id": "UNVALIDATED",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "human_validated": False,
                     "validated_at": "",
@@ -884,16 +915,16 @@ class TestPhase3HumanValidation:
             query_metadatas=[
                 {
                     "scenario_id": "HV_HIGH",
-                    "confidence_state": "high",
-                    "original_confidence_state": "high",
+                    "audit_verdict": "high",
+                    "original_audit_verdict": "high",
                     "outcome_type": "observed",
                     "human_validated": True,
                     "validated_at": "2026-06-01T00:00:00+00:00",
                 },
                 {
                     "scenario_id": "UV_HIGH",
-                    "confidence_state": "high",
-                    "original_confidence_state": "high",
+                    "audit_verdict": "high",
+                    "original_audit_verdict": "high",
                     "outcome_type": "observed",
                     "human_validated": False,
                     "validated_at": "",
@@ -906,7 +937,7 @@ class TestPhase3HumanValidation:
         hv = next(r for r in results if r["scenario_id"] == "HV_HIGH")
         uv = next(r for r in results if r["scenario_id"] == "UV_HIGH")
         # Both are HIGH confidence, but distinguishable by human_validated
-        assert hv["confidence_state"] == uv["confidence_state"] == "high"
+        assert hv["audit_verdict"] == uv["audit_verdict"] == "high"
         assert hv["human_validated"] is True
         assert uv["human_validated"] is False
         # Scores differ due to validation boost
@@ -920,7 +951,7 @@ class TestPhase3HumanValidation:
             query_distances=[0.2],
             query_metadatas=[{
                 "scenario_id": "LEGACY_P",
-                "confidence_state": "high",
+                "audit_verdict": "high",
                 "outcome_type": "observed",
                 # No human_validated or validated_at keys
             }],
@@ -961,7 +992,7 @@ class TestPhase4DomainExpiry:
             query_distances=[0.2],
             query_metadatas=[{
                 "scenario_id": "RECENT_Q",
-                "confidence_state": "high",
+                "audit_verdict": "high",
                 "outcome_type": "observed",
                 "created_at": recent,
                 "source_id": "payment_gateway",
@@ -985,7 +1016,7 @@ class TestPhase4DomainExpiry:
             query_distances=[0.2],
             query_metadatas=[{
                 "scenario_id": "OLD_R",
-                "confidence_state": "high",
+                "audit_verdict": "high",
                 "outcome_type": "observed",
                 "created_at": old,
                 "source_id": "payment_gateway",  # TTL = 60 days
@@ -1014,14 +1045,14 @@ class TestPhase4DomainExpiry:
             query_metadatas=[
                 {
                     "scenario_id": "MKTG_S",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "created_at": marketing_ts,
                     "source_id": "marketing",
                 },
                 {
                     "scenario_id": "DEPLOY_S",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "created_at": deploy_ts,
                     "source_id": "deployment_log",
@@ -1044,7 +1075,7 @@ class TestPhase4DomainExpiry:
             query_distances=[0.2],
             query_metadatas=[{
                 "scenario_id": "NO_TS_T",
-                "confidence_state": "high",
+                "audit_verdict": "high",
                 "outcome_type": "observed",
                 # No created_at key
             }],
@@ -1101,7 +1132,7 @@ class TestPhase4DomainExpiry:
             query_distances=[0.2],
             query_metadatas=[{
                 "scenario_id": "ANCIENT_V",
-                "confidence_state": "high",
+                "audit_verdict": "high",
                 "outcome_type": "observed",
                 "created_at": very_old,
             }],
@@ -1171,21 +1202,21 @@ class TestMemoryEngineAuthorizationProvenance:
                 {
                     "scenario_id": "INC_006",
                     "source_ids": "payment_gateway,deployment_log,support_tickets",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "summary": "Payment gateway connection regression.",
                 },
                 {
                     "scenario_id": "INC_005",
                     "source_ids": "orders,inventory",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "summary": "Inventory stockout across key catalog SKUs.",
                 },
                 {
                     "scenario_id": "INC_008",
                     "source_ids": "release_notes,support_tickets",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "summary": "SSO authentication failure on enterprise tenant.",
                 },
@@ -1223,21 +1254,21 @@ class TestMemoryEngineAuthorizationProvenance:
                 {
                     "scenario_id": "INC_006",
                     "source_ids": "payment_gateway,deployment_log,support_tickets",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "summary": "Payment gateway connection regression.",
                 },
                 {
                     "scenario_id": "INC_005",
                     "source_ids": "orders,inventory",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "summary": "Inventory stockout across key catalog SKUs.",
                 },
                 {
                     "scenario_id": "INC_008",
                     "source_ids": "release_notes,support_tickets",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "summary": "SSO authentication failure.",
                 },
@@ -1266,7 +1297,7 @@ class TestMemoryEngineAuthorizationProvenance:
             query_metadatas=[{
                 "scenario_id": "INC_006",
                 "source_ids": "payment_gateway",
-                "confidence_state": "high",
+                "audit_verdict": "high",
                 "outcome_type": "observed",
             }],
             query_documents=["Payment issue."],
@@ -1290,14 +1321,14 @@ class TestMemoryEngineAuthorizationProvenance:
             query_metadatas=[
                 {
                     "scenario_id": "LEGACY_NO_PROV",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "",  # missing provenance
                     "summary": "Legacy incident without source provenance.",
                 },
                 {
                     "scenario_id": "VERIFIED_CFO",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders,inventory",  # verified provenance
                     "summary": "Verified inventory stockout precedent.",
@@ -1333,28 +1364,28 @@ class TestMemoryEngineAuthorizationProvenance:
             query_metadatas=[
                 {
                     "scenario_id": "PREC_A",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                     "summary": "Highly relevant confirmed root cause.",
                 },
                 {
                     "scenario_id": "PREC_B",
-                    "confidence_state": "abstain",
+                    "audit_verdict": "abstain",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                     "summary": "Highly relevant ambiguous investigation.",
                 },
                 {
                     "scenario_id": "PREC_C",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                     "summary": "Moderately relevant confirmed root cause.",
                 },
                 {
                     "scenario_id": "PREC_D",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                     "summary": "Irrelevant historical incident below threshold.",
@@ -1377,15 +1408,15 @@ class TestMemoryEngineAuthorizationProvenance:
 
         assert prec_a["relevance"] == pytest.approx(0.90, abs=0.01)
         assert prec_a["retrieval_score"] == pytest.approx(0.90, abs=0.01)
-        assert prec_a["confidence_state"] == "high"
+        assert prec_a["audit_verdict"] == "high"
 
         assert prec_c["relevance"] == pytest.approx(0.70, abs=0.01)
         assert prec_c["retrieval_score"] == pytest.approx(0.70, abs=0.01)
-        assert prec_c["confidence_state"] == "high"
+        assert prec_c["audit_verdict"] == "high"
 
         assert prec_b["relevance"] == pytest.approx(0.92, abs=0.01)
         assert prec_b["retrieval_score"] == pytest.approx(0.184, abs=0.01)
-        assert prec_b["confidence_state"] == "abstain"
+        assert prec_b["audit_verdict"] == "abstain"
 
 
 # ---------------------------------------------------------------------------
@@ -1407,7 +1438,7 @@ class TestE9CandidatePoolOversampling:
             query_metadatas=[
                 {
                     "scenario_id": f"P_{i}",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                 }
@@ -1433,7 +1464,7 @@ class TestE9CandidatePoolOversampling:
             query_metadatas=[
                 {
                     "scenario_id": f"P_{i}",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                 }
@@ -1461,7 +1492,7 @@ class TestE9CandidatePoolOversampling:
             query_metadatas=[
                 {
                     "scenario_id": f"P_{i}",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                 }
@@ -1485,7 +1516,7 @@ class TestE9CandidatePoolOversampling:
             query_metadatas=[
                 {
                     "scenario_id": f"P_{i}",
-                    "confidence_state": "high",
+                    "audit_verdict": "high",
                     "outcome_type": "observed",
                     "source_ids": "orders",
                 }
@@ -1504,9 +1535,9 @@ class TestE9CandidatePoolOversampling:
             query_ids=["SIM_1", "UNK_2", "OBS_3"],
             query_distances=[0.05, 0.06, 0.07],
             query_metadatas=[
-                {"scenario_id": "SIM_1", "outcome_type": "simulated", "confidence_state": "high", "source_ids": "orders"},
-                {"scenario_id": "UNK_2", "outcome_type": "unknown", "confidence_state": "high", "source_ids": "orders"},
-                {"scenario_id": "OBS_3", "outcome_type": "observed", "confidence_state": "high", "source_ids": "orders"},
+                {"scenario_id": "SIM_1", "outcome_type": "simulated", "audit_verdict": "high", "source_ids": "orders"},
+                {"scenario_id": "UNK_2", "outcome_type": "unknown", "audit_verdict": "high", "source_ids": "orders"},
+                {"scenario_id": "OBS_3", "outcome_type": "observed", "audit_verdict": "high", "source_ids": "orders"},
             ],
             query_documents=["Sim", "Unk", "Obs"],
         )
@@ -1522,8 +1553,8 @@ class TestE9CandidatePoolOversampling:
             query_ids=["UNAUTH_1", "AUTH_2"],
             query_distances=[0.05, 0.10],
             query_metadatas=[
-                {"scenario_id": "UNAUTH_1", "outcome_type": "observed", "confidence_state": "high", "source_ids": "support_tickets,deployment_log"},
-                {"scenario_id": "AUTH_2", "outcome_type": "observed", "confidence_state": "high", "source_ids": "orders,inventory"},
+                {"scenario_id": "UNAUTH_1", "outcome_type": "observed", "audit_verdict": "high", "source_ids": "support_tickets,deployment_log"},
+                {"scenario_id": "AUTH_2", "outcome_type": "observed", "audit_verdict": "high", "source_ids": "orders,inventory"},
             ],
             query_documents=["Unauth", "Auth"],
         )
@@ -1540,14 +1571,14 @@ class TestE9CandidatePoolOversampling:
         noise_ids = [f"NOISE_{i}" for i in range(15)]
         noise_distances = [0.01 + i * 0.005 for i in range(15)] # highly similar noise
         noise_metas = [
-            {"scenario_id": f"NOISE_{i}", "outcome_type": "simulated", "confidence_state": "high", "source_ids": "orders"}
+            {"scenario_id": f"NOISE_{i}", "outcome_type": "simulated", "audit_verdict": "high", "source_ids": "orders"}
             for i in range(15)
         ]
 
         valid_ids = [f"VALID_{i}" for i in range(5)]
         valid_distances = [0.15 + i * 0.01 for i in range(5)]
         valid_metas = [
-            {"scenario_id": f"VALID_{i}", "outcome_type": "observed", "confidence_state": "high", "source_ids": "orders"}
+            {"scenario_id": f"VALID_{i}", "outcome_type": "observed", "audit_verdict": "high", "source_ids": "orders"}
             for i in range(5)
         ]
 

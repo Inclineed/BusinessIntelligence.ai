@@ -4,7 +4,7 @@ tests/test_fidelity.py — Citation fidelity and hallucination prevention tests 
 
 import pytest
 from models import (
-    ConfidenceState,
+    AuditVerdict,
     Decision,
     Evidence,
     EvidenceCitation,
@@ -108,8 +108,8 @@ def test_citation_violation_disqualifies_hypothesis():
         ],
     )
     score = score_hypothesis(h, {"ev_001": ev})
-    assert score.confidence == ConfidenceState.ABSTAIN
-    assert score.final_score == 0.0
+    assert score.confidence == AuditVerdict.ABSTAIN
+    assert score.final_audit_score == 0.0
     assert score.violations
 
 

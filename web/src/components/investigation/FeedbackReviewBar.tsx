@@ -50,7 +50,7 @@ export const FeedbackReviewBar: React.FC<FeedbackReviewBarProps> = ({ result, pe
         verdict: verdict,
         analyst_notes: notes.trim() || undefined,
         corrected_hypothesis_id: correctedHypothesis || undefined,
-        corrected_confidence_state: correctedConfidence || undefined,
+        corrected_audit_verdict: correctedConfidence || undefined,
         corrected_action: correctedAction || undefined,
         evidence_grounding_correct: true,
       })
@@ -179,9 +179,9 @@ export const FeedbackReviewBar: React.FC<FeedbackReviewBarProps> = ({ result, pe
                 className="w-full bg-[#1C1C1C] border border-[#2E2E2E] px-2 py-1.5 rounded text-xs text-[#F4EEE0] focus:outline-none"
               >
                 <option value="">No change</option>
-                <option value="HIGH">HIGH</option>
-                <option value="MEDIUM">MEDIUM</option>
-                <option value="LOW">LOW</option>
+                <option value="VERIFIED">HIGH</option>
+                <option value="MARGINAL">MEDIUM</option>
+                <option value="REJECTED">LOW</option>
                 <option value="ABSTAIN">ABSTAIN</option>
               </select>
             </div>

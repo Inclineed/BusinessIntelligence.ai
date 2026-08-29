@@ -25,8 +25,8 @@ export const HypothesisStudio: React.FC<HypothesisStudioProps> = ({ result, onOp
 
   const scoredMap = new Map(scored.map((s) => [s.hypothesis_id, s]))
   const sortedHypotheses = [...hypotheses].sort((a, b) => {
-    const scoreA = scoredMap.get(a.hypothesis_id)?.final_score || 0
-    const scoreB = scoredMap.get(b.hypothesis_id)?.final_score || 0
+    const scoreA = scoredMap.get(a.hypothesis_id)?.final_audit_score || 0
+    const scoreB = scoredMap.get(b.hypothesis_id)?.final_audit_score || 0
     return scoreB - scoreA
   })
 
@@ -70,16 +70,16 @@ export const HypothesisStudio: React.FC<HypothesisStudioProps> = ({ result, onOp
           const hid = hyp.hypothesis_id
           const sh = scoredMap.get(hid)
           const isWinner = hid === winnerId && !abstained
-          const score = sh?.final_score || 0
+          const score = sh?.final_audit_score || 0
           const support = sh?.support_score || 0
-          const penalty = sh?.contradiction_penalty || 0
-          const conf = (sh?.confidence_state || "LOW").toUpperCase()
+          const penalty = sh?.contradiction_score || 0
+          const conf = (sh?.audit_verdict || "REJECTED").toUpperCase()
           const cleanStmt = cleanLLMTags(hyp.statement)
 
           let confColor = "text-semantic-positive bg-semantic-positive-bg border-semantic-positive-border"
-          if (conf === "MEDIUM") {
+          if (conf === "MARGINAL") {
             confColor = "text-semantic-warning bg-semantic-warning-bg border-semantic-warning-border"
-          } else if (conf === "LOW") {
+          } else if (conf === "REJECTED") {
             confColor = "text-semantic-critical bg-semantic-critical-bg border-semantic-critical-border"
           }
 

@@ -12,8 +12,8 @@ export const SupportPenaltyChart: React.FC<SupportPenaltyChartProps> = ({ scored
   const data = scored.map((s) => ({
     hid: s.hypothesis_id,
     Support: Number(s.support_score.toFixed(2)),
-    Penalty: -Number(Math.abs(s.contradiction_penalty).toFixed(2)),
-    final: Number(s.final_score.toFixed(2)),
+    Penalty: -Number(Math.abs(s.contradiction_score).toFixed(2)),
+    final: Number(s.final_audit_score.toFixed(2)),
   }))
 
   const CustomTooltip = ({ active, payload }: any) => {

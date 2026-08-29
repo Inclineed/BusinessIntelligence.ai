@@ -35,7 +35,7 @@ from typing import Optional
 
 from models import (
     AnomalySignal,
-    ConfidenceState,
+    AuditVerdict,
     DimensionContribution,
     Evidence,
     InvestigationResult,
@@ -173,9 +173,9 @@ def _find_winning_hypothesis(result: InvestigationResult) -> Optional[ScoredHypo
     """Return the top-ranked non-abstained ScoredHypothesis, or None."""
     if not result.scored:
         return None
-    ranked = sorted(result.scored, key=lambda s: s.final_score, reverse=True)
+    ranked = sorted(result.scored, key=lambda s: s.final_audit_score, reverse=True)
     top = ranked[0]
-    if top.confidence_state == ConfidenceState.ABSTAIN:
+    if top.audit_verdict == AuditVerdict.ABSTAIN:
         return None
     return top
 
@@ -240,7 +240,7 @@ def _did_abstain(result: InvestigationResult) -> bool:
     """
     Determine whether the pipeline abstained for *result*.
 
-    Checks scored hypothesis confidence_state and decision.abstained flag.
+    Checks scored hypothesis audit_verdict and decision.abstained flag.
     Returns True when the top-ranked hypothesis has ABSTAIN confidence state,
     the decision flag is set, or no hypotheses were scored at all (guard
     scenarios where the pipeline stopped before the hypothesis engine).
@@ -249,8 +249,8 @@ def _did_abstain(result: InvestigationResult) -> bool:
     if not result.scored:
         return True
     # Top scored hypothesis is ABSTAIN
-    top = sorted(result.scored, key=lambda s: s.final_score, reverse=True)[0]
-    if top.confidence_state == ConfidenceState.ABSTAIN:
+    top = sorted(result.scored, key=lambda s: s.final_audit_score, reverse=True)[0]
+    if top.audit_verdict == AuditVerdict.ABSTAIN:
         return True
     # Decision-level abstain flag
     if result.decision is not None and getattr(result.decision, "abstained", False):
@@ -270,10 +270,10 @@ ALLOWED_CHECK_FIELDS = frozenset({
     "dominant_dimension",
     "true_hypothesis_in_top3",
     "true_hypothesis_rank",
-    "h1_confidence_state",
-    "h3_confidence_state",
+    "h1_audit_verdict",
+    "h3_audit_verdict",
     "h3_must_be_refuted",
-    "h2_confidence_state_max",
+    "h2_audit_verdict_max",
     "recommended_action_keywords",
     "verification_metric_required",
     "hallucinated_evidence_max",
@@ -289,7 +289,7 @@ ALLOWED_CHECK_FIELDS = frozenset({
     "data_quality_suspect_expected",
     "seasonal_pattern_expected",
     "gradual_degradation_expected",
-    "confidence_state",
+    "audit_verdict",
 })
 
 REQUIRED_CHECK_FIELDS = frozenset({
@@ -408,7 +408,7 @@ class Evaluator:
             d.dimension_id = dim_id; dim_id += 1
             dimensions.append(d)
             
-        if "h3_confidence_state" in checks:
+        if "h3_audit_verdict" in checks:
             d = self._dim_07_incorrect_hypothesis_challenged(result, scenario_gt)
             d.dimension_id = dim_id; dim_id += 1
             dimensions.append(d)
@@ -540,10 +540,10 @@ class Evaluator:
         conf_match = True
         did_abstain = _did_abstain(result)
         
-        if "confidence_state" in checks and result.scored:
+        if "audit_verdict" in checks and result.scored:
             winner_scored = next((s for s in result.scored if s.hypothesis_id == actual_winner), None)
-            expected_conf = checks["confidence_state"].lower()
-            actual_conf = winner_scored.confidence_state.value.lower() if winner_scored else ""
+            expected_conf = checks["audit_verdict"].lower()
+            actual_conf = winner_scored.audit_verdict.value.lower() if winner_scored else ""
             conf_match = (actual_conf == expected_conf)
             
         passed = winner_match and conf_match and not did_abstain
@@ -739,7 +739,7 @@ class Evaluator:
         detail = (
             f"{'✓' if passed else '✗'} winning hypothesis='{winner.hypothesis_id}' "
             f"is checkout/payment={'yes' if is_payment else 'no'} "
-            f"(score={winner.final_score:.3f})"
+            f"(score={winner.final_audit_score:.3f})"
         )
         return DimensionScore(6, "True hypothesis ranking (H1 wins)", score, passed, detail)
 
@@ -781,16 +781,16 @@ class Evaluator:
             )
 
         # The inventory hypothesis should be LOW (not HIGH or MEDIUM)
-        h3 = min(inventory_scored, key=lambda s: s.final_score)
+        h3 = min(inventory_scored, key=lambda s: s.final_audit_score)
         is_low = (
-            h3.confidence_state == ConfidenceState.LOW
-            or h3.final_score <= expected_h3_max
+            h3.audit_verdict == AuditVerdict.REJECTED
+            or h3.final_audit_score <= expected_h3_max
         )
         passed = is_low
         score = 1.0 if passed else 0.0
         detail = (
             f"{'✓' if passed else '✗'} inventory hypothesis '{h3.hypothesis_id}' "
-            f"confidence={h3.confidence_state.value} score={h3.final_score:.3f} "
+            f"confidence={h3.audit_verdict.value} score={h3.final_audit_score:.3f} "
             f"(expected LOW / score <= {expected_h3_max})"
         )
         return DimensionScore(7, "Incorrect hypothesis challenged (H3=LOW)", score, passed, detail)
@@ -853,13 +853,13 @@ class Evaluator:
     ) -> DimensionScore:
         """
         Dimension 9: Confidence correctness.
-        Winning hypothesis confidence_state is HIGH.
+        Winning hypothesis audit_verdict is HIGH.
         """
-        expected_state_str = scenario_gt.get("expected_confidence_state", "HIGH")
+        expected_state_str = scenario_gt.get("expected_audit_verdict", "VERIFIED")
         try:
-            expected_state = ConfidenceState(expected_state_str.lower())
+            expected_state = AuditVerdict(expected_state_str.lower())
         except ValueError:
-            expected_state = ConfidenceState.HIGH
+            expected_state = AuditVerdict.VERIFIED
 
         winner = _find_winning_hypothesis(result)
 
@@ -870,11 +870,11 @@ class Evaluator:
                 f"✗ no winning hypothesis (expected={expected_state.value})"
             )
 
-        passed = winner.confidence_state == expected_state
+        passed = winner.audit_verdict == expected_state
         score = 1.0 if passed else 0.0
         detail = (
             f"{'✓' if passed else '✗'} winning '{winner.hypothesis_id}' "
-            f"confidence={winner.confidence_state.value} "
+            f"confidence={winner.audit_verdict.value} "
             f"(expected={expected_state.value})"
         )
         return DimensionScore(9, "Confidence correctness (winner = HIGH)", score, passed, detail)
@@ -899,8 +899,8 @@ class Evaluator:
         )
         # Also check top scored hypothesis
         if result.scored:
-            top = sorted(result.scored, key=lambda s: s.final_score, reverse=True)[0]
-            did_abstain = top.confidence_state == ConfidenceState.ABSTAIN
+            top = sorted(result.scored, key=lambda s: s.final_audit_score, reverse=True)[0]
+            did_abstain = top.audit_verdict == AuditVerdict.ABSTAIN
 
         passed = did_abstain == abstain_expected
         score = 1.0 if passed else 0.0
@@ -1153,11 +1153,11 @@ class CalibrationReporter:
 
     def __init__(self) -> None:
         self.total_evaluated = 0
-        self.predictions: dict[ConfidenceState, dict[str, int]] = {
-            ConfidenceState.HIGH: {"correct": 0, "incorrect": 0},
-            ConfidenceState.MEDIUM: {"correct": 0, "incorrect": 0},
-            ConfidenceState.LOW: {"correct": 0, "incorrect": 0},
-            ConfidenceState.ABSTAIN: {"correct": 0, "incorrect": 0},
+        self.predictions: dict[AuditVerdict, dict[str, int]] = {
+            AuditVerdict.VERIFIED: {"correct": 0, "incorrect": 0},
+            AuditVerdict.MARGINAL: {"correct": 0, "incorrect": 0},
+            AuditVerdict.REJECTED: {"correct": 0, "incorrect": 0},
+            AuditVerdict.ABSTAIN: {"correct": 0, "incorrect": 0},
         }
 
     def add_result(self, result: InvestigationResult, eval_result: EvaluationResult, ground_truth: dict) -> None:
@@ -1166,7 +1166,7 @@ class CalibrationReporter:
         
         # Check if the pipeline abstained
         if _did_abstain(result):
-            pred_state = ConfidenceState.ABSTAIN
+            pred_state = AuditVerdict.ABSTAIN
             # If the ground truth expected an abstain or no action, it's correct
             checks = ground_truth.get("scenarios", {}).get(result.scenario_id, {}).get("evaluation_checks", {})
             expected_abstain = checks.get("abstain_expected", False) or checks.get("no_recommended_action", False)
@@ -1180,7 +1180,7 @@ class CalibrationReporter:
         if not winner:
             return
             
-        pred_state = winner.confidence_state
+        pred_state = winner.audit_verdict
         
         # Determine if it was structurally correct (passing D07)
         # Note: D07 includes confidence correctness in our strict eval, so we 
@@ -1206,7 +1206,7 @@ class CalibrationReporter:
             "--------------------------------------------------"
         ]
         
-        for state in [ConfidenceState.HIGH, ConfidenceState.MEDIUM, ConfidenceState.LOW, ConfidenceState.ABSTAIN]:
+        for state in [AuditVerdict.VERIFIED, AuditVerdict.MARGINAL, AuditVerdict.REJECTED, AuditVerdict.ABSTAIN]:
             stats = self.predictions[state]
             total_preds = stats["correct"] + stats["incorrect"]
             if total_preds > 0:
