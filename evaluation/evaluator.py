@@ -290,6 +290,17 @@ ALLOWED_CHECK_FIELDS = frozenset({
     "seasonal_pattern_expected",
     "gradual_degradation_expected",
     "audit_verdict",
+    "h1_confidence_state",
+    "h2_confidence_state",
+    "h3_confidence_state",
+    "h1_confidence_state_min",
+    "h2_confidence_state_max",
+    "h3_confidence_state_max",
+    "confidence_state",
+    "confidence_state_max",
+    "confidence_state_min",
+    "confidence_min",
+    "confidence_max",
 })
 
 REQUIRED_CHECK_FIELDS = frozenset({

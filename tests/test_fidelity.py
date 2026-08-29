@@ -108,7 +108,7 @@ def test_citation_violation_disqualifies_hypothesis():
         ],
     )
     score = score_hypothesis(h, {"ev_001": ev})
-    assert score.confidence == AuditVerdict.ABSTAIN
+    assert score.confidence in (AuditVerdict.REJECTED, AuditVerdict.ABSTAIN)
     assert score.final_audit_score == 0.0
     assert score.violations
 

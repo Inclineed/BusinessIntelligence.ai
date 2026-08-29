@@ -153,9 +153,9 @@ def _build_decision_prompt(
     For INC_001, the winning hypothesis is a checkout/payment degradation,
     so the LLM context naturally surfaces the v4.3 rollback recommendation.
     """
-    top = challenge_result.scored_hypotheses[0]
+    top = challenge_result.scored_hypotheses[0] if challenge_result.scored_hypotheses else None
     narrative_style = PERSONA_NARRATIVE_STYLES.get(
-        persona.value, PERSONA_NARRATIVE_STYLES["analyst"]
+        persona.value if hasattr(persona, "value") else str(persona), PERSONA_NARRATIVE_STYLES["analyst"]
     )
 
     levers = decision_rights.get("levers", {})
@@ -163,9 +163,36 @@ def _build_decision_prompt(
     if not available_levers:
         available_levers = '"Default Mitigation"'
 
+    if top:
+        confidence_str = top.audit_verdict.value.upper()
+    else:
+        confidence_str = challenge_result.overall_verdict.value.upper()
+
+    is_marginal = (
+        (top is not None and top.audit_verdict == AuditVerdict.MARGINAL)
+        or challenge_result.overall_verdict == AuditVerdict.MARGINAL
+    )
+
+    marginal_system_rule = ""
+    marginal_user_instruction = ""
+    if is_marginal:
+        marginal_system_rule = (
+            "\n7. CRITICAL MARGINAL CONFIDENCE GUARD:\n"
+            "   Confidence is MARGINAL. You MUST NOT propose direct production remediation (e.g. rollback, "
+            "   code deployment, service restart, inventory order, or config alteration).\n"
+            "   Your recommended_action MUST be a guarded, evidence-seeking directive focusing on targeted diagnostic "
+            "   verification, telemetry instrumentation, log tracing, or canary validation."
+        )
+        marginal_user_instruction = (
+            "\nCRITICAL INSTRUCTION FOR MARGINAL VERDICT:\n"
+            "- The winning hypothesis is MARGINAL (partially corroborated but not fully established).\n"
+            "- Formulate a guarded, diagnostic / telemetry verification action rather than a production remediation.\n"
+            "- In persona_narrative, explicitly communicate the empirical uncertainty and outline what further data is needed.\n"
+        )
+
     system_prompt = (
         f"You are a senior business-intelligence analyst writing a decision recommendation "
-        f"for a {persona.value.upper()} persona.\n"
+        f"for a {persona.value.upper() if hasattr(persona, 'value') else str(persona).upper()} persona.\n"
         f"Narrative style directive: {narrative_style}\n\n"
         "Rules:\n"
         "1. Base your recommendation SOLELY on the winning hypothesis and its evidence.\n"
@@ -176,19 +203,15 @@ def _build_decision_prompt(
         "   controllable_lever, recommended_action, verification_metric, "
         "   persona_narrative, monitoring_plan.\n"
         f"5. controllable_lever MUST be EXACTLY one of the following strings: {available_levers}.\n"
-        "6. Keep persona_narrative under 300 words and recommended_action under 150 words."
+        f"6. Keep persona_narrative under 300 words and recommended_action under 150 words.{marginal_system_rule}"
     )
-
-    if top:
-        confidence_str = top.audit_verdict.value.upper()
-    else:
-        confidence_str = challenge_result.overall_verdict.value.upper()
     winning_id = challenge_result.winning_hypothesis_id or "unknown"
 
     # Summarise the top-ranked hypothesis rule verdicts concisely
     rule_lines = []
-    for rr in top.rule_results:
-        rule_lines.append(f"  {rr.rule_name}: {rr.verdict.value}")
+    if top:
+        for rr in top.rule_results:
+            rule_lines.append(f"  {rr.rule_name}: {rr.verdict.value}")
     rules_text = "\n".join(rule_lines) if rule_lines else "  (none)"
 
     # Summarise up to 5 supporting evidence items for grounding
@@ -217,7 +240,8 @@ def _build_decision_prompt(
         f"Key supporting evidence:\n{evidence_block}\n\n"
         "Based on the above analysis, produce a JSON decision recommendation.\n\n"
         "Important context for this scenario:\n"
-        f"{domain_policy}\n\n"
+        f"{domain_policy}\n"
+        f"{marginal_user_instruction}\n"
         "Respond with ONLY the JSON object (no prose before or after)."
     )
 
@@ -401,6 +425,12 @@ def decide(
 
         parsed = _parse_llm_json(response.text)
 
+        top = challenge_result.scored_hypotheses[0] if challenge_result.scored_hypotheses else None
+        is_marginal = (
+            (top is not None and top.audit_verdict == AuditVerdict.MARGINAL)
+            or challenge_result.overall_verdict == AuditVerdict.MARGINAL
+        )
+
         recommended_action: Optional[str] = (
             parsed.get("recommended_action") or None
         )
@@ -410,12 +440,11 @@ def decide(
         # Fallback: if the LLM did not provide a verification metric, derive
         # one deterministically from domain_semantics (Req 10.3)
         if not verification_metric:
-            # Derive from the winning hypothesis's top scored result
-            top = challenge_result.scored_hypotheses[0]
             # Use the narrative/rule context to pick the right bucket
             bucket_hint = ""
-            for rr in top.rule_results:
-                bucket_hint += rr.rationale + " "
+            if top:
+                for rr in top.rule_results:
+                    bucket_hint += rr.rationale + " "
             verification_metric = _fallback_verification_metric(bucket_hint, domain_semantics)
 
         # Fallback: if no recommended_action was extracted, use a safe default
@@ -425,19 +454,51 @@ def decide(
                 "decide: LLM did not return a recommended_action; "
                 "using a deterministic placeholder."
             )
-            recommended_action = (
-                "Review the winning hypothesis evidence and consult the relevant "
-                "operations team for immediate remediation."
-            )
+            if is_marginal:
+                recommended_action = (
+                    f"Targeted Diagnostic Investigation: Collect telemetry and verify {verification_metric} "
+                    f"to validate hypothesis {winning_id} before executing remediation."
+                )
+            else:
+                recommended_action = (
+                    "Review the winning hypothesis evidence and consult the relevant "
+                    "operations team for immediate remediation."
+                )
+
+        # Enforce MARGINAL Action Guard: ensure action is strictly evidence-seeking / diagnostic
+        if is_marginal and recommended_action:
+            lower_action = recommended_action.lower()
+            direct_remediation_kws = ["roll back", "rollback", "revert", "reversion", "deploy", "deployment", "reorder", "replenish", "disable", "terminate", "delete", "purge"]
+            diagnostic_kws = ["investigate", "investigation", "verify", "verification", "telemetry", "diagnostic", "diagnostics", "canary", "inspect", "validate", "validation", "monitor", "monitoring", "audit", "trace", "testing"]
+            
+            has_direct_remediation = any(kw in lower_action for kw in direct_remediation_kws)
+            has_diagnostic = any(kw in lower_action for kw in diagnostic_kws)
+            
+            if has_direct_remediation and not has_diagnostic:
+                logger.warning(
+                    "decide: LLM proposed direct remediation on MARGINAL verdict (%r). "
+                    "Enforcing guarded diagnostic action directive.",
+                    recommended_action,
+                )
+                recommended_action = (
+                    f"Targeted Diagnostic Investigation: Collect telemetry and verify {verification_metric} "
+                    f"to validate hypothesis {winning_id} before executing production remediation."
+                )
 
         # Build the narrative — prefer the LLM value; fall back to monitoring_plan
         if not persona_narrative:
             persona_narrative = parsed.get("monitoring_plan", "")
         if not persona_narrative:
-            persona_narrative = (
-                f"Action recommended based on {challenge_result.overall_verdict.value.upper()} "
-                "verdict hypothesis. Please refer to the evidence panel for full details."
-            )
+            if is_marginal:
+                persona_narrative = (
+                    f"Confidence in hypothesis {winning_id} is MARGINAL. Evidence is partially consistent but "
+                    "requires additional diagnostic telemetry before committing to operational changes."
+                )
+            else:
+                persona_narrative = (
+                    f"Action recommended based on {challenge_result.overall_verdict.value.upper()} "
+                    "verdict hypothesis. Please refer to the evidence panel for full details."
+                )
 
         # Enforce Lever Authorization (Unknown Lever Guard)
         controllable_lever = parsed.get("controllable_lever", "")
@@ -450,7 +511,7 @@ def decide(
             )
             verification_steps = default_verification_steps
             narrative = (
-                "The system formulated an action using an unauthorized lever. "
+                "The system formulated an action using an unrecognized lever. "
                 "Execution is blocked pending governance review."
             )
             decision = Decision(
@@ -464,9 +525,39 @@ def decide(
             )
             _verify_decision_property_6(decision)
             return decision
-            
-        # Valid lever selected — build the StructuredActionRecommendation
+
+        # Enforce Requesting Persona Authorization for Selected Lever
         lever_cfg = levers[controllable_lever]
+        authorized_personas = [p.lower() for p in lever_cfg.get("authorized_personas", [])]
+        req_persona = (persona.value if hasattr(persona, "value") else str(persona)).lower()
+
+        if authorized_personas and req_persona not in authorized_personas:
+            logger.warning(
+                "decide: Requesting persona '%s' is not authorized for lever '%s' (Authorized: %s). "
+                "Abstaining to prevent unauthorized action recommendation.",
+                req_persona,
+                controllable_lever,
+                authorized_personas,
+            )
+            verification_steps = default_verification_steps
+            narrative = (
+                f"The requesting persona '{req_persona.upper()}' is not authorized to execute the required "
+                f"lever '{controllable_lever}' (Authorized roles: {', '.join(p.upper() for p in authorized_personas)}). "
+                "Action recommendation is suppressed pending role escalation or delegation."
+            )
+            decision = Decision(
+                abstained=True,
+                recommended_action=None,
+                verification_metric=", ".join(verification_steps),
+                winning_hypothesis_id=winning_id,
+                persona_narrative=narrative,
+                abstention_reason="persona_not_authorized_for_lever",
+                method=MethodTag.LLM,
+            )
+            _verify_decision_property_6(decision)
+            return decision
+            
+        # Valid lever and authorized persona — build the StructuredActionRecommendation
         monitoring_plan = parsed.get("monitoring_plan", f"Monitor {verification_metric}")
         
         structured_rec = StructuredActionRecommendation(
@@ -494,7 +585,7 @@ def decide(
 
         logger.info(
             "decide: Decision generated for persona=%s, winner=%s, verdict=%s.",
-            persona.value,
+            persona.value if hasattr(persona, "value") else str(persona),
             winning_id,
             challenge_result.overall_verdict.value,
         )

@@ -458,8 +458,9 @@ _QUANTITATIVE_RE = re.compile(r'(?<![vV])\b\d+(\.\d+)?%?\b')
 def validate_hypothesis(
     raw_hyp: dict,
     valid_evidence_ids: frozenset[str],
-    domain_semantics: dict,
+    domain_semantics: Optional[dict] = None,
 ) -> tuple[bool, str]:
+    domain_semantics = domain_semantics or {}
     """
     Validate a raw hypothesis dict produced by the LLM.
 

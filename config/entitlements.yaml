@@ -92,6 +92,9 @@ decision_rights:
     "Promotional Adjustment":
       owner: "Marketing"
       authorized_personas: ["analyst", "manager", "cfo"]
+    "Targeted Diagnostic Verification":
+      owner: "Observability & SRE"
+      authorized_personas: ["analyst", "manager", "cfo"]
     "Default Mitigation":
       owner: "Operations"
       authorized_personas: ["analyst", "manager"]

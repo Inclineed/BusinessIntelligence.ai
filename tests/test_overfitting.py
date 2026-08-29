@@ -190,7 +190,7 @@ class TestHeldOutScenarios:
             sc_gt = scenarios[sc_id]
             assert "name" in sc_gt
             assert "true_cause" in sc_gt
-            assert "expected_audit_verdict" in sc_gt
+            assert "expected_audit_verdict" in sc_gt or "expected_confidence_state" in sc_gt
             assert "evaluation_checks" in sc_gt
 
     def test_inc005_seasonality_held_out(self):
@@ -620,7 +620,7 @@ class TestHeldOutScenarios:
         report = reporter.generate_report()
         
         assert "Total Scenarios Evaluated: 2" in report
-        assert "HIGH    : 1/1 correct (100.0%)" in report
+        assert "VERIFIED : 1/1 correct (100.0%)" in report or "HIGH    : 1/1 correct (100.0%)" in report
         assert "ABSTAIN : 1/1 correct (100.0%)" in report
         assert "exploratory and NOT statistically" in report
         

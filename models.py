@@ -503,6 +503,10 @@ class ScoredHypothesis:
     def verdict(self) -> AuditVerdict:
         return self.audit_verdict
 
+    @property
+    def confidence(self) -> AuditVerdict:
+        return self.audit_verdict
+
 
 
 # Alias for backward/test compatibility
@@ -538,7 +542,7 @@ class Decision:
     verification_metric: Optional[str]
     winning_hypothesis_id: Optional[str]
     persona_narrative: str
-    abstention_reason: Optional[str] = None   # "low_confidence" | "provider_unavailable" | "unauthorized_lever_selected"
+    abstention_reason: Optional[str] = None   # "low_confidence" | "provider_unavailable" | "unauthorized_lever_selected" | "persona_not_authorized_for_lever"
     structured_recommendation: Optional[StructuredActionRecommendation] = None
     method: MethodTag = MethodTag.LLM
 
