@@ -1,6 +1,7 @@
 /**
  * scripts/convert_readme_to_pdf.js
- * Converts README.md into an executive-grade PDF with server-side KaTeX math rendering.
+ * Converts README.md into an executive-grade PDF with server-side KaTeX math rendering
+ * and table integrity protection.
  */
 
 const fs = require('fs');
@@ -30,7 +31,7 @@ function findBrowser() {
     throw new Error('No Chromium-based headless browser (Edge/Chrome) found on system.');
 }
 
-function renderMath(formula, displayMode) {
+function renderMathSafe(formula, displayMode) {
     try {
         return katex.renderToString(formula.trim(), {
             displayMode: displayMode,
@@ -38,52 +39,66 @@ function renderMath(formula, displayMode) {
             strict: false
         });
     } catch (err) {
-        console.warn('KaTeX render warning for:', formula, err.message);
+        console.warn('KaTeX fallback for:', formula);
         return `<span class="math-fallback">${formula}</span>`;
     }
 }
 
 function convertMarkdownToHtml(rawMd) {
-    const mathPlaceholders = [];
+    const displayMaths = [];
+    const inlineMaths = [];
 
     // 1. Extract Display Math $$...$$
     let protectedMd = rawMd.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
-        const idx = mathPlaceholders.length;
-        const rendered = renderMath(formula, true);
-        mathPlaceholders.push(`<div class="math-display">${rendered}</div>`);
-        return `@@@MATH_PLACEHOLDER_${idx}@@@`;
+        const idx = displayMaths.length;
+        displayMaths.push(formula);
+        return `@@@DISPLAYMATH${idx}END@@@`;
     });
 
-    // 2. Extract Inline Math $...$ (ensuring not currency $100)
-    // Matches $...$ where opening $ is not followed by space/digit/dollar, and closing $ is not preceded by space
-    protectedMd = protectedMd.replace(/(?<!\$)\$(?!\$)([\S](?:[\s\S]*?[\S])?)\$(?!\$)/g, (match, formula) => {
+    // 2. Extract Inline Math $...$
+    // Strictly single-line, NO pipes (|), NO unescaped delimiters
+    protectedMd = protectedMd.replace(/(?<!\\)\$(?![\s\$])([^\|\n\$]+?)(?<![\s\\])\$/g, (match, formula) => {
         // Skip pure currency like $10 or $2,005 or $0.59
         if (/^[\d,.]+(?:\/1[MK]|\s*USD|\s*k)?$/i.test(formula.trim())) {
             return match;
         }
-        const idx = mathPlaceholders.length;
-        const rendered = renderMath(formula, false);
-        mathPlaceholders.push(`<span class="math-inline">${rendered}</span>`);
-        return `@@@MATH_PLACEHOLDER_${idx}@@@`;
+        const idx = inlineMaths.length;
+        inlineMaths.push(formula);
+        return `@@@INLINEMATH${idx}END@@@`;
     });
 
-    // 3. Convert markdown via Python markdown with tables, fenced code, and codehilite
+    // 3. Convert markdown to HTML via Python markdown
     const tempMdPath = path.join(__dirname, '_temp_protected.md');
     const tempHtmlBodyPath = path.join(__dirname, '_temp_body.html');
     fs.writeFileSync(tempMdPath, protectedMd, 'utf8');
 
-    execSync(`python -c "import markdown; text = open(r'${tempMdPath}', encoding='utf-8').read(); html = markdown.markdown(text, extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists']); open(r'${tempHtmlBodyPath}', 'w', encoding='utf-8').write(html)"`, { stdio: 'inherit' });
+    execSync(
+        `python -c "import markdown; text = open(r'${tempMdPath}', encoding='utf-8').read(); html = markdown.markdown(text, extensions=['tables', 'fenced_code', 'nl2br', 'sane_lists']); open(r'${tempHtmlBodyPath}', 'w', encoding='utf-8').write(html)"`,
+        { stdio: 'inherit' }
+    );
 
     let htmlBody = fs.readFileSync(tempHtmlBodyPath, 'utf8');
 
-    // Clean up temp files
+    // Clean up temporary conversion files
     if (fs.existsSync(tempMdPath)) fs.unlinkSync(tempMdPath);
     if (fs.existsSync(tempHtmlBodyPath)) fs.unlinkSync(tempHtmlBodyPath);
 
-    // 4. Restore rendered KaTeX math blocks
-    htmlBody = htmlBody.replace(/@@@MATH_PLACEHOLDER_(\d+)@@@/g, (match, idxStr) => {
+    // 4. Restore Display Math
+    htmlBody = htmlBody.replace(/@@@DISPLAYMATH(\d+)END@@@/g, (match, idxStr) => {
         const idx = parseInt(idxStr, 10);
-        return mathPlaceholders[idx] || match;
+        const formula = displayMaths[idx];
+        if (!formula) return match;
+        const rendered = renderMathSafe(formula, true);
+        return `<div class="math-display">${rendered}</div>`;
+    });
+
+    // 5. Restore Inline Math
+    htmlBody = htmlBody.replace(/@@@INLINEMATH(\d+)END@@@/g, (match, idxStr) => {
+        const idx = parseInt(idxStr, 10);
+        const formula = inlineMaths[idx];
+        if (!formula) return match;
+        const rendered = renderMathSafe(formula, false);
+        return `<span class="math-inline">${rendered}</span>`;
     });
 
     return htmlBody;
@@ -93,7 +108,7 @@ function main() {
     console.log('[1/4] Reading README.md...');
     const rawMd = fs.readFileSync(README_PATH, 'utf8');
 
-    console.log('[2/4] Pre-rendering LaTeX equations via KaTeX and compiling Markdown...');
+    console.log('[2/4] Pre-rendering LaTeX equations via KaTeX and compiling Markdown tables...');
     const htmlBody = convertMarkdownToHtml(rawMd);
 
     const katexCss = fs.readFileSync(KATEX_CSS_PATH, 'utf8');
@@ -105,7 +120,7 @@ function main() {
 
     @page {
         size: A4;
-        margin: 18mm 14mm 18mm 14mm;
+        margin: 14mm 10mm 14mm 10mm;
         @bottom-right {
             content: counter(page);
         }
@@ -119,8 +134,8 @@ function main() {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         color: #1e293b;
         background: #ffffff;
-        line-height: 1.55;
-        font-size: 9.8pt;
+        line-height: 1.5;
+        font-size: 9.3pt;
         margin: 0;
         padding: 0;
     }
@@ -128,42 +143,42 @@ function main() {
     h1, h2, h3, h4, h5, h6 {
         color: #0f172a;
         font-weight: 700;
-        margin-top: 1.5em;
-        margin-bottom: 0.4em;
+        margin-top: 1.3em;
+        margin-bottom: 0.35em;
         page-break-after: avoid;
     }
 
     h1 {
-        font-size: 21pt;
+        font-size: 19pt;
         font-weight: 800;
         color: #0284c7;
         border-bottom: 2px solid #e2e8f0;
-        padding-bottom: 6px;
+        padding-bottom: 5px;
         margin-top: 0;
     }
 
     h2 {
-        font-size: 14.5pt;
+        font-size: 13.5pt;
         border-bottom: 1px solid #e2e8f0;
-        padding-bottom: 5px;
-        margin-top: 1.7em;
+        padding-bottom: 4px;
+        margin-top: 1.5em;
         color: #0369a1;
     }
 
     h3 {
-        font-size: 11.5pt;
+        font-size: 11pt;
         color: #334155;
-        margin-top: 1.3em;
+        margin-top: 1.2em;
     }
 
     h4 {
-        font-size: 10.2pt;
+        font-size: 9.8pt;
         color: #475569;
     }
 
     p, li {
         color: #334155;
-        font-size: 9.5pt;
+        font-size: 9pt;
     }
 
     a {
@@ -174,28 +189,38 @@ function main() {
     hr {
         border: 0;
         border-top: 1px solid #cbd5e1;
-        margin: 1.4em 0;
+        margin: 1.2em 0;
     }
 
     table {
         width: 100%;
         border-collapse: collapse;
-        margin: 1.1em 0;
-        font-size: 8.8pt;
+        margin: 1.2em 0;
+        font-size: 8.2pt;
         page-break-inside: avoid;
+        table-layout: auto;
     }
 
     th, td {
         border: 1px solid #cbd5e1;
-        padding: 6px 9px;
+        padding: 5px 7px;
         text-align: left;
         vertical-align: top;
+        word-break: normal;
+        overflow-wrap: break-word;
     }
 
     th {
         background-color: #f1f5f9;
-        font-weight: 600;
+        font-weight: 700;
         color: #0f172a;
+        font-size: 8.4pt;
+    }
+
+    /* Keep short header cells legible */
+    th:nth-child(1), th:nth-child(2) {
+        white-space: nowrap;
+        width: 60px;
     }
 
     tr:nth-child(even) {
@@ -204,10 +229,10 @@ function main() {
 
     code {
         font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
-        font-size: 8.4pt;
+        font-size: 7.8pt;
         background-color: #f1f5f9;
         color: #0f172a;
-        padding: 2px 4px;
+        padding: 2px 3px;
         border-radius: 3px;
         border: 1px solid #e2e8f0;
     }
@@ -215,13 +240,13 @@ function main() {
     pre {
         background-color: #0f172a;
         color: #f8fafc;
-        padding: 10px 14px;
+        padding: 9px 12px;
         border-radius: 6px;
         overflow-x: auto;
-        font-size: 8.4pt;
-        line-height: 1.45;
+        font-size: 7.8pt;
+        line-height: 1.4;
         page-break-inside: avoid;
-        margin: 0.9em 0;
+        margin: 0.8em 0;
     }
 
     pre code {
@@ -229,40 +254,40 @@ function main() {
         color: #f8fafc;
         border: 0;
         padding: 0;
-        font-size: 8.3pt;
+        font-size: 7.8pt;
     }
 
     blockquote {
         border-left: 4px solid #0284c7;
         background-color: #f0f9ff;
-        padding: 8px 14px;
-        margin: 1em 0;
+        padding: 7px 12px;
+        margin: 0.8em 0;
         color: #0369a1;
         border-radius: 0 4px 4px 0;
         page-break-inside: avoid;
     }
 
     ul, ol {
-        padding-left: 20px;
-        margin: 0.4em 0 0.8em 0;
+        padding-left: 18px;
+        margin: 0.3em 0 0.6em 0;
     }
 
     li {
-        margin-bottom: 0.25em;
+        margin-bottom: 0.2em;
     }
 
     .math-display {
-        margin: 0.9em 0;
+        margin: 0.7em 0;
         text-align: center;
         page-break-inside: avoid;
     }
 
     .katex {
-        font-size: 1.05em !important;
+        font-size: 1.0em !important;
         font-family: KaTeX_Main, 'Times New Roman', serif;
     }
     .katex-display {
-        margin: 0.5em 0 !important;
+        margin: 0.35em 0 !important;
     }
     `;
 
@@ -293,7 +318,7 @@ ${htmlBody}
 
     if (fs.existsSync(PDF_PATH)) {
         const size = fs.statSync(PDF_PATH).size;
-        console.log(`\nSUCCESS: Generated ${PDF_PATH} (${size.toLocaleString()} bytes) with rendered LaTeX formulas!`);
+        console.log(`\nSUCCESS: Generated ${PDF_PATH} (${size.toLocaleString()} bytes) with table integrity and rendered LaTeX formulas!`);
         if (fs.existsSync(HTML_PATH)) fs.unlinkSync(HTML_PATH);
     } else {
         throw new Error('PDF output file was not created.');

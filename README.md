@@ -71,13 +71,13 @@ Institutional learning   → Vector retrieval + Human feedback lifecycle
 
 | Engine | Name | Primary Responsibility | Input | Output | Processing Method | Governance & Safety Safeguards |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **E1** | **KPI Store** | Ingests time-series telemetry and computes historical rolling baseline corridors ($\mu, \sigma$). | KPI Contract YAML, Time Window $[t_0, t_1]$, Scope filter | Normalized Time-Series DataFrames | **Deterministic SQL / Pandas** | Statistical Cold-Start Guard (flags datasets with $<14$ intervals of baseline history). |
+| **E1** | **KPI Store** | Ingests time-series telemetry and computes historical rolling baseline corridors ($\mu, \sigma$). | KPI Contract YAML, Time Window $[t_0, t_1]$, Scope filter | Normalized Time-Series DataFrames | **Deterministic SQL / Pandas** | Statistical Cold-Start Guard (flags datasets with $< 14$ intervals of baseline history). |
 | **E2** | **Signal Engine** | Detects statistical anomalies ($z$-score) and computes revenue materiality rankings. | E1 Time-Series Data | Prioritized `list[AnomalySignal]` with materiality tiers | **Deterministic Statistical Math** | Adverse direction filtering; data quality anomaly detection (ETL ingestion delay vs real drop). |
 | **E3** | **Diagnostic Engine** | Decomposes material anomalies across dimensional slices (`device`, `region`, `channel`). | E2 Top Prioritized Anomaly, SQL Transaction Store | `list[DimensionContribution]` (cohort contribution %) | **Deterministic SQL GROUP BY Aggregation** | Multi-dimensional variance isolation; zero-segment safe handling without crashing. |
 | **E4** | **Evidence Dossier** | Assembles verifiable telemetry records, deployment logs, and vendor feeds. | E2/E3 Signals, Persona Entitlements YAML | `list[Evidence]` with content hashes and timestamps | **Hybrid Vector (ChromaDB) + Relational Entitlement Filter** | Strict role-based entitlement filtering (masks SRE/deployment logs from non-technical personas). |
 | **E5** | **Hypothesis Studio** | Formulates candidate causal explanations structured under a 4-layer ontology. | E2 Signals, E3 Contributions, E4 Evidence Dossier | `list[Hypothesis]` with mechanisms & evidence citations | **LLM Synthesis (Groq Qwen / Ollama Llama)** | Zero-number qualitative propositions; prompt-enforced prohibition of ungrounded citation hashes. |
 | **E6** | **Challenge Engine** | Audits candidate hypotheses against 5 deterministic rules and epistemic gates. | E5 Hypotheses, E4 Evidence Records, Anomaly Windows | `list[ScoredHypothesis]` with `AuditVerdict` & rule scores | **100% Deterministic Pure Mathematical Functions** | **Root-Cause Evidence Gate:** Mandatory discriminative evidence for release/provider claims; Weakest-link constraint. |
-| **E7** | **Decision Engine** | Synthesizes governed operational action directives or triggers safety guards. | E6 Audited Scorecards, Entitlements, Controllable Levers | `DecisionPayload` with action directive & persona narrative | **Deterministic Policy Rules + LLM Executive Briefing** | **Fail-Closed Abstention:** Automated mitigation suppressed if score $<0.70$, margin $<0.15$, or lever unauthorized. |
+| **E7** | **Decision Engine** | Synthesizes governed operational action directives or triggers safety guards. | E6 Audited Scorecards, Entitlements, Controllable Levers | `DecisionPayload` with action directive & persona narrative | **Deterministic Policy Rules + LLM Executive Briefing** | **Fail-Closed Abstention:** Automated mitigation suppressed if score $< 0.70$, margin $< 0.15$, or lever unauthorized. |
 | **E8** | **Outcome Simulator** | Projects recovery trajectories and Mean Time to Normalcy (MTTN) under proposed actions. | E7 Action Directive, E2 Anomaly Baseline Delta | `OutcomeProjection` with recovery curves $[y(t)]$ | **Deterministic Calibrated Exponential Decay Simulation** | Explicit `[SIMULATED]` provenance tag; non-remedial actions suppress recovery projections; causal disclaimer. |
 | **E9** | **Memory Engine** | Embeds verified incident cases and retrieves lifecycle-filtered institutional precedents. | E7 Decision, Analyst Feedback Record, ChromaDB | Historical precedent citations & matching score | **Vector Embeddings (ChromaDB / Cosine Similarity)** | **5-State Precedent Lifecycle:** Validated precedents receive ranking boosts; disputed/suppressed records are excluded. |
 
@@ -101,7 +101,7 @@ To guarantee mathematical reproducibility and enterprise auditability, the syste
 
 ### Early Deterministic Guards (LLM Bypass)
 To optimize LLM economics and eliminate hallucinations, deterministic early guards can bypass LLM inference entirely for scenarios that fail data-quality, baseline, or nominal-corridor checks:
-* **Cold-Start Guard ($<14$ Days):** If baseline history is insufficient, hypothesis generation is skipped ($0$ LLM calls).
+* **Cold-Start Guard ($< 14$ Days):** If baseline history is insufficient, hypothesis generation is skipped ($0$ LLM calls).
 * **Nominal Corridor Guard ($|z| < 3.0\sigma$):** If all telemetry streams fluctuate normally within calibrated corridor bounds, the system declares `SYSTEM NOMINAL` ($0$ LLM calls).
 * **Data Quality Guard (ETL Delay):** If revenue drops without application error or gateway latency elevation, the system triggers the Data Quality Guard without invoking speculative LLM remediations.
 
@@ -435,7 +435,7 @@ The platform provides granular telemetry tracking across every pipeline run:
 
 * **Latency Tracking:** Measures millisecond execution time across individual stages ($E_1$ through $E_9$).
 * **Token Accounting:** Tracks precise prompt tokens (`llm_tokens_in`), completion tokens (`llm_tokens_out`), and total token consumption.
-* **Cost Estimator ([`llm/cost_estimator.py`](file:///e:/accenture/llm/cost_estimator.py)):** Dynamically computes dollar cost per investigation based on active model rate cards (e.g. Groq Qwen $0.05 / 1M tokens vs. OpenAI GPT-4o).
+* **Cost Estimator ([`llm/cost_estimator.py`](file:///e:/accenture/llm/cost_estimator.py)):** Dynamically computes dollar cost per investigation based on active model rate cards (e.g. Groq Qwen USD 0.05 / 1M tokens vs. OpenAI GPT-4o).
 * **Deterministic Efficiency:** By leveraging deterministic early guards (bypassing LLMs for cold-start and nominal states), the engine eliminates unnecessary LLM inference costs for un-actionable telemetry runs.
 
 ---
