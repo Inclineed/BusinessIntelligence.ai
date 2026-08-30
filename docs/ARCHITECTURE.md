@@ -97,9 +97,11 @@ class Dependencies:
 
 ### Pluggable LLM Provider Layer
 Engines interact with language models exclusively via the `LLMProvider` abstraction (`llm/provider.py`):
-- `OllamaProvider`: Default local inference provider (`qwen3:8b`, `gemma3:12b`, `bge-m3`).
+- `OllamaProvider`: Local offline inference provider (`qwen3:8b`, `gemma3:12b`, `bge-m3`).
 - `GroqProvider`: Hosted low-latency cloud inference provider (`llama-3.3-70b-versatile`) with bounded exponential backoff for HTTP 429 rate limits and 5xx errors.
-- Embedding requests (`embed()`) are delegated to the local `bge-m3` embedder under both providers to maintain 100% ChromaDB compatibility.
+- `OpenAIProvider`: Cloud inference provider (`gpt-4o-mini`, `gpt-4o`, `o1`, `o3-mini`) with native JSON mode and token pricing telemetry.
+- `AnthropicProvider`: Cloud inference provider (`claude-3-5-haiku-20241022`, `claude-3-5-sonnet-20241022`) via Messages REST API with structured JSON extraction and 429/529 overload recovery.
+- Embedding requests (`embed()`) default to native provider embeddings or delegate to local `bge-m3` embedder to maintain 100% ChromaDB compatibility.
 
 ---
 
@@ -108,7 +110,7 @@ Engines interact with language models exclusively via the `LLMProvider` abstract
 Every engine invocation emits structured metrics into `TelemetryService`:
 - **Wall-clock latency** per engine (`duration_ms`).
 - **Token consumption** (`prompt_tokens`, `completion_tokens`) for LLM-backed engines (E4 summarization, E5, E7, E9).
-- **External Cost Calculation**: Computes real API costs for cloud providers (Groq) and reports $0.00 for local Ollama runs.
+- **External Cost Calculation**: Computes real API costs for cloud providers (Groq, OpenAI, Anthropic) and reports $0.00 for local Ollama runs.
 - **Execution tracing** attached directly to the `InvestigationResult.telemetry` payload.
 
 ---
@@ -120,14 +122,13 @@ Built on FastAPI, exposing:
 - `POST /investigate`: Runs full end-to-end investigation for a requested `scenario_id` and `persona`. Enforces HTTP 403 when persona lacks foundational entitlements.
 - `POST /feedback`: Captures human analyst evaluations and validation stamps.
 - `GET /evaluation/health`: On-demand continuous evaluation and operational drift monitoring across 6 core health metrics (50 recent vs 50 baseline).
-- `GET /health`: Reports database connectivity, ChromaDB status, and active LLM backend (`ollama` or `groq`).
+- `GET /health`: Reports database connectivity, ChromaDB status, and active LLM backend (`ollama`, `groq`, `openai`, or `anthropic`).
 
-### Interactive Console (`frontend/app.py` & React UI)
-A rich user interface providing:
+### Analytical Operations Console (`web/`)
+A React 19 / Vite / Tailwind workspace console providing:
 - **Real-Time Scenario Investigation**: Select any scenario (`INC_001`–`INC_008`) and persona (`analyst`, `manager`, `cfo`).
+- **9 Engine Workspaces ($E_1 \rightarrow E_9$)**: Dedicated interactive analytical surfaces for KPI signals, anomaly corridors, dimensional attribution, evidence dossiers, hypothesis cards, rule scorecards, governed actions, outcome projections, and precedent memory.
 - **System Health & Drift Modal**: Inspect live operational health metrics (latency, abstention, confidence, agreement, violations, E9 relevance).
-- **Evidence Explorer**: Inspect raw SQL evidence, ChromaDB snippets, and reliability weights.
-- **Rule Verification Table**: Visual breakdown of the 5 operational rule checks.
 - **Precedent Memory Viewer**: Inspect semantic matches retrieved from ChromaDB with confidence weighting.
 
 ---
@@ -157,6 +158,7 @@ A rich user interface providing:
 | **ChromaDB Unavailable** | E4, E9 | E4 falls back to SQL-only evidence; E9 queues precedents in an in-memory retry queue (`_pending`) for up to 3 attempts. |
 | **Ollama Primary Model Timeout** | E5, E7, E9 | `OllamaProvider` automatically falls back to secondary model (`gemma3:12b`); if fallback also times out, raises `LLMUnavailableError`. |
 | **Groq Rate Limit (HTTP 429)** | E5, E7, E9 | `GroqProvider` reads `Retry-After` / reset headers and applies bounded exponential backoff up to `GROQ_MAX_RETRIES`. |
+| **OpenAI / Anthropic Rate Limit (HTTP 429 / 529)** | E5, E7, E9 | `OpenAIProvider` and `AnthropicProvider` read retry headers and apply exponential backoff with credential rotation. |
 | **LLM Outage (Complete)** | E5, E7, E9 | E5 generates zero hypotheses; E6/E7 abstain; E9 uses deterministic template fallback (`_build_fallback_summary`). |
 | **Unauthorized / Unknown Persona** | Security Engine | Scope produces `is_empty=True`; E4 retrieves zero evidence; E7 returns HTTP 403 / Abstain with empty action. |
 | **Missing SLA Metadata in Source Registry** | E4 | `reliability_weight` decays to `0.0`; evidence is included with zero weight and logged in `reliability_notes`. |

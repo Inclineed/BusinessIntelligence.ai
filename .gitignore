@@ -112,3 +112,15 @@ _ui_check.py
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Temporary Specifications, Audit Reports, and Scratch Documentation
+FRONTEND_BACKEND_SPEC.md
+docs/audit_reports/
+docs/ISSUE-*.md
+docs/ISSUES.md
+docs/ISSUES_TRACKER.md
+docs/IMPLEMENTATION_PLAN.md
+benchmarks/*.md
+evaluation/*.md
+web/README.md
+.kiro/

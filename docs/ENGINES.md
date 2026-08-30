@@ -247,24 +247,26 @@ Evaluates competing hypotheses against five deterministic operational rules, com
    - `kpi_corroboration` (0.20): Verifies leading and lagging metrics corroborate.
    - `mechanism_consistency` (0.20): Verifies evidence supports proposed physical failure mechanism.
    - `contradiction` (0.15): Evaluates presence of high-reliability refuting evidence.
-3. **Deterministic Scoring Formula**:
-   $$\text{support\_score} = \sum_{e \in \text{supp}} \text{reliability}(e) \times \text{relevance}(e)$$
-   $$\text{contradiction\_penalty} = \sum_{e \in \text{contra}} \text{reliability}(e) \times \text{relevance}(e)$$
-   $$\text{rule\_modifier} = \sum \text{weight}_r \times \text{verdict\_val}_r \quad (\text{PASS}=1.0, \text{PARTIAL}=0.5, \text{FAIL}=0.0)$$
-   $$\text{final\_score} = \text{clamp}\left(\text{rule\_modifier} + \frac{\min(\text{support\_score}, 2.0)}{2.0} - \frac{\text{contradiction\_penalty}}{2.0}, 0.0, 1.0\right)$$
-4. **Winner & Confidence Determination**:
-   - `final_score >= 0.70` $\rightarrow$ `HIGH`
-   - `0.40 <= final_score < 0.70` $\rightarrow$ `MEDIUM`
-   - `final_score < 0.30` or top-two score gap $< 0.15$ $\rightarrow$ `ABSTAIN`
+3. **Deterministic Weakest-Link Scoring Formula**:
+   $$\text{rule\_score} = \sum_{r} \text{weight}_r \times \text{verdict\_val}_r \quad (\text{PASS}=1.0, \text{PARTIAL}=0.5, \text{FAIL}=0.0)$$
+   $$\text{grounding\_factor} = \text{support\_score} \times (1.0 - \text{contradiction\_score})$$
+   $$\text{final\_audit\_score} = \text{clamp}(\text{rule\_score} \times \text{grounding\_factor}, 0.0, 1.0)$$
+4. **Root-Cause Evidence Gate**:
+   A candidate hypothesis cannot achieve `VERIFIED` status without passing the root-cause evidence gate (corroboration by at least one internal release, deployment record, or direct system trace).
+5. **Winner & Audit Verdict Determination**:
+   - `final_audit_score >= 0.70` $\rightarrow$ `VERIFIED`
+   - `0.40 <= final_audit_score < 0.70` $\rightarrow$ `MARGINAL`
+   - `final_audit_score < 0.40` $\rightarrow$ `REJECTED`
+   - Score gap between top two candidate hypotheses $< 0.15$ $\rightarrow$ `ABSTAIN`
 
 ### Deterministic vs LLM Behavior
-**100% Deterministic Rule Engine.** Zero LLM involvement in score math.
+**100% Deterministic Rule Engine.** Zero LLM involvement in score calculation or rule evaluation.
 
 ### Provenance Tag
 `MethodTag.RULES`
 
 ### Failure/Abstention Behavior
-If zero hypotheses are provided or the top score is below `abstain_threshold`, sets `abstained=True` and `confidence_state=ABSTAIN`.
+If zero hypotheses are provided, or top score is below abstain threshold, or top score gap $< 0.15$, sets `abstained=True` and `audit_verdict=ABSTAIN`.
 
 ### Security Considerations
 Pure computational logic; handles evidence IDs strictly within scope.
@@ -275,6 +277,7 @@ None.
 ### Tests
 - `tests/test_challenge_smoke.py`
 - `tests/test_citation_validation.py`
+- `tests/test_causal_e6_isolation.py`
 
 ### Relevant Source Files
 - `engines/challenge.py`
@@ -284,32 +287,35 @@ None.
 ## E7: Decision Engine
 
 ### Purpose
-Produces actionable mitigation recommendations for the winning hypothesis tailored to the target executive persona, enforcing strict abstention invariants.
+Produces actionable mitigation recommendations for the winning hypothesis tailored to the target executive persona, enforcing strict abstention invariants and governed action safety.
 
 ### Inputs
 - `challenge_result`: Output from E6.
 - `persona`: Target user persona (`analyst`, `manager`, `cfo`).
-- `llm_provider`: Ollama provider.
+- `llm_provider`: Pluggable LLM provider (Ollama / Groq / OpenAI / Anthropic).
 
 ### Outputs
-- `Decision`: `winning_hypothesis_id`, `recommended_action`, `confidence_state`, `rationale`, `abstained`, `method`.
+- `Decision`: `winning_hypothesis_id`, `recommended_action`, `overall_verdict`, `persona_narrative`, `abstained`, `method`.
 
 ### Core Logic
 1. **Abstention Invariant**: If `challenge_result.abstained == True` or confidence is `ABSTAIN`, immediately returns `Decision(abstained=True, recommended_action=None)`.
-2. **Persona Synthesis**: Invokes LLM with persona context:
+2. **Action Governance**:
+   - For `VERIFIED` verdicts: Formulates a concrete, high-confidence mitigation action (e.g. immediate rollback, cache invalidation, supplier reroute).
+   - For `MARGINAL` verdicts: Emits a guarded exploratory / telemetry gathering directive without irreversible automated intervention.
+3. **Persona Synthesis**: Invokes LLM with persona context:
    - `analyst`: Technical root-cause details and deployment rollbacks.
    - `manager`: Operational timeline, team ownership, and customer impact.
    - `cfo`: Financial exposure, revenue loss mitigation, and SLA impact.
 
 ### Deterministic vs LLM Behavior
-- Abstention gate is **100% Deterministic**.
-- Recommendation narrative is **LLM-Generated** (`temperature=0.0`).
+- Abstention gate and action governance policy are **100% Deterministic**.
+- Narrative synthesis is **LLM-Generated** (`temperature=0.0`).
 
 ### Provenance Tag
 `MethodTag.LLM`
 
 ### Failure/Abstention Behavior
-If the LLM fails or times out, returns `abstained=True` with `rationale="LLM unavailable"`.
+If the LLM fails or times out, returns `abstained=True` with `persona_narrative="LLM unavailable"`.
 
 ### Security Considerations
 Persona entitlement filters are preserved; narrative only discusses evidence present in the authorized result.
