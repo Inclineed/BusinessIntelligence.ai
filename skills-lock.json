@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "html-slides": {
+      "source": "bluedusk/html-slides",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "d2527514107cd0a0bcca0a101d97847217e575ffef710ba10d97e3707b5c264d"
+    }
+  }
+}
