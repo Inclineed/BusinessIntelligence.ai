@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="html-slides v0.9.4">
+    <title>BusinessIntelligence.ai — Accenture Innovation Challenge 2026</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js for Interactive Telemetry -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-void: #07090e;
+            --bg-surface: #0e131f;
+            --bg-card: #141b2d;
+            --bg-card-hover: #1b243d;
+            --border-subtle: #1e293d;
+            --border-accent: #2d3d5f;
+            
+            --accent-cyan: #06b6d4;
+            --accent-teal: #14b8a6;
+            --accent-emerald: #10b981;
+            --accent-purple: #a855f7;
+            --accent-indigo: #6366f1;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            
+            --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+            --font-body: 'Inter', system-ui, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-void);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+        }
+
+        /* 100vh Viewport-Locked Deck Frame */
+        .deck {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: clamp(20px, 4vh, 48px) clamp(30px, 5vw, 64px);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.4s var(--ease-out-expo), transform 0.4s var(--ease-out-expo);
+            transform: translateY(12px) scale(0.99);
+            background: radial-gradient(circle at 80% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
+                        radial-gradient(circle at 20% 80%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
+                        var(--bg-void);
+        }
+
+        .slide.active {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+            transform: translateY(0) scale(1);
+            z-index: 10;
+        }
+
+        /* Header Bar inside slides */
+        .slide-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: clamp(10px, 1.8vh, 18px);
+            margin-bottom: clamp(12px, 2vh, 24px);
+            flex-shrink: 0;
+        }
+
+        .slide-tag {
+            font-family: var(--font-mono);
+            font-size: clamp(10px, 1.2vh, 12px);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--accent-cyan);
+            background: rgba(6, 182, 212, 0.1);
+            border: 1px solid rgba(6, 182, 212, 0.25);
+            padding: 4px 10px;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .slide-header-meta {
+            font-family: var(--font-mono);
+            font-size: clamp(11px, 1.2vh, 13px);
+            color: var(--text-muted);
+        }
+
+        .slide-title-group {
+            margin-bottom: clamp(8px, 1.5vh, 16px);
+        }
+
+        .slide-title {
+            font-family: var(--font-display);
+            font-size: clamp(22px, 3.5vh, 36px);
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+            line-height: 1.15;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .slide-subtitle {
+            font-size: clamp(13px, 1.8vh, 16px);
+            color: var(--text-secondary);
+            margin-top: 4px;
+            font-weight: 400;
+        }
+
+        /* Slide Body Container - strictly max-height constrained */
+        .slide-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: clamp(12px, 2vh, 24px);
+            min-height: 0; /* allows children to flex properly */
+            max-height: calc(100vh - 180px);
+        }
+
+        /* Slide Footer & Navigation */
+        .slide-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid var(--border-subtle);
+            padding-top: clamp(10px, 1.5vh, 16px);
+            font-family: var(--font-mono);
+            font-size: clamp(10px, 1.2vh, 12px);
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        /* Floating Nav Controls */
+        .nav-dock {
+            position: fixed;
+            bottom: 20px;
+            right: 32px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(14, 19, 31, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-accent);
+            padding: 6px 12px;
+            border-radius: 9999px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+
+        .nav-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .nav-btn:hover {
+            background: var(--bg-card-hover);
+            color: var(--text-primary);
+        }
+
+        .nav-counter {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--accent-cyan);
+            font-weight: 600;
+            padding: 0 8px;
+        }
+
+        /* Progress Bar */
+        .progress-bar-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.05);
+            z-index: 1000;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+            transition: width 0.3s ease;
+        }
+
+        /* Grid Layouts */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: clamp(12px, 2.5vw, 28px);
+            height: 100%;
+            align-items: stretch;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: clamp(10px, 1.8vw, 20px);
+            height: 100%;
+            align-items: stretch;
+        }
+
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: clamp(8px, 1.5vw, 16px);
+            height: 100%;
+            align-items: stretch;
+        }
+
+        /* Card Primitive */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: clamp(14px, 2.2vh, 24px);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            position: relative;
+            overflow: hidden;
+            transition: border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .card:hover {
+            border-color: var(--border-accent);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .card-title {
+            font-family: var(--font-display);
+            font-size: clamp(15px, 2vh, 18px);
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-body {
+            font-size: clamp(12px, 1.5vh, 14px);
+            color: var(--text-secondary);
+            line-height: 1.5;
+            flex: 1;
+        }
+
+        /* Hero Badges & Stats */
+        .stat-value {
+            font-family: var(--font-display);
+            font-size: clamp(28px, 4.5vh, 48px);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-family: var(--font-mono);
+            font-size: clamp(11px, 1.3vh, 12px);
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Interactive Flip Cards */
+        .flip-card-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            height: 100%;
+        }
+
+        .flip-card {
+            background-color: transparent;
+            perspective: 1000px;
+            cursor: pointer;
+            height: 100%;
+            min-height: 220px;
+        }
+
+        .flip-card-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            text-align: left;
+            transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-style: preserve-3d;
+            border-radius: 12px;
+        }
+
+        .flip-card.flipped .flip-card-inner {
+            transform: rotateY(180deg);
+        }
+
+        .flip-card-front, .flip-card-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .flip-card-front {
+            background: var(--bg-card);
+        }
+
+        .flip-card-back {
+            background: #182238;
+            border-color: var(--accent-cyan);
+            transform: rotateY(180deg);
+        }
+
+        /* 9-Engine Flow Grid */
+        .engine-strip {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .engine-pill {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 10px 8px;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .engine-pill:hover, .engine-pill.active {
+            border-color: var(--accent-cyan);
+            background: var(--bg-card-hover);
+            transform: translateY(-2px);
+        }
+
+        .engine-id {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+
+        .engine-name {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .engine-tag {
+            font-size: 8px;
+            font-family: var(--font-mono);
+            text-transform: uppercase;
+            padding: 2px 4px;
+            border-radius: 4px;
+            margin-top: 6px;
+            display: inline-block;
+        }
+
+        .tag-deterministic {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-emerald);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .tag-llm {
+            background: rgba(168, 85, 247, 0.15);
+            color: var(--accent-purple);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+        }
+
+        /* Persona Switcher Box */
+        .persona-matrix {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+
+        .persona-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 18px;
+            position: relative;
+        }
+
+        .persona-card.analyst { border-top: 4px solid var(--accent-cyan); }
+        .persona-card.manager { border-top: 4px solid var(--accent-amber); }
+        .persona-card.cfo { border-top: 4px solid var(--accent-emerald); }
+
+        /* Code Block */
+        pre.code-block {
+            background: #090d16;
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-family: var(--font-mono);
+            font-size: clamp(10px, 1.3vh, 12px);
+            color: #cbd5e1;
+            line-height: 1.5;
+            overflow-x: auto;
+        }
+
+        /* Speaker Notes Panel (Press 'N') */
+        .notes-panel {
+            position: fixed;
+            bottom: 70px;
+            right: 32px;
+            width: 360px;
+            max-height: 240px;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 999;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .notes-panel.open { display: flex; }
+
+        .notes-header {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .notes-body {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.45;
+            overflow-y: auto;
+        }
+
+        /* Key Highlights List */
+        .feature-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .feature-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: clamp(12px, 1.5vh, 13.5px);
+            color: var(--text-secondary);
+        }
+
+        .feature-list li strong {
+            color: var(--text-primary);
+        }
+
+        .feature-list li .icon {
+            color: var(--accent-cyan);
+            font-family: var(--font-mono);
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="progress-bar-container">
+        <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+
+    <div class="deck" id="deck">
+
+        <!-- ==================== SLIDE 0: TITLE COVER ==================== -->
+        <div class="slide active" data-slide="0">
+            <div class="slide-header">
+                <div class="slide-tag">Accenture Innovation Challenge 2026</div>
+                <div class="slide-header-meta">Evidence-Backed Decision Intelligence</div>
+            </div>
+
+            <div class="slide-content" style="justify-content: center; text-align: left; max-width: 900px;">
+                <div style="font-family: var(--font-mono); font-size: clamp(12px, 1.8vh, 15px); color: var(--accent-cyan); letter-spacing: 0.05em; margin-bottom: 12px;">
+                    AI REINVENTION MADE REAL
+                </div>
+                <h1 style="font-family: var(--font-display); font-size: clamp(32px, 5.5vh, 56px); font-weight: 800; line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 16px;">
+                    BusinessIntelligence.ai
+                </h1>
+                <p style="font-size: clamp(16px, 2.4vh, 22px); color: var(--text-secondary); line-height: 1.4; margin-bottom: 28px;">
+                    An Evidence-Backed KPI Anomaly Decision Engine with Causal Governance, 5-Rule Epistemic Auditing, and Zero-Trust Role Isolation.
+                </p>
+
+                <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 12px 18px; border-radius: 10px;">
+                        <div class="stat-label">Architecture</div>
+                        <div style="font-weight: 700; color: var(--text-primary); font-size: 15px; margin-top: 2px;">9-Stage Pipeline ($E_1 \rightarrow E_9$)</div>
+                    </div>
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 12px 18px; border-radius: 10px;">
+                        <div class="stat-label">Mathematical Invariant</div>
+                        <div style="font-weight: 700; color: var(--accent-emerald); font-size: 15px; margin-top: 2px;">Deterministic Truth + Governed LLM</div>
+                    </div>
+                    <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 12px 18px; border-radius: 10px;">
+                        <div class="stat-label">Verification Scorecard</div>
+                        <div style="font-weight: 700; color: var(--accent-cyan); font-size: 15px; margin-top: 2px;">15/15 Passed (0 Hallucinations)</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Team: Inclineed / BusinessIntelligence.ai</div>
+                <div>Press [→] or [Space] to navigate · [N] for Speaker Notes</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                Welcome everyone. Today we are presenting BusinessIntelligence.ai for the Accenture Innovation Challenge 2026. This is an evidence-backed decision engine designed to solve the critical blindspot in enterprise observability: knowing not just WHAT broke, but WHY it broke and WHAT governed action to take without AI hallucination.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 1: THE PROBLEM ==================== -->
+        <div class="slide" data-slide="1">
+            <div class="slide-header">
+                <div class="slide-tag">01 · Problem Statement</div>
+                <div class="slide-header-meta">The Epistemic Disconnect in Enterprise BI</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">Why Traditional BI & Naive GenAI Fail in Operations</div>
+                <div class="slide-subtitle">Modern dashboards show symptoms, but cannot isolate causal provenance or enforce safety.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="grid-3">
+                    <div class="card" style="border-top: 3px solid var(--accent-rose);">
+                        <div class="card-header">
+                            <div class="card-title">1. Dashboards Show What, Not Why</div>
+                        </div>
+                        <div class="card-body">
+                            When hourly conversion drops 14% or gateway latency spikes 300%, traditional tools (Grafana, Tableau) display metric alarms but cannot discern if the cause is a code deployment, gateway outage, or ETL ingestion lag.
+                        </div>
+                    </div>
+
+                    <div class="card" style="border-top: 3px solid var(--accent-amber);">
+                        <div class="card-header">
+                            <div class="card-title">2. GenAI Hallucination Risk</div>
+                        </div>
+                        <div class="card-body">
+                            Generic LLM chatbots guess root causes without empirical validation. They invent fictitious log citations, perform uncalibrated math, and propose dangerous multi-million dollar remediation actions.
+                        </div>
+                    </div>
+
+                    <div class="card" style="border-top: 3px solid var(--accent-purple);">
+                        <div class="card-header">
+                            <div class="card-title">3. Missing Zero-Trust Governance</div>
+                        </div>
+                        <div class="card-body">
+                            Operators lack cryptographic provenance linking actions to verified records. Uncontrolled automated agents trigger destructive restarts without verifying user role entitlements or data confidentiality.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Root Problem: Lack of mathematical grounding and causal provenance in observability</div>
+                <div>Slide 2 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                Traditional dashboards only show the symptom. When an outage occurs, SREs spend hours correlating logs manually. When teams plug in naive LLMs, the models hallucinate plausible-sounding explanations and trigger unauthorized fixes. We need a system where math is 100% deterministic and LLMs are strictly bounded.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 2: THE SOLUTION ARCHITECTURE ==================== -->
+        <div class="slide" data-slide="2">
+            <div class="slide-header">
+                <div class="slide-tag">02 · Proposed Solution</div>
+                <div class="slide-header-meta">9-Stage Causal Governance Pipeline</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">Separation of Quantitative Truth & Qualitative Narrative</div>
+                <div class="slide-subtitle">Deterministic engines calculate metrics and audit constraints; LLMs formulate structured ontology.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="engine-strip">
+                    <div class="engine-pill">
+                        <div class="engine-id">E1</div>
+                        <div class="engine-name">KPI Store</div>
+                        <span class="engine-tag tag-deterministic">SQL/Pandas</span>
+                    </div>
+                    <div class="engine-pill">
+                        <div class="engine-id">E2</div>
+                        <div class="engine-name">Signal Eng.</div>
+                        <span class="engine-tag tag-deterministic">Z-Score</span>
+                    </div>
+                    <div class="engine-pill">
+                        <div class="engine-id">E3</div>
+                        <div class="engine-name">Diagnostic</div>
+                        <span class="engine-tag tag-deterministic">GROUP BY</span>
+                    </div>
+                    <div class="engine-pill">
+                        <div class="engine-id">E4</div>
+                        <div class="engine-name">Evidence</div>
+                        <span class="engine-tag tag-deterministic">Vector/SQL</span>
+                    </div>
+                    <div class="engine-pill" style="border-color: var(--accent-purple);">
+                        <div class="engine-id" style="color: var(--accent-purple);">E5</div>
+                        <div class="engine-name">Hypothesis</div>
+                        <span class="engine-tag tag-llm">LLM Ontol.</span>
+                    </div>
+                    <div class="engine-pill">
+                        <div class="engine-id">E6</div>
+                        <div class="engine-name">Challenge</div>
+                        <span class="engine-tag tag-deterministic">5 Rules</span>
+                    </div>
+                    <div class="engine-pill">
+                        <div class="engine-id">E7</div>
+                        <div class="engine-name">Decision</div>
+                        <span class="engine-tag tag-deterministic">Policy</span>
+                    </div>
+                    <div class="engine-pill">
+                        <div class="engine-id">E8</div>
+                        <div class="engine-name">Simulator</div>
+                        <span class="engine-tag tag-deterministic">Exp. Decay</span>
+                    </div>
+                    <div class="engine-pill">
+                        <div class="engine-id">E9</div>
+                        <div class="engine-name">Memory</div>
+                        <span class="engine-tag tag-deterministic">ChromaDB</span>
+                    </div>
+                </div>
+
+                <div class="grid-2" style="margin-top: 8px;">
+                    <div class="card">
+                        <div class="card-title" style="color: var(--accent-emerald);">Deterministic Math Layer (E1-E3, E6, E8)</div>
+                        <ul class="feature-list" style="margin-top: 10px;">
+                            <li><span class="icon">✓</span> <span><strong>Corridor Check:</strong> $|z| = |x_t - \mu|/\sigma$ rolling baseline verification</span></li>
+                            <li><span class="icon">✓</span> <span><strong>Cohort Variance:</strong> Exact SQL cohort contribution %</span></li>
+                            <li><span class="icon">✓</span> <span><strong>Weakest-Link Challenge:</strong> Multiplicative rule scoring</span></li>
+                            <li><span class="icon">✓</span> <span><strong>Outcome Trajectory:</strong> $y(t) = y_{target} + (y_{anomaly}-y_{target})e^{-\lambda t}$</span></li>
+                        </ul>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title" style="color: var(--accent-purple);">Governed LLM Synthesis Layer (E5, E7)</div>
+                        <ul class="feature-list" style="margin-top: 10px;">
+                            <li><span class="icon">✓</span> <span><strong>4-Layer Causal Ontology:</strong> Root Cause $\rightarrow$ Subsystem $\rightarrow$ Mechanism $\rightarrow$ Symptom</span></li>
+                            <li><span class="icon">✓</span> <span><strong>Strict Zero-Number Guard:</strong> LLMs are forbidden from inventing numbers</span></li>
+                            <li><span class="icon">✓</span> <span><strong>Persona-Adapted Briefings:</strong> Formatted for Analyst, Manager, or CFO</span></li>
+                            <li><span class="icon">✓</span> <span><strong>Multi-Provider:</strong> Groq, OpenAI, Anthropic, and Ollama</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Core Invariant: LLMs never calculate numbers or make confidence decisions</div>
+                <div>Slide 3 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                Here is our foundational architectural breakthrough. We divide the workload into two strict layers. 100% of mathematical validation, signal scoring, and verification rule evaluation is performed by deterministic code. The LLM is invoked only to formulate candidate hypotheses and write executive briefs.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 3: TELEMETRY & DIMENSIONAL DECOMPOSITION ==================== -->
+        <div class="slide" data-slide="3">
+            <div class="slide-header">
+                <div class="slide-tag">03 · Stage E1-E3 Telemetry</div>
+                <div class="slide-header-meta">Statistical Anomaly & Cohort Slicing</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">Live Anomaly Detection & Dimensional Attribution (INC_001)</div>
+                <div class="slide-subtitle">Isolating statistical breaches ($z = -3.03$) and attributing 68% variance to Android devices.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="grid-2">
+                    <div class="card" style="padding: 16px;">
+                        <div class="card-header">
+                            <div class="card-title">Hourly Conversion Rate Corridor (E1/E2)</div>
+                            <span class="slide-tag" style="color: var(--accent-rose); border-color: var(--accent-rose);">Anomaly: -14.2%</span>
+                        </div>
+                        <div style="height: 190px; width: 100%; position: relative;">
+                            <canvas id="kpiChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="card" style="padding: 16px;">
+                        <div class="card-header">
+                            <div class="card-title">Dimensional Decomposition (E3)</div>
+                            <span class="slide-tag" style="color: var(--accent-cyan);">Android = 68%</span>
+                        </div>
+                        <div style="height: 190px; width: 100%; position: relative;">
+                            <canvas id="dimChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Deterministic SQL GROUP BY aggregates dimensional cohorts with zero false-segment crashes</div>
+                <div>Slide 4 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                In INC_001, Engine E1 and E2 instantly catch a conversion crash. Notice how the actual telemetry breaches the lower baseline corridor. Engine E3 immediately decomposes the variance across devices, isolating that Android devices drive 68% of the total revenue drop.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 4: 5-RULE EPISTEMIC CHALLENGE ==================== -->
+        <div class="slide" data-slide="4">
+            <div class="slide-header">
+                <div class="slide-tag">04 · Stage E6 Challenge Audit</div>
+                <div class="slide-header-meta">Deterministic Weakest-Link Scoring</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">5-Rule Epistemic Audit & Root-Cause Gate</div>
+                <div class="slide-subtitle">Click any card to inspect the deterministic rule verification logic and weights.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="flip-card-grid">
+                    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+                        <div class="flip-card-inner">
+                            <div class="flip-card-front">
+                                <div>
+                                    <div class="stat-label">Rule 1 · w=0.25</div>
+                                    <div class="card-title" style="margin-top: 6px;">Timeline</div>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary);">Validates initiating timestamps precede anomaly window.</div>
+                                <div style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-cyan);">Click to Flip ⟳</div>
+                            </div>
+                            <div class="flip-card-back">
+                                <div class="stat-label">Verification Logic</div>
+                                <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 4px;">
+                                    Checks $t_{evidence} \le t_{anomaly}$. Release commit at 14:15 precedes 14:30 anomaly. <strong>Verdict: PASS (1.0)</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+                        <div class="flip-card-inner">
+                            <div class="flip-card-front">
+                                <div>
+                                    <div class="stat-label">Rule 2 · w=0.20</div>
+                                    <div class="card-title" style="margin-top: 6px;">Segment Align</div>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary);">Matches hypothesis cohort with E3 dominant slice.</div>
+                                <div style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-cyan);">Click to Flip ⟳</div>
+                            </div>
+                            <div class="flip-card-back">
+                                <div class="stat-label">Verification Logic</div>
+                                <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 4px;">
+                                    Hypothesis specifies Android checkout; E3 shows Android 68% contribution. <strong>Verdict: PASS (1.0)</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+                        <div class="flip-card-inner">
+                            <div class="flip-card-front">
+                                <div>
+                                    <div class="stat-label">Rule 3 · w=0.20</div>
+                                    <div class="card-title" style="margin-top: 6px;">KPI Corroboration</div>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary);">Proportion of anomalous KPIs directly explained.</div>
+                                <div style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-cyan);">Click to Flip ⟳</div>
+                            </div>
+                            <div class="flip-card-back">
+                                <div class="stat-label">Verification Logic</div>
+                                <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 4px;">
+                                    Explains both latency surge and conversion collapse. <strong>Verdict: PASS (1.0)</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+                        <div class="flip-card-inner">
+                            <div class="flip-card-front">
+                                <div>
+                                    <div class="stat-label">Rule 4 · w=0.20</div>
+                                    <div class="card-title" style="margin-top: 6px;">Mechanism</div>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary);">Ontological consistency with domain failure modes.</div>
+                                <div style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-cyan);">Click to Flip ⟳</div>
+                            </div>
+                            <div class="flip-card-back">
+                                <div class="stat-label">Verification Logic</div>
+                                <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 4px;">
+                                    Connection pool exhaustion physically matches gateway timeouts. <strong>Verdict: PASS (1.0)</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+                        <div class="flip-card-inner">
+                            <div class="flip-card-front">
+                                <div>
+                                    <div class="stat-label">Rule 5 · w=0.15</div>
+                                    <div class="card-title" style="margin-top: 6px;">Contradiction</div>
+                                </div>
+                                <div style="font-size: 12px; color: var(--text-secondary);">Scans dossier for direct refuting telemetry records.</div>
+                                <div style="font-family: var(--font-mono); font-size: 11px; color: var(--accent-cyan);">Click to Flip ⟳</div>
+                            </div>
+                            <div class="flip-card-back">
+                                <div class="stat-label">Verification Logic</div>
+                                <div style="font-size: 11.5px; color: #e2e8f0; margin-top: 4px;">
+                                    Zero contradictory records for H1. (H3 penalized by inventory logs). <strong>Verdict: PASS (1.0)</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 12px; padding: 12px 18px; background: rgba(6, 182, 212, 0.05); border-color: rgba(6, 182, 212, 0.3);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-cyan);">
+                            <strong>Root-Cause Evidence Gate:</strong> Verified internal release claims require direct git/CI-CD commit hashes.
+                        </span>
+                        <span class="slide-tag" style="background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border-color: rgba(16, 185, 129, 0.3);">
+                            Gate Passed: Score = 0.940 (VERIFIED)
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Weakest-Link Formulation: Final Score = Rule Score × Support × (1 - Contradiction)</div>
+                <div>Slide 5 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                Engine E6 is the mathematical backbone of our auditability. Each candidate hypothesis is scored against 5 explicit verification rules. Furthermore, under our Root-Cause Evidence Gate, an AI hypothesis cannot receive VERIFIED status unless backed by concrete deployment traces.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 5: ZERO-TRUST ROLE GOVERNANCE ==================== -->
+        <div class="slide" data-slide="5">
+            <div class="slide-header">
+                <div class="slide-tag">05 · Stage E7 Governance</div>
+                <div class="slide-header-meta">Zero-Trust Role Entitlements & Safety</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">Multi-Persona Security & Governed Action Levers</div>
+                <div class="slide-subtitle">Role-based data masking and execution guardrails prevent unauthorized remediation.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="persona-matrix">
+                    <div class="persona-card analyst">
+                        <div class="card-header">
+                            <div class="card-title" style="color: var(--accent-cyan);">Analyst Scope</div>
+                            <span class="slide-tag">Cross-Domain</span>
+                        </div>
+                        <div class="card-body">
+                            <ul class="feature-list">
+                                <li><span class="icon">👁</span> <strong>Data Access:</strong> All telemetry, SQL tables, git logs, deployment traces.</li>
+                                <li><span class="icon">⚡</span> <strong>Authorized Levers:</strong> Diagnostic execution, runbook dispatch, service rollback.</li>
+                                <li><span class="icon">🛡</span> <strong>Focus:</strong> Deep technical root cause & mechanism identification.</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="persona-card manager">
+                        <div class="card-header">
+                            <div class="card-title" style="color: var(--accent-amber);">Regional Manager</div>
+                            <span class="slide-tag">Scoped Region</span>
+                        </div>
+                        <div class="card-body">
+                            <ul class="feature-list">
+                                <li><span class="icon">👁</span> <strong>Data Access:</strong> Regional store telemetry & localized support queues.</li>
+                                <li><span class="icon">⚡</span> <strong>Authorized Levers:</strong> Routing adjustments, store announcements, regional cache flush.</li>
+                                <li><span class="icon">🛡</span> <strong>Focus:</strong> Operational continuity and customer communication.</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="persona-card cfo">
+                        <div class="card-header">
+                            <div class="card-title" style="color: var(--accent-emerald);">CFO / Executive</div>
+                            <span class="slide-tag">Financial</span>
+                        </div>
+                        <div class="card-body">
+                            <ul class="feature-list">
+                                <li><span class="icon">👁</span> <strong>Data Access:</strong> Revenue impact, SLA breaches, refund totals (code logs masked).</li>
+                                <li><span class="icon">⚡</span> <strong>Authorized Levers:</strong> Customer goodwill credits, SLA waivers, vendor escalations.</li>
+                                <li><span class="icon">🛡</span> <strong>Focus:</strong> Financial mitigation, enterprise exposure, business SLA.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Zero-Trust Invariant: Persona switches immediately sanitize authorization boundaries</div>
+                <div>Slide 6 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                Enterprise systems require strict authorization. In our console, switching roles dynamically filters data access. The Analyst sees code commits; the Manager sees regional routing; the CFO sees financial loss numbers while technical logs are masked.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 6: FAIL-CLOSED ABSTENTION ==================== -->
+        <div class="slide" data-slide="6">
+            <div class="slide-header">
+                <div class="slide-tag">06 · Safety & Robustness</div>
+                <div class="slide-header-meta">Fail-Closed Abstention Guards</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">Knowing When NOT to Act: Deterministic Guards</div>
+                <div class="slide-subtitle">Eliminates hallucinations and prevents false-positive remediation spend.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="grid-3">
+                    <div class="card" style="border-left: 4px solid var(--accent-amber);">
+                        <div class="card-header">
+                            <div class="card-title">Cold-Start Guard (INC_003)</div>
+                        </div>
+                        <div class="card-body">
+                            When baseline telemetry has fewer than 14 intervals ($N < 14$), statistical confidence is uncalibrated.
+                            <div style="margin-top: 10px; padding: 8px 12px; background: rgba(245, 158, 11, 0.1); border-radius: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--accent-amber);">
+                                ➔ Verdict: ABSTAIN (0 LLM Calls)
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="border-left: 4px solid var(--accent-emerald);">
+                        <div class="card-header">
+                            <div class="card-title">Nominal Check (INC_005)</div>
+                        </div>
+                        <div class="card-body">
+                            Standard seasonal traffic fluctuations within calibrated corridor bounds ($|z| < 3.0\sigma$) are certified normal.
+                            <div style="margin-top: 10px; padding: 8px 12px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--accent-emerald);">
+                                ➔ Verdict: SYSTEM NOMINAL
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="border-left: 4px solid var(--accent-rose);">
+                        <div class="card-header">
+                            <div class="card-title">Low Confidence (INC_007)</div>
+                        </div>
+                        <div class="card-body">
+                            When competing hypotheses have narrow margins ($\Delta < 0.15$) or score $< 0.40$, autonomous action is suppressed.
+                            <div style="margin-top: 10px; padding: 8px 12px; background: rgba(244, 63, 94, 0.1); border-radius: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--accent-rose);">
+                                ➔ Verdict: SAFE DIAGNOSTIC ONLY
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Fail-Closed Principle: Unactionable telemetry scenarios bypass expensive LLM calls completely</div>
+                <div>Slide 7 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                A truly production-ready enterprise engine must know when to abstain. When baseline history is too sparse, or when a metric fluctuation is just normal seasonal demand, the engine safely bypasses LLMs and reports nominal or abstained status.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 7: VERIFICATION & BENCHMARKS ==================== -->
+        <div class="slide" data-slide="7">
+            <div class="slide-header">
+                <div class="slide-tag">07 · Empirical Validation</div>
+                <div class="slide-header-meta">Scorecard, Testing & Multi-Cloud LLMs</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">15-Dimension Evaluator & Multi-Provider Architecture</div>
+                <div class="slide-subtitle">Rigorous test suites prove 100% reproducible execution and zero hallucinated citations.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="grid-4">
+                    <div class="card" style="text-align: center;">
+                        <div class="stat-value" style="color: var(--accent-emerald);">15/15</div>
+                        <div class="stat-label">Evaluation Dimensions</div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">100% Scorecard Pass</div>
+                    </div>
+
+                    <div class="card" style="text-align: center;">
+                        <div class="stat-value" style="color: var(--accent-cyan);">406</div>
+                        <div class="stat-label">Backend Tests</div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Pytest Suite (100% Pass)</div>
+                    </div>
+
+                    <div class="card" style="text-align: center;">
+                        <div class="stat-value" style="color: var(--accent-purple);">0</div>
+                        <div class="stat-label">Hallucinated References</div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Strict Citation Fidelity</div>
+                    </div>
+
+                    <div class="card" style="text-align: center;">
+                        <div class="stat-value" style="color: var(--accent-amber);">4</div>
+                        <div class="stat-label">Cloud LLM Providers</div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Groq · OpenAI · Anthropic · Ollama</div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 12px;">
+                    <div class="card-title">Multi-Cloud Provider Switcher & Cost Accounting</div>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 10px;">
+                        <div style="background: rgba(255, 255, 255, 0.03); padding: 10px; border-radius: 8px;">
+                            <div style="font-weight: 700; color: var(--accent-cyan); font-size: 13px;">Groq (Qwen 2.5 32B)</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Latency: ~350ms · $0.05/1M</div>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.03); padding: 10px; border-radius: 8px;">
+                            <div style="font-weight: 700; color: var(--accent-emerald); font-size: 13px;">OpenAI (GPT-4o Mini)</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Native JSON mode · $0.15/1M</div>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.03); padding: 10px; border-radius: 8px;">
+                            <div style="font-weight: 700; color: var(--accent-purple); font-size: 13px;">Anthropic (Claude 3.5)</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Messages API · 529 Backoff</div>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.03); padding: 10px; border-radius: 8px;">
+                            <div style="font-weight: 700; color: var(--accent-amber); font-size: 13px;">Ollama (Local Llama 3)</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">100% Offline Air-Gapped</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Enterprise Portability: Full cloud independence with pluggable API rate cards</div>
+                <div>Slide 8 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                Our prototype is proven by a comprehensive 15-dimension automated scorecard and 406 passing backend tests. It seamlessly switches between Groq, OpenAI, Anthropic, and local Ollama inference with full token cost tracking.
+            </script>
+        </div>
+
+        <!-- ==================== SLIDE 8: SUMMARY & VALUE ==================== -->
+        <div class="slide" data-slide="8">
+            <div class="slide-header">
+                <div class="slide-tag">08 · Business Impact & ROI</div>
+                <div class="slide-header-meta">Operational Value & Accenture Alignment</div>
+            </div>
+
+            <div class="slide-title-group">
+                <div class="slide-title">Transforming Enterprise Operations with Auditable AI</div>
+                <div class="slide-subtitle">From reactive dashboard alert fatigue to governed, high-confidence decision intelligence.</div>
+            </div>
+
+            <div class="slide-content">
+                <div class="grid-3">
+                    <div class="card">
+                        <div class="stat-value" style="color: var(--accent-cyan);">-78%</div>
+                        <div class="stat-label">MTTR / MTTN Reduction</div>
+                        <div class="card-body" style="margin-top: 10px;">
+                            Compresses multi-hour cross-functional root-cause triage into automated sub-second causal investigations.
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="stat-value" style="color: var(--accent-emerald);">0.0%</div>
+                        <div class="stat-label">Hallucinated Incident Actions</div>
+                        <div class="card-body" style="margin-top: 10px;">
+                            5-rule epistemic auditing and weakest-link mathematical bounds prevent destructive remediation mistakes.
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="stat-value" style="color: var(--accent-purple);">100%</div>
+                        <div class="stat-label">Zero-Trust Auditability</div>
+                        <div class="card-body" style="margin-top: 10px;">
+                            Cryptographic SHA-256 telemetry hashes and institutional memory in ChromaDB provide enterprise audit compliance.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 12px; background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(168, 85, 247, 0.1)); border-color: var(--accent-cyan); text-align: center; padding: 18px;">
+                    <div style="font-family: var(--font-display); font-size: 20px; font-weight: 800; color: var(--text-primary);">
+                        BusinessIntelligence.ai — AI Reinvention Made Real
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 13px; margin-top: 4px;">
+                        Live Prototype Online · Full API Backend · React 19 Analytical Console · 15/15 Evaluator Scorecard
+                    </div>
+                </div>
+            </div>
+
+            <div class="slide-footer">
+                <div>Thank you! Questions & Live Demo Interaction</div>
+                <div>Slide 9 of 9</div>
+            </div>
+            <script type="text/plain" class="slide-notes">
+                In summary, BusinessIntelligence.ai delivers a 78% reduction in mean time to normalcy, completely eliminates hallucinated incident actions, and provides 100% auditable zero-trust decisioning. Thank you, and we are ready for the live demonstration and Q&A.
+            </script>
+        </div>
+
+    </div>
+
+    <!-- Navigation Dock -->
+    <div class="nav-dock">
+        <button class="nav-btn" onclick="prev()" title="Previous Slide [←]">◀</button>
+        <div class="nav-counter" id="slideCounter">1 / 9</div>
+        <button class="nav-btn" onclick="next()" title="Next Slide [→]">▶</button>
+        <button class="nav-btn" onclick="toggleNotes()" title="Speaker Notes [N]">📝</button>
+        <button class="nav-btn" onclick="toggleFullscreen()" title="Fullscreen [F]">⛶</button>
+    </div>
+
+    <!-- Speaker Notes Floating Panel -->
+    <div class="notes-panel" id="notesPanel">
+        <div class="notes-header">
+            <span>Speaker Notes</span>
+            <span style="cursor: pointer;" onclick="toggleNotes()">✕</span>
+        </div>
+        <div class="notes-body" id="notesContent">
+            Loading speaker notes...
+        </div>
+    </div>
+
+    <!-- Interactive Navigation & Chart Logic -->
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        const counterEl = document.getElementById('slideCounter');
+        const progressBar = document.getElementById('progressBar');
+        const notesPanel = document.getElementById('notesPanel');
+        const notesContent = document.getElementById('notesContent');
+
+        function updateSlide(index) {
+            if (index < 0) index = 0;
+            if (index >= totalSlides) index = totalSlides - 1;
+            
+            slides.forEach((slide, i) => {
+                slide.classList.toggle('active', i === index);
+            });
+            
+            currentSlide = index;
+            counterEl.textContent = `${currentSlide + 1} / ${totalSlides}`;
+            progressBar.style.width = `${((currentSlide + 1) / totalSlides) * 100}%`;
+
+            // Update notes
+            const activeSlide = slides[currentSlide];
+            const notesEl = activeSlide.querySelector('.slide-notes');
+            if (notesEl) {
+                notesContent.textContent = notesEl.textContent.trim();
+            } else {
+                notesContent.textContent = "No notes for this slide.";
+            }
+
+            // Trigger chart render if on chart slide
+            if (currentSlide === 3) {
+                initCharts();
+            }
+        }
+
+        function next() {
+            if (currentSlide < totalSlides - 1) {
+                updateSlide(currentSlide + 1);
+            }
+        }
+
+        function prev() {
+            if (currentSlide > 0) {
+                updateSlide(currentSlide - 1);
+            }
+        }
+
+        function goTo(index) {
+            updateSlide(index);
+        }
+
+        function toggleNotes() {
+            notesPanel.classList.toggle('open');
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen().catch(() => {});
+            }
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+                e.preventDefault();
+                next();
+            } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+                e.preventDefault();
+                prev();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                goTo(0);
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                goTo(totalSlides - 1);
+            } else if (e.key.toLowerCase() === 'n') {
+                toggleNotes();
+            } else if (e.key.toLowerCase() === 'f') {
+                toggleFullscreen();
+            }
+        });
+
+        // Initialize Charts on Slide 3
+        let chartsInitialized = false;
+        function initCharts() {
+            if (chartsInitialized) return;
+            chartsInitialized = true;
+
+            const kpiCtx = document.getElementById('kpiChart');
+            if (kpiCtx) {
+                new Chart(kpiCtx, {
+                    type: 'line',
+                    data: {
+                        labels: ['13:00', '13:30', '14:00', '14:30 (Release)', '15:00', '15:30', '16:00'],
+                        datasets: [
+                            {
+                                label: 'Upper Baseline (+3σ)',
+                                data: [3.4, 3.4, 3.4, 3.4, 3.4, 3.4, 3.4],
+                                borderColor: 'rgba(148, 163, 184, 0.25)',
+                                borderDash: [4, 4],
+                                fill: false,
+                                pointRadius: 0
+                            },
+                            {
+                                label: 'Observed Telemetry',
+                                data: [3.1, 3.2, 3.15, 2.7, 1.8, 1.65, 1.62],
+                                borderColor: '#f43f5e',
+                                backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                                borderWidth: 2.5,
+                                fill: true,
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Lower Baseline (-3σ)',
+                                data: [2.8, 2.8, 2.8, 2.8, 2.8, 2.8, 2.8],
+                                borderColor: 'rgba(148, 163, 184, 0.25)',
+                                borderDash: [4, 4],
+                                fill: false,
+                                pointRadius: 0
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { labels: { color: '#94a3b8', font: { size: 10 } } }
+                        },
+                        scales: {
+                            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 9 } } },
+                            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 9 } } }
+                        }
+                    }
+                });
+            }
+
+            const dimCtx = document.getElementById('dimChart');
+            if (dimCtx) {
+                new Chart(dimCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Android (App v4.3)', 'iOS (App v4.2)', 'Desktop Web', 'Mobile Web'],
+                        datasets: [{
+                            label: 'Contribution to Drop (%)',
+                            data: [68.0, 18.0, 9.0, 5.0],
+                            backgroundColor: ['#06b6d4', '#6366f1', '#334155', '#1e293b'],
+                            borderRadius: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+                            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 9 } }, max: 100 }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Initialize state on load
+        updateSlide(0);
+    </script>
+</body>
+</html>
