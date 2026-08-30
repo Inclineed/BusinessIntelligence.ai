@@ -1,7 +1,8 @@
 import React from "react"
 import { InvestigationResult } from "../../types/investigation"
+import { getInvestigationStory } from "../../lib/narrativeHelpers"
 import { DiagnosticBreakdown } from "../diagnostic/DiagnosticBreakdown"
-import { Activity, Layers, Target, ArrowRight, ShieldAlert } from "lucide-react"
+import { Activity, Layers, Target, ArrowRight, ShieldAlert, Info } from "lucide-react"
 
 interface E3DiagnosticWorkspaceProps {
   result: InvestigationResult
@@ -11,6 +12,7 @@ export const E3DiagnosticWorkspace: React.FC<E3DiagnosticWorkspaceProps> = ({ re
   const contributions = result.contributions || []
   const signals = result.signals || []
   const materialityList = result.materiality || []
+  const story = getInvestigationStory(result)
 
   // Top overall anomaly by priority rank in E2
   const topMateriality = materialityList.find((m) => m.priority_rank === 1) || materialityList[0]
@@ -18,7 +20,6 @@ export const E3DiagnosticWorkspace: React.FC<E3DiagnosticWorkspaceProps> = ({ re
   const topSignal = signals.find((s) => s.kpi_id === topOverallKpi)
 
   // Dimensional diagnostic target (the segmentable anomaly decomposed by E3)
-  // In INC_001, hourly_conversion is the segmentable target with dimensional data.
   const segmentableMateriality = materialityList.find(
     (m) => m.is_statistical_anomaly && m.kpi_id !== topOverallKpi
   )
@@ -26,8 +27,10 @@ export const E3DiagnosticWorkspace: React.FC<E3DiagnosticWorkspaceProps> = ({ re
   const diagMateriality = materialityList.find((m) => m.kpi_id === diagnosticTargetId)
   const diagSignal = signals.find((s) => s.kpi_id === diagnosticTargetId)
 
+  const isDifferentTarget = topOverallKpi !== diagnosticTargetId
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in select-text">
       {/* Stage Header */}
       <header className="space-y-2 border-b border-[#2E2E2E] pb-4">
         <div className="flex items-center justify-between">
@@ -45,6 +48,26 @@ export const E3DiagnosticWorkspace: React.FC<E3DiagnosticWorkspaceProps> = ({ re
           Drilling down into dimensional partitions (device type, operating region, channel) to isolate cohort-level concentration on segmentable business KPIs while maintaining overall incident telemetry context.
         </p>
       </header>
+
+      {/* ── E2 -> E3 Context Bridge Banner ─────────────────────────────────── */}
+      <div className="p-3.5 rounded-xl bg-[#1A2024] border border-[#6B9BB0]/30 text-xs font-mono flex items-start gap-3 shadow-sm">
+        <Info className="w-4 h-4 text-[#6B9BB0] shrink-0 mt-0.5" />
+        <div className="text-[#D1C9B8] leading-relaxed">
+          {story.guardName.includes("Data Quality") || result.scenario_id === "INC_004" ? (
+            <span>
+              Top overall stream: <strong className="text-[#E56B62]">{topOverallKpi}</strong>. <strong>Data Quality Guard Active:</strong> Dimensional partitions are unpopulated because order transaction rows were delayed in the upstream ETL ingestion queue. Gateway telemetry confirms nominal checkout operation.
+            </span>
+          ) : isDifferentTarget ? (
+            <span>
+              Top overall anomaly: <strong className="text-[#E56B62]">{topOverallKpi}</strong> (E2 Priority #1). Because this system-level KPI has no dimensional slices, E3 is decomposing the highest-priority segmentable anomaly: <strong className="text-[#6B9BB0]">{diagnosticTargetId}</strong>.
+            </span>
+          ) : (
+            <span>
+              Top overall anomaly: <strong className="text-[#6B9BB0]">{topOverallKpi}</strong>. E3 is decomposing cohort partitions across device and channel dimensions.
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* E2 -> E3 Target Context Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-mono text-xs">
@@ -92,4 +115,3 @@ export const E3DiagnosticWorkspace: React.FC<E3DiagnosticWorkspaceProps> = ({ re
     </div>
   )
 }
-

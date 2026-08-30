@@ -172,17 +172,17 @@ export const FeedbackReviewBar: React.FC<FeedbackReviewBarProps> = ({ result, pe
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] text-[#9E9788]">Corrected Confidence</label>
+              <label className="text-[10px] text-[#9E9788]">Corrected Audit Verdict</label>
               <select
                 value={correctedConfidence}
                 onChange={(e) => setCorrectedConfidence(e.target.value)}
                 className="w-full bg-[#1C1C1C] border border-[#2E2E2E] px-2 py-1.5 rounded text-xs text-[#F4EEE0] focus:outline-none"
               >
                 <option value="">No change</option>
-                <option value="VERIFIED">HIGH</option>
-                <option value="MARGINAL">MEDIUM</option>
-                <option value="REJECTED">LOW</option>
-                <option value="ABSTAIN">ABSTAIN</option>
+                <option value="VERIFIED">Audit Verified</option>
+                <option value="MARGINAL">Audit Marginal</option>
+                <option value="REJECTED">Audit Rejected</option>
+                <option value="ABSTAIN">Audit Abstain</option>
               </select>
             </div>
 

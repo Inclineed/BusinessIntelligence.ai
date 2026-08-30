@@ -1,100 +1,127 @@
-# BusinessIntelligence.ai — Setup & Run Guide
+# BusinessIntelligence.ai — Setup & Operations Guide
 
-Domain-agnostic, evidence-backed KPI decision engine.  
-Nine-engine pipeline with deterministic confidence and local LLM inference.
-
----
-
-## Prerequisites
-
-| Requirement | Notes |
-|---|---|
-| **Python 3.11** | Other 3.x versions may work but are untested |
-| **Docker Desktop** | Must be running before you start |
-| **Ollama** | Installed and running locally on port 11434 |
-| **Git** | For cloning / version control |
-
-### Required Ollama models
-
-Pull these once before first run:
-
-```powershell
-ollama pull qwen3:8b       # primary reasoning model (~5 GB)
-ollama pull gemma3:12b     # fallback model (~8 GB)
-ollama pull bge-m3         # embedding model for ChromaDB (~1 GB)
-```
-
-Confirm they are available:
-
-```powershell
-ollama list
-# Should show: qwen3:8b, gemma3:12b, bge-m3
-```
+Evidence-backed KPI decision engine with a 9-stage causal investigation pipeline, deterministic constraint auditing (E6), role-based data governance (E7), and an enterprise React/Vite analytical console.
 
 ---
 
-## First-Time Setup
+## 1. System Requirements & Prerequisites
 
-### 1. Clone / open the project
+| Requirement | Supported Version | Notes |
+|---|---|---|
+| **Operating System** | Windows 10/11, macOS, Linux | PowerShell or Bash terminal |
+| **Python** | `Python 3.11.x` | Primary backend runtime |
+| **Node.js & npm** | `Node.js >= 18.0.0`, `npm >= 9.0.0` | Required for React 19 / Vite operations console |
+| **Docker Desktop** | `Docker >= 24.0.0` | Required for PostgreSQL and ChromaDB containers |
+| **LLM Inference** | **Groq**, **OpenAI**, **Anthropic**, or **Ollama** | Cloud API or Local offline inference |
 
+---
+
+## 2. LLM Provider Configuration
+
+### Option A: Groq Cloud API (Recommended for Ultra-Low Latency)
+1. Obtain an API key from [console.groq.com](https://console.groq.com).
+2. Configure `.env`:
+   ```ini
+   LLM_PROVIDER=groq
+   GROQ_API_KEY=gsk_your_actual_api_key_here
+   GROQ_MODEL=llama-3.3-70b-versatile
+   ```
+
+### Option B: OpenAI API
+1. Obtain an API key from [platform.openai.com](https://platform.openai.com).
+2. Configure `.env`:
+   ```ini
+   LLM_PROVIDER=openai
+   OPENAI_API_KEY=sk-your_openai_api_key_here
+   OPENAI_MODEL=gpt-4o-mini
+   ```
+
+### Option C: Anthropic API
+1. Obtain an API key from [console.anthropic.com](https://console.anthropic.com).
+2. Configure `.env`:
+   ```ini
+   LLM_PROVIDER=anthropic
+   ANTHROPIC_API_KEY=sk-ant-your_anthropic_api_key_here
+   ANTHROPIC_MODEL=claude-3-5-haiku-20241022
+   ```
+
+### Option D: Local Offline Inference (Ollama)
+1. Install and start Ollama (`http://localhost:11434`):
+   ```powershell
+   ollama pull qwen3:8b
+   ollama pull bge-m3         # Embedding model for ChromaDB vector store
+   ```
+2. Configure `.env`:
+   ```ini
+   LLM_PROVIDER=ollama
+   OLLAMA_HOST=http://localhost:11434
+   ```
+
+---
+
+## 3. First-Time Installation
+
+### Step 1 — Clone / Open Repository
 ```powershell
 cd e:\accenture
 ```
 
-### 2. Install Python dependencies
-
+### Step 2 — Python Virtual Environment & Backend Dependencies
 ```powershell
+# Create virtual environment (if not present)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Install backend dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Configure environment variables
+### Step 3 — Frontend Dependencies
+```powershell
+# Navigate to web frontend and install npm packages
+cd web
+npm install
+cd ..
+```
 
+### Step 4 — Configure Environment Variables
 ```powershell
 copy .env.example .env
 ```
-
-The defaults in `.env` work out of the box for a local setup:
-
-```
+Ensure your `.env` contains the correct database and service parameters:
+```ini
 DATABASE_URL=postgresql://biai:biai@localhost:5432/biai
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
-OLLAMA_HOST=http://localhost:11434
+API_PORT=8085
+API_HOST=0.0.0.0
+LLM_BACKEND=groq
+GROQ_API_KEY=your_key_here
+GROQ_MODEL=qwen/qwen3.8-27b
 ```
 
-Edit `.env` only if your ports differ.
+---
 
-### 4. Start the databases
+## 4. Infrastructure & Database Initialization
 
+### Step 1 — Start PostgreSQL & ChromaDB
 ```powershell
-docker compose up postgres chromadb -d
+docker compose up -d
 ```
-
-Wait ~10 seconds for Postgres to become healthy:
-
+Verify container health:
 ```powershell
 docker compose ps
-# postgres should show: (healthy)
+# postgres should report (healthy), chromadb should report Up
 ```
 
-### 5. Generate synthetic scenario data
-
+### Step 2 — Generate Synthetic Scenario Telemetry & Load PostgreSQL
 ```powershell
 $env:PYTHONIOENCODING = "utf-8"
-python etl/generate_inc001.py
 python etl/generate_scenarios.py
+python etl/load_synthetic.py
 ```
-
-This writes CSVs to `data/synthetic/`.
-
-### 6. Load structured data into Postgres
-
-```powershell
-python etl/load_fast.py
-```
-
 Expected output:
-```
+```text
 OK  orders                 43,359 rows
 OK  payment_events        345,286 rows
 OK  inventory_events        2,250 rows
@@ -104,236 +131,118 @@ OK  deployment_log              3 rows
 Done. 392,163 rows loaded.
 ```
 
-### 7. Embed unstructured evidence into ChromaDB
-
+### Step 3 — Embed & Populate ChromaDB Evidence Collections
 ```powershell
-python etl/load_unstructured.py `
-  --chroma-host localhost `
-  --chroma-port 8000 `
-  --ollama-host http://localhost:11434
-```
+# 1. Embed and load core unstructured evidence records (INC_001)
+python etl/load_unstructured.py --scenario-id INC_001 --chroma-host localhost --chroma-port 8000
 
-Expected output:
+# 2. Seed multi-scenario evidence collections (INC_002, INC_004, etc.)
+python etl/seed_scenario_evidence.py --chroma-host localhost --chroma-port 8000
 ```
+Expected output:
+```text
 support_tickets   1238 document(s)
 deployment_log       3 document(s)
 release_notes        3 document(s)
-TOTAL             1244 document(s)
+TOTAL             1244 document(s) loaded into ChromaDB.
 ```
-
-> **Note:** This step embeds documents using `bge-m3` via Ollama. It takes ~60–90 seconds.
 
 ---
 
-## Daily Run
+## 5. Daily Execution & Running the Platform
 
-Every time you want to use the app, you need three things running: Docker containers, the FastAPI backend, and the Streamlit frontend.
-
-### Step 1 — Start Docker containers (if not already running)
-
+### Terminal 1 — Start the FastAPI Backend
 ```powershell
 cd e:\accenture
-docker compose up postgres chromadb -d
+.\.venv\Scripts\Activate.ps1
+uvicorn api.main:app --host 0.0.0.0 --port 8085 --reload
 ```
+* Interactive Swagger API documentation: `http://localhost:8085/docs`
+* Health check endpoint: `http://localhost:8085/health`
 
-Check they are healthy:
-
+### Terminal 2 — Start the React Operations Console
 ```powershell
-docker compose ps
+cd e:\accenture\web
+npm run dev
 ```
-
-### Step 2 — Warm the LLM (recommended)
-
-The first Ollama inference after a cold start can be slow (2–5 min).  
-Warm the model first to avoid a timeout on your first investigation:
-
-```powershell
-ollama run qwen3:8b "hi"
-# Wait for the response, then Ctrl+C
-```
-
-### Step 3 — Start the API backend
-
-Open **Terminal 1**:
-
-```powershell
-cd e:\accenture
-$env:PYTHONIOENCODING = "utf-8"
-$env:DATABASE_URL     = "postgresql://biai:biai@localhost:5432/biai"
-$env:CHROMA_HOST      = "localhost"
-$env:CHROMA_PORT      = "8000"
-$env:OLLAMA_HOST      = "http://localhost:11434"
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8080
-```
-
-You should see:
-```
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8080
-```
-
-### Step 4 — Start the Streamlit frontend
-
-Open **Terminal 2**:
-
-```powershell
-cd e:\accenture
-$env:PYTHONIOENCODING = "utf-8"
-$env:API_URL          = "http://localhost:8080"
-python -m streamlit run frontend/app.py
-```
-
-You should see:
-```
-  You can now view your Streamlit app in your browser.
-  Local URL: http://localhost:8501
-```
-
-### Step 5 — Open the browser
-
-Go to **http://localhost:8501**
-
-1. Select persona in the sidebar: **Analyst** (full access), **CFO** (aggregate only), or **Manager** (own region — demonstrates access-denied)
-2. Select scenario: **INC_001** (live full investigation), **INC_002**, or **INC_004**
-3. Click **🚀 Run Investigation**
-
-> **Expected run time:** 2–4 minutes for the first run (LLM generating hypotheses + decision locally).  
-> Subsequent runs on the same scenario are faster once the model is warm.
+* Operations Console URL: `http://localhost:5173`
 
 ---
 
-## Scenarios
+## 6. Running Investigations
 
-| Scenario | Status | What it demonstrates |
-|---|---|---|
-| 🟢 **INC_001** | Live | Full investigation — checkout/payment degradation, H1 wins HIGH, Android dominant, rollback recommended |
-| 🟢 **INC_002** | Live | Simultaneous causes — pipeline abstains (gap too small between H1 and H2) |
-| 🧪 **INC_003** | Evaluation-only | Sparse history — 12 days < 30-sample threshold, anomaly suppressed. Run via `python run_demo.py` |
-| 🟢 **INC_004** | Live | Data-quality false anomaly — ETL gap creates apparent revenue drop, pipeline flags it as data issue not business issue |
+### 1. Via Operations Console (Web UI)
+1. Open `http://localhost:5173` in your browser.
+2. Select a scenario from the top bar (e.g. `INC_001 Payment Gateway Latency`).
+3. Select an Analyst Persona (`Analyst`, `CFO`, `Manager`) and Region Scope (`Global`, `US-East`, `Asia-Pacific`, etc.).
+4. Click **Run Investigation** to watch the 9-stage pipeline execute with live streaming cards.
+5. Review the E6 Rule Scorecard, Root-Cause Evidence Gate, and E7 Governed Action Directive.
 
----
-
-## Offline Verification (no servers needed)
-
-Runs a mock INC_001 investigation using pre-built fixtures and prints the 15-dimension evaluation scorecard. Requires no running Postgres, ChromaDB, or Ollama:
-
+### 2. Via Command Line / API (cURL / PowerShell)
 ```powershell
-$env:PYTHONIOENCODING = "utf-8"
-python run_demo.py
-```
-
-Expected output:
-```
-Overall: 15/15 dimensions passed | PASS
-Hallucinated evidence references: 0
-Authorization violations: 0
-```
-
----
-
-## API Endpoints
-
-The FastAPI backend exposes these endpoints once running on port 8080:
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Liveness check |
-| `GET` | `/scenarios` | List available scenarios with status |
-| `GET` | `/kpi-contract` | Loaded KPI semantic contract as JSON |
-| `POST` | `/investigate` | Run a full investigation |
-| `POST` | `/feedback` | Submit analyst feedback on an investigation |
-
-Quick test:
-
-```powershell
-# Health check
-curl http://localhost:8080/health
-
-# Run INC_001 as analyst
-curl -X POST http://localhost:8080/investigate `
+curl -X POST "http://localhost:8085/investigate" `
   -H "Content-Type: application/json" `
-  -d '{\"scenario_id\":\"INC_001\",\"persona\":\"analyst\"}'
+  -d '{\"scenario_id\":\"INC_001\",\"persona\":\"analyst\",\"region\":\"all\"}'
 ```
 
 ---
 
-## Personas
+## 7. Verification & Automated Test Suites
 
-| Persona | Authorized sources | Narrative style |
-|---|---|---|
-| `analyst` | orders, payment_gateway, inventory, marketing, deployment_log, support_tickets, release_notes | Full technical breakdown |
-| `cfo` | orders, inventory (aggregate only) | C-suite executive summary — single most important action |
-| `manager` | orders, inventory (own region only) | Operational action list — demonstrates access-denied for payment_gateway |
+### 1. Backend Pytest Suite
+```powershell
+cd e:\accenture
+pytest -v --tb=short
+```
+
+### 2. Frontend Vitest Suite
+```powershell
+cd e:\accenture\web
+npm test
+```
+*Runs all 12 Vitest suites and 35 React Testing Library component tests.*
+
+### 3. Frontend Production Build Verification
+```powershell
+cd e:\accenture\web
+npm run build
+```
+*Compiles TypeScript bundle and verifies zero bundle errors.*
+
+### 4. Multi-Scenario Matrix Verification Suite
+```powershell
+cd e:\accenture
+python scratch/run_full_matrix_verification.py
+```
+*Executes all 26 scenario and persona permutations with 60s rate-limit protection.*
 
 ---
 
-## Troubleshooting
+## 8. Service Port Reference
 
-### `streamlit: command not found`
+| Service | Port | Description |
+|---|---|---|
+| **PostgreSQL** | `5432` | Relational telemetry store (`biai / biai / biai`) |
+| **ChromaDB** | `8000` | Vector evidence and precedent memory store |
+| **FastAPI Backend** | `8085` | Primary REST API server (`uvicorn api.main:app`) |
+| **React Console** | `5173` | Vite development server (`web/`) |
+| **Ollama** (Optional) | `11434` | Local LLM inference server (when `LLM_BACKEND=ollama`) |
 
-Use the module form instead:
+---
+
+## 9. Troubleshooting & FAQ
+
+### Port `8085` already in use
+Check for lingering Python background processes:
 ```powershell
-python -m streamlit run frontend/app.py
+Get-Process python* | Stop-Process
 ```
 
 ### `ChromaDB connection failed: Could not connect to tenant default_tenant`
-
-The Docker image version is pinned to `0.5.7` to match the Python client (`chromadb==0.5.0`). If you see this after pulling a new image, check `docker-compose.yml` — it should read `chromadb/chroma:0.5.7`.
-
-### Investigation times out in the UI (`Request timed out after 600s`)
-
-The LLM is running cold or the machine is under heavy load. Steps:
-1. Stop the `ra-*` containers if running: `docker stop ra-tei-reranker ra-searxng ra-qdrant`
-2. Warm the model: `ollama run qwen3:8b "hi"` then Ctrl+C
-3. Retry the investigation
-
-### `tuple index out of range` on payment KPIs
-
-This was a fixed bug (modulo operator in SQL). If you see it, confirm you have the latest `engines/kpi_store.py` where `% 15` is written as `%% 15`.
-
-### `llm_calls=0` in telemetry
-
-This was a fixed bug (deepcopy snapshot). Confirm you have the latest `pipeline/telemetry.py` with the `live_telemetry` property and `pipeline/investigate.py` passing `telemetry_svc.live_telemetry` to the LLM engines.
-
-### H1 shows MEDIUM instead of HIGH
-
-This was a fixed bug in the challenge rules. Confirm:
-- `engines/challenge.py` — `_rule_timeline` accepts `payment_gateway` as deployment-adjacent evidence
-- `engines/challenge.py` — `_rule_segment_alignment` passes for payment/checkout hypotheses with payment_gateway evidence
-- `config/entitlements.yaml` — analyst `authorized_sources` includes `deployment_log`, `support_tickets`, `release_notes`
-- ChromaDB `evidence_INC_001` collection was rebuilt after the entitlement change (1244 documents)
-
----
-
-## Data Architecture
-
-```
-data/
-  synthetic/
-    orders.csv                  # INC_001 — hourly orders with incident window
-    payment_events.csv          # INC_001 — 15-min gateway events
-    inventory_events.csv        # INC_001 — daily SKU snapshots (normal throughout)
-    marketing_events.csv        # INC_001 — daily campaigns (intentionally stale)
-    support_tickets.csv         # INC_001 — customer tickets (3x spike in window)
-    deployment_log.csv          # INC_001 — v4.3 deploy at 08:45, 15 min before incident
-    INC_002/                    # Abstain scenario data
-    INC_003/                    # Sparse history data
-    INC_004/                    # ETL gap / data-quality scenario data
-  release_notes/
-    v4.2.txt                    # Routine maintenance
-    v4.3.txt                    # Performance optimisation (root cause)
-    v4.3-hotfix.txt             # Emergency rollback
-  ground_truth.json             # Hidden — evaluator only, never read by pipeline
+Ensure Docker container is running:
+```powershell
+docker compose restart chromadb
 ```
 
----
-
-## Service Ports
-
-| Service | Port | Notes |
-|---|---|---|
-| Postgres | 5432 | Credentials: `biai / biai / biai` |
-| ChromaDB | 8000 | Pinned to `0.5.7` |
-| Ollama | 11434 | Must be started manually |
-| FastAPI | 8080 | Started by you in Terminal 1 |
-| Streamlit | 8501 | Started by you in Terminal 2 |
+### LLM Rate Limits (429 Too Many Requests on Groq)
+The test runner `scratch/run_full_matrix_verification.py` automatically incorporates a 60-second cooldown between tests. If hitting rate limits in manual use, switch model to `groq/llama-3.3-70b-versatile` or run locally via `LLM_BACKEND=ollama`.

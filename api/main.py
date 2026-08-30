@@ -230,7 +230,8 @@ app = FastAPI(
 
 
 class InvestigateRequest(BaseModel):
-    scenario_id: str = "INC_001"
+    scenario_id: Optional[str] = None
+    scenario: Optional[str] = None
     persona: str = "analyst"   # "cfo" | "analyst" | "manager"
     region: Optional[str] = None
 
@@ -264,11 +265,12 @@ class FeedbackResponse(BaseModel):
 
 
 @app.get("/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
     """
-    Liveness probe.  Returns status and LLM backend identifier.
+    Liveness probe. Returns status and LLM backend identifier.
     """
-    return {"status": "ok", "llm_backend": "ollama"}
+    provider_name = getattr(getattr(request.app.state, "llm_provider", None), "provider_name", "ollama")
+    return {"status": "ok", "llm_backend": provider_name}
 
 
 @app.get("/scenarios")
@@ -416,7 +418,8 @@ async def investigate_endpoint(
     active_provider = get_llm_provider()
     p_name = str(getattr(active_provider, "provider_name", "unknown") or "unknown")
     p_model = str(getattr(active_provider, "model", getattr(active_provider, "_model", "default")) or "default")
-    sc_id_str = str(body.scenario_id or "INC_001")
+    target_sc_id = str(body.scenario_id or body.scenario or "INC_001").strip()
+    sc_id_str = target_sc_id
     region_str = str(getattr(body, "region", "all") or "all")
     print(f"\n\033[96m+------------------------------------------------------------------+\033[0m")
     print(f"\033[96m| STARTING INVESTIGATION: {sc_id_str:<10} | Persona: {persona_str:<8} | Region: {region_str:<5} |\033[0m")
@@ -456,13 +459,13 @@ async def investigate_endpoint(
         sources_config=sources_config,
         domain_semantics=domain_semantics,
         scenarios_config=scenarios_config,
-        scenario_id=body.scenario_id,
+        scenario_id=target_sc_id,
         region=body.region,
     )
 
     try:
         t_req_start = datetime.datetime.now()
-        result = investigate(body.scenario_id, persona_str, deps)
+        result = investigate(target_sc_id, persona_str, deps)
         elapsed_sec = (datetime.datetime.now() - t_req_start).total_seconds()
         
         d_abstained = getattr(result.decision, "abstained", False) if result.decision else True

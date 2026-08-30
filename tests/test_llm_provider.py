@@ -29,12 +29,16 @@ from llm.cost_estimator import (
     format_cost_comparison,
 )
 from llm.provider import (
+    AnthropicAPIError,
+    AnthropicProvider,
     GroqAPIError,
     GroqProvider,
     LLMProvider,
     LLMResponse,
     LLMUnavailableError,
     OllamaProvider,
+    OpenAIAPIError,
+    OpenAIProvider,
     get_llm_provider,
 )
 from models import Telemetry
@@ -66,6 +70,22 @@ def test_provider_selection_groq(monkeypatch):
     assert provider.provider_name == "groq"
 
 
+def test_provider_selection_openai(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-mock-openai-key-12345")
+    provider = get_llm_provider()
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.provider_name == "openai"
+
+
+def test_provider_selection_anthropic(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-mock-anthropic-key-12345")
+    provider = get_llm_provider()
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.provider_name == "anthropic"
+
+
 def test_provider_selection_unsupported():
     with pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
         get_llm_provider("unsupported_cloud")
@@ -76,6 +96,20 @@ def test_groq_missing_api_key_fails(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEYS", raising=False)
     with pytest.raises(ValueError, match="GROQ_API_KEY.*is required"):
         GroqProvider(api_key=None)
+
+
+def test_openai_missing_api_key_fails(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEYS", raising=False)
+    with pytest.raises(ValueError, match="OPENAI_API_KEY.*is required"):
+        OpenAIProvider(api_key=None)
+
+
+def test_anthropic_missing_api_key_fails(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEYS", raising=False)
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY.*is required"):
+        AnthropicProvider(api_key=None)
 
 
 # ---------------------------------------------------------------------------
@@ -392,3 +426,229 @@ def test_groq_sanitizes_error_messages(mock_post):
     err_str = str(exc_info.value)
     assert "gsk_****" in err_str
     assert "gsk_secret_token_12345" not in err_str
+
+
+# ---------------------------------------------------------------------------
+# OpenAI Provider Execution & Parsing Tests
+# ---------------------------------------------------------------------------
+
+@patch("llm.provider.httpx.post")
+def test_openai_success_response_parsing(mock_post):
+    mock_post.return_value = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary": "Payment failure spike identified."}'
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 150,
+                "completion_tokens": 45,
+                "total_tokens": 195,
+            },
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    provider = OpenAIProvider(api_key="sk-test-key-openai")
+    response = provider.complete(
+        "Analyze payment incident",
+        model="gpt-4o-mini",
+        system="Return JSON",
+        format_json=True,
+    )
+
+    assert response.provider == "openai"
+    assert response.model == "gpt-4o-mini"
+    assert response.prompt_tokens == 150
+    assert response.completion_tokens == 45
+    assert response.total_tokens == 195
+    assert "Payment failure spike" in response.text
+    assert mock_post.call_count == 1
+
+    # Verify JSON response format flag in payload
+    call_payload = mock_post.call_args[1]["json"]
+    assert call_payload["response_format"] == {"type": "json_object"}
+    assert call_payload["model"] == "gpt-4o-mini"
+
+
+@patch("time.sleep", return_value=None)
+@patch("llm.provider.httpx.post")
+def test_openai_rate_limit_and_retry(mock_post, mock_sleep):
+    resp_429 = httpx.Response(
+        status_code=429,
+        text="Rate limit exceeded",
+        headers={"retry-after": "1"},
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+    resp_200 = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [{"message": {"content": "Success after rate limit"}}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10},
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+    mock_post.side_effect = [resp_429, resp_200]
+
+    provider = OpenAIProvider(api_key="sk-key1", max_retries=2)
+    response = provider.complete("Test prompt")
+    assert response.text == "Success after rate limit"
+    assert mock_post.call_count == 2
+
+
+@patch("llm.provider.httpx.post")
+def test_openai_sanitizes_error_messages(mock_post):
+    mock_post.return_value = httpx.Response(
+        status_code=401,
+        text="Incorrect API key provided: sk-proj-super_secret_openai_key_12345.",
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+    provider = OpenAIProvider(api_key="sk-test-key")
+    with pytest.raises(OpenAIAPIError) as exc_info:
+        provider.complete("Test")
+    err_str = str(exc_info.value)
+    assert "sk-****" in err_str
+    assert "sk-proj-super_secret_openai_key_12345" not in err_str
+
+
+@patch("llm.provider.httpx.post")
+def test_openai_embed_success(mock_post):
+    mock_post.return_value = httpx.Response(
+        status_code=200,
+        json={
+            "data": [
+                {"embedding": [0.1, 0.2, 0.3], "index": 0},
+                {"embedding": [0.4, 0.5, 0.6], "index": 1},
+            ]
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/embeddings"),
+    )
+    provider = OpenAIProvider(api_key="sk-test-key")
+    vectors = provider.embed(["sample 1", "sample 2"], model="text-embedding-3-small")
+    assert len(vectors) == 2
+    assert vectors[0] == [0.1, 0.2, 0.3]
+    assert vectors[1] == [0.4, 0.5, 0.6]
+
+
+# ---------------------------------------------------------------------------
+# Anthropic Provider Execution & Parsing Tests
+# ---------------------------------------------------------------------------
+
+@patch("llm.provider.httpx.post")
+def test_anthropic_success_response_parsing(mock_post):
+    mock_post.return_value = httpx.Response(
+        status_code=200,
+        json={
+            "id": "msg_01XFDUDYJgAACQQabb5xQH8u",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": '{"cause": "Timeout failure in checkout microservice"}'}
+            ],
+            "model": "claude-3-5-haiku-20241022",
+            "usage": {
+                "input_tokens": 110,
+                "output_tokens": 40,
+            },
+        },
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+
+    provider = AnthropicProvider(api_key="sk-ant-test-key-anthropic")
+    response = provider.complete(
+        "Analyze root cause",
+        model="claude-3-5-haiku-20241022",
+        system="You are an expert diagnostic assistant.",
+        format_json=True,
+    )
+
+    assert response.provider == "anthropic"
+    assert response.model == "claude-3-5-haiku-20241022"
+    assert response.prompt_tokens == 110
+    assert response.completion_tokens == 40
+    assert response.total_tokens == 150
+    assert "Timeout failure in checkout" in response.text
+    assert mock_post.call_count == 1
+
+    # Verify Anthropic headers and top-level system parameter
+    headers = mock_post.call_args[1]["headers"]
+    assert headers["x-api-key"] == "sk-ant-test-key-anthropic"
+    assert headers["anthropic-version"] == "2023-06-01"
+
+    payload = mock_post.call_args[1]["json"]
+    assert payload["model"] == "claude-3-5-haiku-20241022"
+    assert "system" in payload
+    assert "You are an expert diagnostic assistant" in payload["system"]
+
+
+@patch("time.sleep", return_value=None)
+@patch("llm.provider.httpx.post")
+def test_anthropic_overloaded_529_retry(mock_post, mock_sleep):
+    resp_529 = httpx.Response(
+        status_code=529,
+        text="Anthropic API is currently overloaded",
+        headers={"retry-after": "2"},
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    resp_200 = httpx.Response(
+        status_code=200,
+        json={
+            "content": [{"type": "text", "text": "Success after 529 overload recovery"}],
+            "usage": {"input_tokens": 15, "output_tokens": 12},
+        },
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    mock_post.side_effect = [resp_529, resp_200]
+
+    provider = AnthropicProvider(api_key="sk-ant-key1", max_retries=2)
+    response = provider.complete("Test prompt")
+    assert response.text == "Success after 529 overload recovery"
+    assert mock_post.call_count == 2
+
+
+@patch("llm.provider.httpx.post")
+def test_anthropic_sanitizes_error_messages(mock_post):
+    mock_post.return_value = httpx.Response(
+        status_code=401,
+        text="Invalid x-api-key: sk-ant-api03-super_secret_anthropic_key_98765.",
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    provider = AnthropicProvider(api_key="sk-ant-test-key")
+    with pytest.raises(AnthropicAPIError) as exc_info:
+        provider.complete("Test")
+    err_str = str(exc_info.value)
+    assert "sk-ant-****" in err_str
+    assert "sk-ant-api03-super_secret_anthropic_key_98765" not in err_str
+
+
+# ---------------------------------------------------------------------------
+# Cloud Model Cost Calculation Tests (OpenAI & Anthropic)
+# ---------------------------------------------------------------------------
+
+def test_cost_calculation_openai_models():
+    # gpt-4o-mini: $0.15/1M input, $0.60/1M output
+    # 1,000 prompt + 500 completion
+    cost_mini = estimate_model_cost("gpt-4o-mini", prompt_tokens=1000, completion_tokens=500, provider="openai")
+    expected_mini = (1000 * 0.15 / 1_000_000) + (500 * 0.60 / 1_000_000)
+    assert cost_mini == round(expected_mini, 6)
+
+    # gpt-4o: $2.50/1M input, $10.00/1M output
+    cost_4o = estimate_model_cost("gpt-4o", prompt_tokens=2000, completion_tokens=1000, provider="openai")
+    expected_4o = (2000 * 2.50 / 1_000_000) + (1000 * 10.00 / 1_000_000)
+    assert cost_4o == round(expected_4o, 6)
+
+
+def test_cost_calculation_anthropic_models():
+    # claude-3-5-haiku-20241022: $0.80/1M input, $4.00/1M output
+    cost_haiku = estimate_model_cost("claude-3-5-haiku-20241022", prompt_tokens=1000, completion_tokens=500, provider="anthropic")
+    expected_haiku = (1000 * 0.80 / 1_000_000) + (500 * 4.00 / 1_000_000)
+    assert cost_haiku == round(expected_haiku, 6)
+
+    # claude-3-5-sonnet: $3.00/1M input, $15.00/1M output
+    cost_sonnet = estimate_model_cost("claude-3-5-sonnet", prompt_tokens=2000, completion_tokens=1000, provider="anthropic")
+    expected_sonnet = (2000 * 3.00 / 1_000_000) + (1000 * 15.00 / 1_000_000)
+    assert cost_sonnet == round(expected_sonnet, 6)

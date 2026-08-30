@@ -1,5 +1,6 @@
 import React from "react"
-import { DecisionPayload, OutcomeProjection } from "../../types/investigation"
+import { DecisionPayload, OutcomeProjection, InvestigationResult } from "../../types/investigation"
+import { cleanLLMTags } from "../../lib/utils"
 import { AbstentionCard } from "./AbstentionCard"
 import { RecoveryProjectionGauge } from "./RecoveryProjectionGauge"
 import { Zap, CheckCircle2, ShieldCheck, ArrowRight, Activity, CheckSquare, Target, User, BarChart2 } from "lucide-react"
@@ -7,15 +8,16 @@ import { Zap, CheckCircle2, ShieldCheck, ArrowRight, Activity, CheckSquare, Targ
 interface DecisionHeroProps {
   decision?: DecisionPayload
   outcome?: OutcomeProjection
+  result?: InvestigationResult
 }
 
-export const DecisionHero: React.FC<DecisionHeroProps> = ({ decision, outcome }) => {
+export const DecisionHero: React.FC<DecisionHeroProps> = ({ decision, outcome, result }) => {
   if (!decision) {
     return null
   }
 
   if (decision.abstained) {
-    return <AbstentionCard decision={decision} />
+    return <AbstentionCard decision={decision} result={result} />
   }
 
   const sr = decision.structured_recommendation
@@ -31,7 +33,7 @@ export const DecisionHero: React.FC<DecisionHeroProps> = ({ decision, outcome })
             </div>
             <div>
               <div className="text-base font-bold text-[#F4EEE0] font-mono flex items-center gap-2">
-                <span>RECOMMENDED EXECUTIVE ACTION</span>
+                <span>GOVERNED ACTION DIRECTIVE</span>
               </div>
               <div className="text-xs text-[#9E9788] font-mono">
                 Winning Hypothesis: <span className="text-[#6B9BB0] font-bold">{decision.winning_hypothesis_id || "H1"}</span>
@@ -66,7 +68,7 @@ export const DecisionHero: React.FC<DecisionHeroProps> = ({ decision, outcome })
                 <span>Executive Briefing</span>
               </div>
               <p className="text-xs text-[#D1C9B8] font-sans leading-relaxed">
-                {decision.persona_narrative}
+                {cleanLLMTags(decision.persona_narrative)}
               </p>
             </div>
           )}
@@ -175,7 +177,7 @@ export const DecisionHero: React.FC<DecisionHeroProps> = ({ decision, outcome })
                 ))}
               </div>
               <span className="px-1 text-[#444]">•</span>
-              <span className="text-[#9E9788]">Confidence:</span> 
+              <span className="text-[#9E9788]">Audit Score:</span> 
               <span className="font-bold text-[#6B9BB0]">{(sr.confidence * 100).toFixed(0)}%</span>
             </div>
           </div>
@@ -192,7 +194,7 @@ export const DecisionHero: React.FC<DecisionHeroProps> = ({ decision, outcome })
               <span>Executive Briefing</span>
             </div>
             <p className="text-sm text-[#D1C9B8] font-sans leading-relaxed pt-1">
-              {decision.persona_narrative}
+              {cleanLLMTags(decision.persona_narrative)}
             </p>
           </div>
         )}

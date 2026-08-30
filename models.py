@@ -82,6 +82,15 @@ class AuditVerdict(str, Enum):
     ABSTAIN = "abstain"
 
 
+class ConfidenceState(str, Enum):
+    """Legacy backward-compatibility enum mapping to AuditVerdict."""
+
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    ABSTAIN = "ABSTAIN"
+
+
 class EvidenceSufficiencyLevel(str, Enum):
     """Evidence sufficiency levels determined by deduplicated support sum."""
 
@@ -532,6 +541,18 @@ class ScoredHypothesis:
     @property
     def confidence(self) -> AuditVerdict:
         return self.audit_verdict
+
+    @property
+    def final_score(self) -> float:
+        return self.final_audit_score
+
+    @property
+    def contradiction_penalty(self) -> float:
+        return self.contradiction_score
+
+    @property
+    def confidence_state(self) -> str:
+        return self.audit_verdict.value.upper()
 
 
 

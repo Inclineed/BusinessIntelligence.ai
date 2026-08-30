@@ -1,5 +1,7 @@
 import React, { useEffect } from "react"
 import { InvestigationResult, PersonaType } from "../../types/investigation"
+import { cleanLLMTags } from "../../lib/utils"
+import { getInvestigationStory } from "../../lib/narrativeHelpers"
 import {
   Zap,
   AlertTriangle,
@@ -10,6 +12,7 @@ import {
   ArrowRight,
   X,
   Sparkles,
+  ShieldAlert,
 } from "lucide-react"
 
 interface RightBeliefPanelProps {
@@ -29,19 +32,46 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
   onClose,
   onExecuteAction,
 }) => {
+  const story = getInvestigationStory(result)
+  const isNominal = story.isNominal ?? false
   const isAbstained = result.decision?.abstained ?? false
   const winningHypothesis = result.decision?.winning_hypothesis_id || "H1"
   const leadingScored =
-    result.scored?.find((s) => s.hypothesis_id === winningHypothesis) || result.scored?.[0]
-  const confidenceScore = leadingScored?.final_audit_score
+    result.scored?.find((s) => s.hypothesis_id === winningHypothesis) ||
+    result.scored?.[0]
+
+  const auditScore = leadingScored?.final_audit_score != null
     ? Math.round(leadingScored.final_audit_score * 100)
-    : 85
+    : (isAbstained ? 0 : 71)
+
+  const auditVerdict =
+    leadingScored?.audit_verdict ||
+    (isAbstained
+      ? "ABSTAIN"
+      : auditScore >= 70
+      ? "VERIFIED"
+      : "MARGINAL")
+
+  const getVerdictLabel = () => {
+    if (isNominal) return "SYSTEM HEALTHY"
+    if (isAbstained) return "AUDIT ABSTAIN"
+    switch (auditVerdict.toUpperCase()) {
+      case "VERIFIED":
+        return "AUDIT VERIFIED"
+      case "MARGINAL":
+        return "AUDIT MARGINAL"
+      case "REJECTED":
+        return "AUDIT REJECTED"
+      default:
+        return "AUDIT SCORE"
+    }
+  }
 
   // SVG Circular Dash math (r=48 => circumference ~ 301.59)
   const circumference = 301.59
   const strokeDashoffset = isAbstained
     ? 0
-    : circumference - (confidenceScore / 100) * circumference
+    : circumference - (auditScore / 100) * circumference
 
   // Close on Escape key press
   useEffect(() => {
@@ -57,7 +87,7 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end animate-fade-in">
+    <div className="fixed inset-0 z-50 flex justify-end animate-fade-in select-text">
       {/* Backdrop overlay */}
       <div
         className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
@@ -66,49 +96,72 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
       />
 
       {/* Slide-over Drawer */}
-      <aside
-        className="relative w-full max-w-md md:max-w-lg bg-[#181818] border-l border-[#2E2E2E] flex flex-col h-full shadow-2xl z-10 overflow-y-auto custom-scrollbar animate-slide-in-right"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Assessment & Action Directive Drawer"
-      >
-        {/* Sticky Header with Close Button */}
-        <div className="p-4 border-b border-[#2E2E2E] flex justify-between items-center sticky top-0 bg-[#181818]/95 backdrop-blur-md z-10">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#6B9BB0] shadow-[0_0_6px_rgba(107,155,176,0.6)]" />
-            <span className="font-mono text-xs font-bold text-[#F4EEE0] uppercase tracking-wider">
-              System Assessment &amp; Action Directive
-            </span>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg bg-[#222222] hover:bg-[#2E2E2E] text-[#9E9788] hover:text-[#F4EEE0] border border-[#333333] transition-colors"
-            title="Close Drawer (Esc)"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-6 flex flex-col justify-between space-y-6 flex-1">
-          {/* Top: Dynamic System Belief & Circular Confidence Ring */}
+      {/* Drawer Container */}
+      <aside className="absolute inset-y-0 right-0 max-w-full flex pl-10">
+        <div className="w-screen max-w-md bg-[#181818] border-l border-[#2E2E2E] shadow-2xl p-6 flex flex-col justify-between overflow-y-auto animate-slide-in-right">
+          {/* Top: Header & High-Level Directive */}
           <div className="space-y-4">
-            <div className="space-y-1 text-center">
-              <span className="font-mono text-[10px] font-bold text-[#9E9788] uppercase tracking-wider block">
+            <div className="flex items-center justify-between border-b border-[#2E2E2E] pb-4">
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center border ${
+                    isNominal
+                      ? "bg-[#4E8569]/20 border-[#4E8569]/40 text-[#78AC91]"
+                      : isAbstained
+                      ? "bg-[#D8453A]/20 border-[#D8453A]/40 text-[#E56B62]"
+                      : "bg-[#6B9BB0]/20 border-[#6B9BB0]/40 text-[#6B9BB0]"
+                  }`}
+                >
+                  {isNominal ? (
+                    <ShieldCheck className="w-4 h-4 text-[#4E8569]" />
+                  ) : isAbstained ? (
+                    <AlertTriangle className="w-4 h-4 text-[#D8453A]" />
+                  ) : (
+                    <Zap className="w-4 h-4 text-[#6B9BB0]" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-mono text-xs font-bold text-[#F4EEE0] uppercase tracking-wider">
+                    {isNominal
+                      ? "System Telemetry Status"
+                      : isAbstained
+                      ? "Audit Abstention Status"
+                      : "Governed Action Directive"}
+                  </h3>
+                  <span className="text-[10px] font-mono text-[#9E9788]">
+                    Persona: <strong className="text-[#D1C9B8] capitalize">{persona}</strong> · Stage E{currentStageNum}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg text-[#9E9788] hover:text-[#F4EEE0] hover:bg-[#252525] transition-colors cursor-pointer"
+                title="Close Drawer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Governed Directive Title */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-mono uppercase text-[#9E9788] tracking-wider block">
                 {currentStageNum <= 2
                   ? "SIGNAL RECOGNITION"
                   : currentStageNum <= 4
                   ? "GROUNDED ASSESSMENT"
                   : currentStageNum <= 6
-                  ? "SYSTEM BELIEF"
+                  ? "SYSTEM BELIEF & AUDIT"
                   : currentStageNum === 7
-                  ? "ACTION DIRECTIVE"
+                  ? "GOVERNED ACTION DIRECTIVE"
                   : currentStageNum === 8
-                  ? "PROJECTED IMPACT"
+                  ? "PROJECTED RECOVERY IMPACT"
                   : "INSTITUTIONAL MEMORY"}
               </span>
               <h2 className="text-base font-bold font-sans text-[#F4EEE0] leading-snug">
-                {isAbstained
+                {isNominal
+                  ? "All Telemetry Within Normal Baseline"
+                  : isAbstained
                   ? "Autonomous Abstention Triggered"
                   : result.decision?.recommended_action
                   ? result.decision.recommended_action
@@ -116,7 +169,7 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
               </h2>
             </div>
 
-            {/* Circular SVG Confidence Ring */}
+            {/* Circular SVG Audit Score Ring */}
             <div className="relative w-36 h-36 mx-auto flex items-center justify-center rounded-full border border-[#2E2E2E] my-2 bg-[#1C1C1C]">
               <svg
                 className="absolute inset-0 w-full h-full transform -rotate-90"
@@ -135,7 +188,15 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
                   cy="50"
                   fill="transparent"
                   r="48"
-                  stroke={isAbstained ? "#D8453A" : "#6B9BB0"}
+                  stroke={
+                    isNominal
+                      ? "#4E8569"
+                      : isAbstained
+                      ? "#D8453A"
+                      : auditScore >= 70
+                      ? "#4E8569"
+                      : "#A88232"
+                  }
                   strokeDasharray={circumference}
                   strokeDashoffset={strokeDashoffset}
                   strokeLinecap="round"
@@ -145,10 +206,20 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
               </svg>
               <div className="text-center z-10 flex flex-col items-center">
                 <span className="text-3xl font-bold font-mono text-[#F4EEE0] leading-none block mb-1 tabular-nums">
-                  {isAbstained ? "ABSTAIN" : `${confidenceScore}%`}
+                  {isNominal ? "100%" : isAbstained ? "ABSTAIN" : `${auditScore}%`}
                 </span>
-                <span className="text-[9px] font-mono font-bold text-[#9E9788] uppercase tracking-wider">
-                  {isAbstained ? "GUARD ACTIVE" : "CONFIDENCE"}
+                <span
+                  className={`text-[9px] font-mono font-bold uppercase tracking-wider ${
+                    isNominal
+                      ? "text-[#78AC91]"
+                      : isAbstained
+                      ? "text-[#E56B62]"
+                      : auditScore >= 70
+                      ? "text-[#78AC91]"
+                      : "text-[#DEC06A]"
+                  }`}
+                >
+                  {getVerdictLabel()}
                 </span>
               </div>
             </div>
@@ -158,37 +229,79 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
           <div className="space-y-4 text-xs font-mono">
             {/* Anomaly Severity Card */}
             <div className="p-3.5 rounded-xl bg-[#222222] border border-[#333333] space-y-2">
-              <div className="text-[#9E9788] uppercase text-[10px]">Anomaly Significance</div>
-              <div className="text-sm font-bold text-[#D8453A]">
-                {result.signals?.[0]?.delta_pct
+              <div className="text-[#9E9788] uppercase text-[10px]">
+                {isNominal ? "Telemetry Stability" : "Anomaly Significance"}
+              </div>
+              <div
+                className={`text-sm font-bold ${
+                  isNominal ? "text-[#78AC91]" : "text-[#D8453A]"
+                }`}
+              >
+                {isNominal
+                  ? "0.0% variance from baseline"
+                  : result.signals?.[0]?.delta_pct
                   ? `${result.signals[0].delta_pct.toFixed(1)}% drop from baseline`
                   : "-14.2% drop"}
               </div>
               <div className="text-[#9E9788] text-[11px]">
-                Statistical severity:{" "}
-                <span className="text-[#F4EEE0] font-bold">
-                  {result.signals?.[0]?.z_score
-                    ? `${result.signals[0].z_score.toFixed(2)}σ`
-                    : "-3.85σ"}
-                </span>
+                {isNominal ? (
+                  <span>Corridor bounds: <strong className="text-[#78AC91]">Within calibrated ±3.0σ</strong></span>
+                ) : (
+                  <span>
+                    Statistical severity:{" "}
+                    <span className="text-[#F4EEE0] font-bold">
+                      {result.signals?.[0]?.z_score
+                        ? `${result.signals[0].z_score.toFixed(2)}σ`
+                        : "-3.85σ"}
+                    </span>
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Evaluated Root Cause & Narrative */}
             <div className="p-3.5 rounded-xl bg-[#222222] border border-[#333333] space-y-2">
-              <div className="text-[#9E9788] uppercase text-[10px]">
-                {isAbstained ? "Abstention Rationale" : "Evaluated Causal Rationale"}
+              <div className="text-[#9E9788] uppercase text-[10px] flex items-center justify-between">
+                <span>
+                  {isNominal
+                    ? "Telemetry Assessment"
+                    : isAbstained
+                    ? "Abstention Diagnosis"
+                    : "Evaluated Causal Rationale"}
+                </span>
+                {isAbstained && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#D8453A]/20 text-[#E56B62] border border-[#D8453A]/30 font-mono font-bold">
+                    {story.guardName}
+                  </span>
+                )}
+                {isNominal && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#4E8569]/20 text-[#78AC91] border border-[#4E8569]/30 font-mono font-bold">
+                    HEALTHY
+                  </span>
+                )}
               </div>
               <p className="text-[#D1C9B8] font-sans text-xs leading-relaxed">
-                {result.decision?.persona_narrative ||
-                  (isAbstained
-                    ? "Confidence criteria was not satisfied or guard conditions prevented automated execution."
-                    : "Payment gateway connection pool exhaustion is corroborated by latency surge and release timestamp alignment.")}
+                {result.decision?.persona_narrative && !isAbstained && !isNominal
+                  ? cleanLLMTags(result.decision.persona_narrative)
+                  : story.story}
               </p>
+              {story.operatorAction && (
+                <div
+                  className={`text-[11px] font-mono border-t border-white/[0.06] pt-1.5 leading-snug ${
+                    isNominal
+                      ? "text-[#78AC91]"
+                      : isAbstained
+                      ? "text-[#E56B62]"
+                      : "text-[#6B9BB0]"
+                  }`}
+                >
+                  <strong className="text-[#F4EEE0]">Directive:</strong> {story.operatorAction}
+                </div>
+              )}
             </div>
 
             {/* Verification Metric */}
-            {result.decision?.verification_metric && (
+            {result.decision?.verification_metric && !isNominal && (
               <div className="p-3 rounded-lg bg-[#181818] border border-[#333333] space-y-1">
                 <div className="text-[#6B9BB0] text-[10px] uppercase font-bold">
                   Verification Metric
@@ -200,7 +313,7 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
             )}
 
             {/* Projected Impact */}
-            {result.outcome && result.outcome.projected_recovery_pct !== undefined && (
+            {result.outcome && result.outcome.projected_recovery_pct !== undefined && !isNominal && (
               <div className="p-3.5 rounded-xl bg-[#222222] border border-[#333333] space-y-1.5">
                 <div className="text-[#9E9788] uppercase text-[10px]">Projected Outcome</div>
                 <p className="text-[#D1C9B8] font-sans text-xs leading-relaxed">
@@ -221,26 +334,36 @@ export const RightBeliefPanel: React.FC<RightBeliefPanelProps> = ({
             )}
           </div>
 
-          {/* Bottom: Mitigation Action Trigger Button */}
+          {/* Bottom: Governed Action Dispatch Trigger Button */}
           <div className="pt-4 border-t border-[#2E2E2E]">
             <button
               onClick={() => {
-                if (onExecuteAction) onExecuteAction()
+                if (onExecuteAction && !isNominal) onExecuteAction()
                 onClose()
               }}
               className={`w-full py-3.5 px-4 rounded-xl text-xs font-mono font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg ${
-                isAbstained
+                isNominal
+                  ? "bg-[#4E8569]/20 hover:bg-[#4E8569]/30 text-[#78AC91] border border-[#4E8569]/40"
+                  : isAbstained
                   ? "bg-[#D8453A]/20 hover:bg-[#D8453A]/30 text-[#E56B62] border border-[#D8453A]/40"
                   : "bg-[#6B9BB0]/20 hover:bg-[#6B9BB0]/35 text-[#F4EEE0] border border-[#6B9BB0]/40"
               }`}
             >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isAbstained ? "bg-[#D8453A]" : "bg-[#6B9BB0]"
-                }`}
-              />
+              {isNominal ? (
+                <ShieldCheck className="w-4 h-4 text-[#4E8569]" />
+              ) : (
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    isAbstained ? "bg-[#D8453A]" : "bg-[#6B9BB0]"
+                  }`}
+                />
+              )}
               <span>
-                {isAbstained ? "REVIEW ABSTENTION REASON" : "EXECUTE MITIGATION STRATEGY"}
+                {isNominal
+                  ? "SYSTEM NOMINAL · NO ACTION REQUIRED"
+                  : isAbstained
+                  ? "REVIEW ABSTENTION REASON"
+                  : "DISPATCH GOVERNED ACTION"}
               </span>
             </button>
           </div>

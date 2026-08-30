@@ -11,8 +11,11 @@ interface TopBarProps {
   isLiveLoading: boolean
   liveElapsedSeconds: number
   telemetry?: TelemetryData
-  confidenceScore?: number
+  confidenceScore?: number // backwards compatible alias for auditScore
+  auditScore?: number
+  auditVerdict?: string
   isAbstained?: boolean
+  isNominal?: boolean
   onConfigChange: (scenarioId: string, persona: PersonaType, region: string) => void
   onSelectStageNum: (stageNum: number) => void
   onRunLive: () => void
@@ -31,7 +34,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   liveElapsedSeconds,
   telemetry,
   confidenceScore,
+  auditScore,
+  auditVerdict,
   isAbstained,
+  isNominal = false,
   onConfigChange,
   onSelectStageNum,
   onRunLive,
@@ -39,6 +45,12 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenHealth,
   onOpenActionDrawer,
 }) => {
+  // Compute calibrated audit score and verdict label
+  const score = auditScore ?? confidenceScore ?? 71
+  const isVerified = auditVerdict
+    ? auditVerdict.toUpperCase() === "VERIFIED"
+    : score >= 70 && !isAbstained
+
   // Top Nav Category Tabs
   const NAV_TABS = [
     { label: "Signal", targetStage: 1, activeIf: currentStageNum === 1 },
@@ -96,15 +108,25 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={onOpenActionDrawer}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all border cursor-pointer ${
-                isAbstained
+                isNominal
+                  ? "bg-[#4E8569]/20 hover:bg-[#4E8569]/30 text-[#78AC91] border-[#4E8569]/40"
+                  : isAbstained
                   ? "bg-[#D8453A]/20 hover:bg-[#D8453A]/30 text-[#E56B62] border-[#D8453A]/40"
-                  : "bg-[#6B9BB0]/20 hover:bg-[#6B9BB0]/30 text-[#F4EEE0] border-[#6B9BB0]/40"
+                  : isVerified
+                  ? "bg-[#4E8569]/20 hover:bg-[#4E8569]/30 text-[#78AC91] border-[#4E8569]/40"
+                  : "bg-[#A88232]/20 hover:bg-[#A88232]/30 text-[#DEC06A] border-[#A88232]/40"
               }`}
-              title="Open System Assessment & Action Directive Drawer"
+              title="Open System Assessment & Governed Action Drawer"
             >
-              <Zap className="w-3.5 h-3.5 text-[#6B9BB0]" />
+              <Zap className="w-3.5 h-3.5" />
               <span>
-                {isAbstained ? "ABSTAIN" : `${confidenceScore ?? 85}% ACTION`}
+                {isNominal
+                  ? "SYSTEM NOMINAL"
+                  : isAbstained
+                  ? "AUDIT ABSTAIN"
+                  : isVerified
+                  ? `${score}% AUDIT VERIFIED`
+                  : `${score}% AUDIT MARGINAL`}
               </span>
             </button>
           )}

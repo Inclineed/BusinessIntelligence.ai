@@ -11,8 +11,14 @@ interface DiagnosticBreakdownProps {
 export const DiagnosticBreakdown: React.FC<DiagnosticBreakdownProps> = ({ contributions, targetKpiId }) => {
   if (!contributions || contributions.length === 0) {
     return (
-      <div className="p-6 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] text-center text-xs font-mono text-[#9E9788]">
-        No dimensional variance observed / no cohort-level partition data available for this investigation.
+      <div className="p-8 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] space-y-3 text-xs font-mono text-center">
+        <div className="text-sm font-bold text-[#F4EEE0] flex items-center justify-center gap-2">
+          <Layers className="w-4 h-4 text-[#6B9BB0]" />
+          <span>ZERO COHORT PARTITIONS QUALIFIED</span>
+        </div>
+        <p className="text-[#9E9788] max-w-xl mx-auto font-sans leading-relaxed">
+          Dimensional partition data was not generated or is unavailable for this unsegmented metric. Telemetry is evaluated strictly at the aggregate system stream level without cohort bias.
+        </p>
       </div>
     )
   }

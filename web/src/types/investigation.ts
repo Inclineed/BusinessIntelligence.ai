@@ -58,10 +58,22 @@ export interface EvidenceItem {
   lineage?: string[]
 }
 
+export interface EvidenceCitation {
+  evidence_id: string
+  quoted_summary?: string
+  role: "supports" | "contradicts" | "neutral"
+  relevance_explanation?: string
+}
+
 export interface HypothesisItem {
   hypothesis_id: string
-  mechanism_tag: string
+  mechanism_tag?: string
   statement: string
+  root_cause_type?: string
+  affected_subsystem?: string
+  proximal_mechanism?: string
+  symptom_kpis?: string[]
+  citations?: EvidenceCitation[]
   reasoning?: string
   supporting_evidence_ids: string[]
   contradictory_evidence_ids: string[]
@@ -84,6 +96,10 @@ export interface ScoredHypothesisItem {
   evidence_sufficiency_level: EvidenceSufficiencyLevel
   rule_results: RuleResult[]
   narrative?: string
+  disqualification_reason?: string
+  root_cause_gate_passed?: boolean
+  root_cause_evidence_ids?: string[]
+  root_cause_rationale?: string
 }
 
 export interface StructuredActionRecommendation {

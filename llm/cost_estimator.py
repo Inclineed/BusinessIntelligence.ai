@@ -27,7 +27,7 @@ from models import Telemetry
 # ---------------------------------------------------------------------------
 
 MODEL_PRICING_PER_1M: dict[str, tuple[float, float]] = {
-    # Groq Cloud Models (list pricing as of 2025/2026)
+    # Groq Cloud Models
     "llama-3.3-70b-versatile":   (0.59, 0.79),
     "llama-3.1-70b-versatile":   (0.59, 0.79),
     "llama-3.1-8b-instant":      (0.05, 0.08),
@@ -39,13 +39,30 @@ MODEL_PRICING_PER_1M: dict[str, tuple[float, float]] = {
     "qwen/qwen3.6-27b":          (0.59, 0.79),
     "qwen3.6-27b":               (0.59, 0.79),
     "qwen/qwen-2.5-32b":         (0.79, 0.79),
-    # Major benchmark models
-    "claude-3-5-sonnet-20241022":(3.00, 15.00),
-    "claude-3-5-sonnet":         (3.00, 15.00),
-    "claude-3-opus":             (15.00, 75.00),
+    # OpenAI Models
     "gpt-4o":                    (2.50, 10.00),
+    "gpt-4o-2024-08-06":         (2.50, 10.00),
     "gpt-4o-mini":               (0.15, 0.60),
+    "gpt-4o-mini-2024-07-18":    (0.15, 0.60),
     "gpt-4-turbo":               (10.00, 30.00),
+    "gpt-4":                     (30.00, 60.00),
+    "gpt-3.5-turbo":             (0.50, 1.50),
+    "o1":                        (15.00, 60.00),
+    "o1-mini":                   (3.00, 12.00),
+    "o1-preview":                (15.00, 60.00),
+    "o3-mini":                   (1.10, 4.40),
+    "text-embedding-3-small":    (0.02, 0.00),
+    "text-embedding-3-large":    (0.13, 0.00),
+    # Anthropic Models
+    "claude-3-5-sonnet-20241022":(3.00, 15.00),
+    "claude-3-5-sonnet-20240620":(3.00, 15.00),
+    "claude-3-5-sonnet":         (3.00, 15.00),
+    "claude-3-5-haiku-20241022": (0.80, 4.00),
+    "claude-3-5-haiku":          (0.80, 4.00),
+    "claude-3-opus-20240229":    (15.00, 75.00),
+    "claude-3-opus":             (15.00, 75.00),
+    "claude-3-haiku-20240307":   (0.25, 1.25),
+    "claude-3-haiku":            (0.25, 1.25),
     # Local Ollama models — zero external cost
     "qwen3:8b":                  (0.0, 0.0),
     "gemma3:12b":                (0.0, 0.0),
@@ -60,10 +77,16 @@ MODEL_PRICING_PER_1M: dict[str, tuple[float, float]] = {
 CLOUD_COST_PER_1K_TOKENS: dict[str, float] = {
     "claude-3-5-sonnet":         0.003,
     "claude-3-5-sonnet-20241022":0.003,
+    "claude-3-5-haiku":          0.000_800,
+    "claude-3-5-haiku-20241022": 0.000_800,
     "claude-3-opus":             0.015,
+    "claude-3-haiku":            0.000_250,
     "gpt-4o":                    0.005,
     "gpt-4o-mini":               0.000_150,
     "gpt-4-turbo":               0.010,
+    "o1":                        0.015,
+    "o1-mini":                   0.003,
+    "o3-mini":                   0.001_100,
     "llama-3.3-70b-versatile":   0.000_690,
     "llama-3.1-70b-versatile":   0.000_690,
     "llama-3.1-8b-instant":      0.000_065,

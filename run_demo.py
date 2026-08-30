@@ -34,6 +34,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from models import (
     AnomalySignal,
+    AuditVerdict,
     ConfidenceState,
     Decision,
     DimensionContribution,
@@ -375,9 +376,9 @@ def _build_mock_inc001_result() -> InvestigationResult:
             RuleResult("contradiction", RuleVerdict.PASS, "No contradictory evidence found"),
         ],
         support_score=0.94,
-        contradiction_penalty=0.0,
-        final_score=clamp(0.94, 0.0, 1.0),
-        confidence_state=ConfidenceState.HIGH,
+        contradiction_score=0.0,
+        final_audit_score=clamp(0.94, 0.0, 1.0),
+        audit_verdict=AuditVerdict.VERIFIED,
         narrative=(
             "All five rules pass for H1. The timeline, segment alignment with Android/iOS, "
             "corroborated KPI signals, and deployment log form a coherent causal chain."
@@ -395,9 +396,9 @@ def _build_mock_inc001_result() -> InvestigationResult:
             RuleResult("contradiction", RuleVerdict.FAIL, "Payment failure spikes contradict demand-side explanation"),
         ],
         support_score=0.22,
-        contradiction_penalty=0.12,
-        final_score=clamp(0.22 - 0.12, 0.0, 1.0),
-        confidence_state=ConfidenceState.LOW,
+        contradiction_score=0.12,
+        final_audit_score=clamp(0.22 - 0.12, 0.0, 1.0),
+        audit_verdict=AuditVerdict.MARGINAL,
         narrative=(
             "Segment alignment and mechanism consistency both fail. Payment TIMEOUT errors "
             "are a technical signal that demand-side explanations cannot account for."
@@ -410,14 +411,14 @@ def _build_mock_inc001_result() -> InvestigationResult:
         rule_results=[
             RuleResult("timeline", RuleVerdict.PARTIAL, "Cannot rule out timing coincidence"),
             RuleResult("segment_alignment", RuleVerdict.FAIL, "Inventory shortage would affect all devices equally"),
-            RuleResult("kpi_corroboration", RuleVerdict.FAIL, "Fill_rate stable â€” no inventory signal"),
+            RuleResult("kpi_corroboration", RuleVerdict.FAIL, "Fill_rate stable — no inventory signal"),
             RuleResult("mechanism_consistency", RuleVerdict.FAIL, "Payment TIMEOUT is not an inventory mechanism"),
             RuleResult("contradiction", RuleVerdict.FAIL, "Inventory fill_rate evidence directly contradicts hypothesis"),
         ],
         support_score=0.08,
-        contradiction_penalty=0.15,
-        final_score=clamp(0.08 - 0.15, 0.0, 1.0),   # clamps to 0.0
-        confidence_state=ConfidenceState.LOW,
+        contradiction_score=0.15,
+        final_audit_score=clamp(0.08 - 0.15, 0.0, 1.0),   # clamps to 0.0
+        audit_verdict=AuditVerdict.REJECTED,
         narrative=(
             "H3 is refuted by direct inventory evidence. Fill_rate remained at baseline "
             "throughout the incident window. Four of five rules fail."

@@ -1,5 +1,6 @@
 import React, { useState } from "react"
 import { InvestigationResult, PersonaType } from "../../types/investigation"
+import { getInvestigationStory } from "../../lib/narrativeHelpers"
 import { TopBar } from "../layout/TopBar"
 import { EngineSpine } from "../layout/EngineSpine"
 import { LeftObservePanel } from "../layout/LeftObservePanel"
@@ -15,7 +16,7 @@ import { E8OutcomeWorkspace } from "../engines/E8OutcomeWorkspace"
 import { E9MemoryWorkspace } from "../engines/E9MemoryWorkspace"
 import { SystemPerformanceDrawer } from "./SystemPerformanceDrawer"
 import { SystemHealthModal } from "./SystemHealthModal"
-import { AlertTriangle, Lock, RefreshCw, X, Zap, ChevronRight } from "lucide-react"
+import { AlertTriangle, Lock, RefreshCw, X, Zap, ChevronRight, ShieldCheck } from "lucide-react"
 
 export interface AnalysisConfig {
   scenarioId: string
@@ -74,6 +75,20 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
     ? Math.round(leadingScored.final_audit_score * 100)
     : 85
 
+  const auditVerdict =
+    result.decision?.overall_verdict ||
+    leadingScored?.audit_verdict ||
+    (isAbstained
+      ? "ABSTAIN"
+      : confidenceScore >= 70
+      ? "VERIFIED"
+      : "MARGINAL")
+
+  const isVerified = auditVerdict.toUpperCase() === "VERIFIED"
+
+  const story = getInvestigationStory(result)
+  const isNominal = story.isNominal ?? false
+
   const renderCurrentWorkspace = () => {
     switch (currentStageNum) {
       case 1:
@@ -112,7 +127,9 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
         liveElapsedSeconds={liveElapsedSeconds}
         telemetry={result.telemetry}
         confidenceScore={confidenceScore}
+        auditVerdict={auditVerdict}
         isAbstained={isAbstained}
+        isNominal={isNominal}
         onConfigChange={onConfigChange}
         onSelectStageNum={(num) => setCurrentStageNum(num)}
         onRunLive={() => onRunLive()}
@@ -224,25 +241,41 @@ export const InvestigationOverview: React.FC<InvestigationOverviewProps> = ({
           <button
             onClick={() => setShowActionDrawer(true)}
             className={`fixed bottom-6 right-6 z-30 px-4 py-3 rounded-2xl text-xs font-mono font-bold flex items-center gap-3 shadow-2xl transition-all hover:scale-105 border backdrop-blur-md cursor-pointer ${
-              isAbstained
+              isNominal
+                ? "bg-[#181818]/95 border-[#4E8569]/50 text-[#78AC91] hover:border-[#4E8569]"
+                : isAbstained
                 ? "bg-[#181818]/95 border-[#D8453A]/50 text-[#E56B62] hover:border-[#D8453A]"
-                : "bg-[#181818]/95 border-[#6B9BB0]/50 text-[#F4EEE0] hover:border-[#6B9BB0]"
+                : isVerified
+                ? "bg-[#181818]/95 border-[#4E8569]/50 text-[#78AC91] hover:border-[#4E8569]"
+                : "bg-[#181818]/95 border-[#A88232]/50 text-[#DEC06A] hover:border-[#A88232]"
             }`}
-            title="Open Assessment & Action Directive Drawer"
+            title="Open Assessment & Governed Action Drawer"
           >
             <div
               className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] ${
-                isAbstained ? "bg-[#D8453A]/30" : "bg-[#6B9BB0]/30"
+                isNominal
+                  ? "bg-[#4E8569]/30 text-[#78AC91]"
+                  : isAbstained
+                  ? "bg-[#D8453A]/30 text-[#E56B62]"
+                  : isVerified
+                  ? "bg-[#4E8569]/30 text-[#78AC91]"
+                  : "bg-[#A88232]/30 text-[#DEC06A]"
               }`}
             >
-              <Zap className="w-3.5 h-3.5" />
+              {isNominal ? <ShieldCheck className="w-3.5 h-3.5" /> : <Zap className="w-3.5 h-3.5" />}
             </div>
             <div className="flex flex-col text-left">
               <span className="text-[10px] text-[#9E9788] uppercase tracking-wider">
-                {isAbstained ? "Status" : "Decision"}
+                {isNominal ? "Telemetry Status" : isAbstained ? "Audit Status" : "Governed Directive"}
               </span>
               <span className="font-bold">
-                {isAbstained ? "Abstained" : `${confidenceScore}% Confidence`}
+                {isNominal
+                  ? "System Nominal"
+                  : isAbstained
+                  ? "Audit Abstain"
+                  : isVerified
+                  ? `${confidenceScore}% Audit Verified`
+                  : `${confidenceScore}% Audit Marginal`}
               </span>
             </div>
             <ChevronRight className="w-4 h-4 text-[#9E9788] ml-1" />

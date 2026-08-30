@@ -63,10 +63,11 @@ export const App: React.FC = () => {
       (activeConfig.region || "all") !== (evaluatedConfig.region || "all"))
 
   const handleConfigChange = (newScenarioId: string, newPersona: PersonaType, newRegion: string) => {
+    const resolvedRegion = newPersona !== "manager" ? "all" : (newRegion === "all" ? "us-east" : newRegion)
     setActiveConfig({
       scenarioId: newScenarioId,
       persona: newPersona,
-      region: newRegion,
+      region: resolvedRegion,
     })
     setIsPreviousResultPinned(false)
     setApiError(null)
@@ -75,7 +76,7 @@ export const App: React.FC = () => {
   const handleRunInvestigation = async (scenarioId?: string, persona?: PersonaType, region?: string) => {
     const scId = scenarioId || activeConfig.scenarioId
     const pers = persona || activeConfig.persona
-    const reg = region || activeConfig.region
+    const reg = pers !== "manager" ? "all" : (region || activeConfig.region || "us-east")
 
     setIsLiveLoading(true)
     setApiError(null)

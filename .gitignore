@@ -13,9 +13,11 @@ temp_docs/
 build/
 develop-eggs/
 dist/
+web/dist/
 downloads/
 eggs/
 .eggs/
+archive/
 /lib/
 /lib64/
 !web/src/lib/

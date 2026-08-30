@@ -51,12 +51,34 @@ export function formatZScore(z: number | undefined | null): string {
 
 export function cleanLLMTags(text: string): string {
   if (!text) return ""
-  return text
-    .replace(/\[LLM_NARRATIVE\]/g, "")
-    .replace(/\[LLM\]/g, "")
-    .replace(/\[SIMULATED\]/g, "")
-    .replace(/\[RULES\]/g, "")
+  let cleaned = text
+    .replace(/\[LLM_NARRATIVE\]/gi, "")
+    .replace(/\[LLM\]/gi, "")
+    .replace(/\[SIMULATED\]/gi, "")
+    .replace(/\[RULES\]/gi, "")
     .trim()
+
+  // Handle markdown codeblocks like ```json { "explanation": "..." } ```
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  if (codeBlockMatch) {
+    cleaned = codeBlockMatch[1].trim()
+  }
+
+  // Handle raw JSON objects with explanation/narrative/reasoning keys
+  if (cleaned.startsWith("{") && cleaned.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(cleaned)
+      if (typeof parsed.explanation === "string") return parsed.explanation.trim()
+      if (typeof parsed.narrative === "string") return parsed.narrative.trim()
+      if (typeof parsed.reasoning === "string") return parsed.reasoning.trim()
+    } catch {
+      // Fall through to regex strip
+      const explMatch = cleaned.match(/"explanation"\s*:\s*"([\s\S]*?)"/)
+      if (explMatch) return explMatch[1].replace(/\\"/g, '"').trim()
+    }
+  }
+
+  return cleaned
 }
 
 /**

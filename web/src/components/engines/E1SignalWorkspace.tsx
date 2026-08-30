@@ -63,6 +63,41 @@ export const E1SignalWorkspace: React.FC<E1SignalWorkspaceProps> = ({ result }) 
         </p>
       </header>
 
+      {/* Zero Signals / Sparse Baseline Empty State Card */}
+      {signals.length === 0 && (
+        <div className="p-8 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#6B9BB0]/15 border border-[#6B9BB0]/30 flex items-center justify-center text-[#6B9BB0]">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-sm font-bold font-mono text-[#F4EEE0] flex items-center gap-2">
+                <span>SPARSE HISTORICAL TELEMETRY (&lt; 14 INTERVALS)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-[#D8453A]/20 text-[#E56B62] font-mono border border-[#D8453A]/30 font-bold">
+                  GUARD TRIGGERED
+                </span>
+              </div>
+              <div className="text-xs text-[#9E9788] font-mono mt-0.5">
+                Engine E1 [SQL INGESTION] · Zero Anomaly Signals Qualified
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-[#D1C9B8] font-sans leading-relaxed">
+            Historical baseline data is sparse or below the minimum statistical requirement for this monitored domain. Under the statistical reliability contract, anomaly detection requires sufficient baseline history to compute valid ±3σ confidence corridors without false-positive drift.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 font-mono text-xs">
+            <div className="p-3 rounded-xl bg-[#141414] border border-[#2E2E2E] space-y-1">
+              <span className="text-[10px] text-[#9E9788] uppercase block">Telemetry Status</span>
+              <span className="font-bold text-[#F4EEE0]">0 Ingested Anomaly Signals</span>
+            </div>
+            <div className="p-3 rounded-xl bg-[#141414] border border-[#2E2E2E] space-y-1">
+              <span className="text-[10px] text-[#9E9788] uppercase block">Governance Action</span>
+              <span className="font-bold text-[#E56B62]">Autonomous Decision Abstention</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hero Analytical Primary KPI Card with Bullet Range Gauge */}
       {primary && (
         <div className="p-6 rounded-2xl bg-[#1C1C1C] border border-[#2E2E2E] space-y-6">

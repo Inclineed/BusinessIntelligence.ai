@@ -33,11 +33,11 @@ describe("RightBeliefPanel", () => {
     )
 
     expect(
-      screen.getByText("System Assessment & Action Directive")
+      screen.getByText(/Governed Action Directive/i)
     ).toBeInTheDocument()
-    expect(screen.getByTitle("Close Drawer (Esc)")).toBeInTheDocument()
+    expect(screen.getByTitle("Close Drawer")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTitle("Close Drawer (Esc)"))
+    fireEvent.click(screen.getByTitle("Close Drawer"))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

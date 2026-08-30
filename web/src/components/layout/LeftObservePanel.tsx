@@ -2,9 +2,11 @@ import React, { useState } from "react"
 import { InvestigationResult, PersonaType, TelemetryData } from "../../types/investigation"
 import { useScenarios } from "../../contexts/ScenariosContext"
 import { formatMetricValue, formatDelta, isAdverseMetric } from "../../lib/utils"
+import { getInvestigationStory } from "../../lib/narrativeHelpers"
 import {
   Activity,
   AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -325,7 +327,10 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
                 return (
                   <button
                     key={p}
-                    onClick={() => onConfigChange(activeScenarioId, p, activeRegion)}
+                    onClick={() => {
+                      const nextRegion = p !== "manager" ? "all" : (activeRegion === "all" ? "us-east" : activeRegion)
+                      onConfigChange(activeScenarioId, p, nextRegion)
+                    }}
                     className={`py-1.5 px-2 rounded-lg text-xs font-mono capitalize transition-all cursor-pointer text-center ${
                       isActive
                         ? "bg-[#6B9BB0]/30 text-[#F4EEE0] font-bold border border-[#6B9BB0]/50 shadow-sm"
@@ -339,20 +344,28 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
               })}
             </div>
 
-            {/* Region Input for Manager */}
+            {/* Region Dropdown for Manager */}
             {activePersona === "manager" && (
-              <div className="flex items-center justify-between bg-[#222222] border border-[#333333] px-3 py-1.5 rounded-xl text-xs font-mono animate-fade-in">
+              <div className="flex items-center justify-between bg-[#222222] border border-[#333333] px-3 py-2 rounded-xl text-xs font-mono animate-fade-in">
                 <div className="flex items-center gap-1.5 text-[#9E9788]">
-                  <Globe className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">Region Scope:</span>
+                  <Globe className="w-3.5 h-3.5 text-[#6B9BB0]" />
+                  <span className="text-[11px] font-bold">Region Scope:</span>
                 </div>
-                <input
-                  type="text"
-                  value={activeRegion === "all" ? "us-east" : activeRegion}
-                  onChange={(e) => onConfigChange(activeScenarioId, activePersona, e.target.value)}
-                  placeholder="e.g. us-east"
-                  className="w-20 bg-transparent text-[#F4EEE0] font-bold focus:outline-none text-right text-xs"
-                />
+                <div className="relative">
+                  <select
+                    value={activeRegion === "all" ? "us-east" : activeRegion}
+                    onChange={(e) => onConfigChange(activeScenarioId, activePersona, e.target.value)}
+                    aria-label="Select Region Scope"
+                    className="bg-[#181818] hover:bg-[#252525] border border-[#3A3A3A] hover:border-[#6B9BB0]/60 text-[#F4EEE0] font-bold text-xs rounded-lg px-2.5 py-1 pr-6 appearance-none cursor-pointer focus:outline-none focus:border-[#6B9BB0] focus:ring-1 focus:ring-[#6B9BB0]/40 transition-colors font-mono"
+                  >
+                    <option value="us-east" className="bg-[#181818] text-[#F4EEE0]">us-east (US East)</option>
+                    <option value="us-west" className="bg-[#181818] text-[#F4EEE0]">us-west (US West)</option>
+                    <option value="eu-west" className="bg-[#181818] text-[#F4EEE0]">eu-west (EU West)</option>
+                    <option value="ap-south" className="bg-[#181818] text-[#F4EEE0]">ap-south (Asia Pacific)</option>
+                    <option value="all" className="bg-[#181818] text-[#F4EEE0]">all (Global)</option>
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-[#9E9788] absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
               </div>
             )}
           </div>
@@ -392,11 +405,11 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
                 Domain: <span className="text-[#D1C9B8]">{currentScenario.domain}</span>
               </span>
               <span className="text-[#9E9788]">
-                Confidence:{" "}
+                Audit Score:{" "}
                 <span className="text-[#6B9BB0] font-bold">
                   {result.scored?.[0]?.final_audit_score
                     ? `${Math.round(result.scored[0].final_audit_score * 100)}%`
-                    : "85%"}
+                    : "71%"}
                 </span>
               </span>
             </div>
@@ -444,30 +457,59 @@ export const LeftObservePanel: React.FC<LeftObservePanelProps> = ({
             </div>
           )}
 
-          {/* Data Quality & System Guard Alerts */}
-          {hasGuardAlerts && (
-            <div className="p-3 rounded-lg bg-[#D8453A]/15 border border-[#D8453A]/30 text-[#E56B62] text-xs font-mono space-y-1.5">
-              <div className="flex items-center gap-1.5 font-bold">
-                <AlertTriangle className="w-3.5 h-3.5 text-[#D8453A]" />
-                <span>Guard Conditions</span>
-              </div>
-              {primarySignal?.sparse_history && (
-                <div className="text-[11px] text-[#E56B62]/90">
-                  • Historical baseline &lt; 14 days
+          {/* Data Quality & System Guard Alerts / Nominal State */}
+          {(() => {
+            const story = getInvestigationStory(result)
+            if (story.isNominal) {
+              return (
+                <div className="p-3.5 rounded-xl bg-[#4E8569]/15 border border-[#4E8569]/30 text-[#78AC91] text-xs font-mono space-y-2">
+                  <div className="flex items-center justify-between font-bold">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-[#4E8569]" />
+                      <span>{story.guardName}</span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#4E8569]/25 border border-[#4E8569]/40 font-bold uppercase text-[#78AC91]">
+                      HEALTHY
+                    </span>
+                  </div>
+                  
+                  <p className="text-[11px] text-[#D1C9B8] font-sans leading-relaxed">
+                    {story.story}
+                  </p>
+
+                  <div className="text-[10px] text-[#78AC91] font-mono border-t border-[#4E8569]/30 pt-1.5">
+                    <strong className="text-[#F4EEE0]">Directive:</strong> {story.operatorAction}
+                  </div>
                 </div>
-              )}
-              {primarySignal?.data_quality_suspect && (
-                <div className="text-[11px] text-[#E56B62]/90">
-                  • Data quality index &lt; 0.80
+              )
+            }
+
+            if (hasGuardAlerts) {
+              return (
+                <div className="p-3.5 rounded-xl bg-[#D8453A]/15 border border-[#D8453A]/30 text-[#E56B62] text-xs font-mono space-y-2">
+                  <div className="flex items-center justify-between font-bold">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-[#D8453A]" />
+                      <span>{story.guardName}</span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#D8453A]/25 border border-[#D8453A]/40 font-bold uppercase">
+                      Active
+                    </span>
+                  </div>
+                  
+                  <p className="text-[11px] text-[#F4EEE0] font-sans leading-relaxed">
+                    {story.story}
+                  </p>
+
+                  <div className="text-[10px] text-[#E56B62] font-mono border-t border-[#D8453A]/30 pt-1.5">
+                    <strong className="text-[#F4EEE0]">Directive:</strong> {story.operatorAction}
+                  </div>
                 </div>
-              )}
-              {result.decision?.abstained && (
-                <div className="text-[11px] text-[#E56B62]/90">
-                  • Automated decision abstention active
-                </div>
-              )}
-            </div>
-          )}
+              )
+            }
+
+            return null
+          })()}
         </div>
 
         {/* Bottom Operations & Health Row */}

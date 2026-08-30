@@ -29,7 +29,7 @@ export const E7DecisionWorkspace: React.FC<E7DecisionWorkspaceProps> = ({ result
       </header>
 
       {/* Decision Hero */}
-      <DecisionHero decision={result.decision} outcome={result.outcome} />
+      <DecisionHero decision={result.decision} outcome={result.outcome} result={result} />
     </div>
   )
 }
