@@ -124,3 +124,12 @@ benchmarks/*.md
 evaluation/*.md
 web/README.md
 .kiro/
+
+# Presentations, Slide Decks, and PPT Templates
+*.pptx
+*.ppt
+~$*.pptx
+~$*.ppt
+presentation.html
+scripts/generate_accenture_pptx.py
+scripts/inspect_ppts.py
