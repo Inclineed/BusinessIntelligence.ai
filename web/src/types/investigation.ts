@@ -125,6 +125,7 @@ export interface PrecedentItem {
   relevance?: number
   retrieval_score?: number
   retrieval_weight?: number
+  validation_state?: "UNVALIDATED" | "VALIDATED" | "PARTIALLY_VALIDATED" | "DISPUTED" | "SUPPRESSED"
   audit_verdict?: string
   original_audit_verdict?: string
   outcome_type?: string
@@ -136,6 +137,8 @@ export interface PrecedentItem {
   source_ids?: string[]
   human_validated?: boolean
   validated_at?: string
+  disputed_at?: string
+  dispute_notes?: string
   method?: string
   similarity?: number
 }

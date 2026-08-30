@@ -186,19 +186,18 @@ def _rule_timeline(
     """
     TIMELINE rule
     -------------
-    Checks whether there is temporal coherence between the supporting evidence
-    and the anomaly.
+    Verifies temporal consistency between claimed causal mechanisms and evidence.
 
-    PASS   : at least one supporting evidence item comes from a deployment_log
-             source (or its summary mentions deployment keywords) - the deploy
-             precedes the anomaly, so timeline is consistent.
-    FAIL   : contradictory evidence explicitly states a timeline inconsistency
-             (e.g., deployment happened after the anomaly, or the summary
-             explicitly denies any recent deployment).
-    PARTIAL: everything else.
-
-    This rule operates purely on the evidence summaries and source IDs that
-    the LLM included in the hypothesis - no calendar lookup.
+    Invariants:
+    1. A deployment/release timeline PASS requires actual deployment/release evidence:
+       source_id in ("deployment_log", "release_notes") or an explicit release artifact.
+       Generic words such as "latency", "failure", "timeout" must NEVER establish deployment precedence.
+    2. If the hypothesis claims an internal release root cause (root_cause_type == "INTERNAL_RELEASE"
+       or mechanism_tag == "deployment_issues"), it MUST provide explicit deployment/release evidence.
+       If none is provided, timeline is PARTIAL (or unconfirmed).
+    3. For component/subsystem hypotheses (e.g. payment_gateway, inventory_system, external_factors),
+       timestamped telemetry within/preceding the anomaly window confirms component observation alignment.
+    4. Temporal precedence alone establishes chronology, not ultimate causation.
     """
     # Check contradictory evidence for timeline inconsistency first
     for eid in hypothesis.contradictory_evidence_ids:
@@ -206,7 +205,6 @@ def _rule_timeline(
         if ev is None:
             continue
         summary_lower = ev.summary.lower()
-        # Signs of explicit timeline contradiction
         if any(
             phrase in summary_lower
             for phrase in (
@@ -227,51 +225,69 @@ def _rule_timeline(
                 ),
             )
 
-    # Check supporting evidence for deployment temporal alignment.
-    # PASS when:
-    #   (a) a deployment_log source is directly referenced, OR
-    #   (b) the summary mentions deployment keywords (deploy/release/version), OR
-    #   (c) payment_gateway evidence is present - the payment gateway is the
-    #       component affected by the v4.3 deploy, so its spike is itself evidence
-    #       that a deployment-related change impacted the system.
-    deploy_keywords = set()
-    for m_id, m_data in domain_semantics.get("mechanisms", {}).items():
-        # Identify deployment/timeline related mechanisms (e.g. by checking if 'deploy' or 'release' is in keywords)
-        kw = set(m_data.get("keywords", []))
-        if "deploy" in kw or "release" in kw or "rollback" in kw:
-            deploy_keywords.update(kw)
+    deploy_sources = {"deployment_log", "release_notes"}
+    deployment_evidence_found = False
+    deployment_evidence_source = ""
+    component_evidence_found = False
+    component_evidence_sources = []
 
-    deployment_found = False
-    mechanism_found = False
+    subsystems = domain_semantics.get("subsystems", {})
+    mechanisms = domain_semantics.get("mechanisms", {})
+
+    raw_root = getattr(hypothesis, "root_cause_type", "UNKNOWN")
+    claimed_root = raw_root.value if hasattr(raw_root, "value") else str(raw_root) if raw_root else "UNKNOWN"
+    claimed_mech = getattr(hypothesis, "mechanism_tag", "")
+    is_deploy_claim = (claimed_root == "INTERNAL_RELEASE" or claimed_mech == "deployment_issues")
+
     for eid in hypothesis.supporting_evidence_ids:
         ev = evidence_by_id.get(eid)
         if ev is None:
             continue
-        if ev.source_id == "deployment_log" or _contains_any(ev.summary, deploy_keywords):
-            deployment_found = True
-            break
-        # Identify if evidence maps to ANY configured mechanism
-        if ev.source_id in domain_semantics.get("mechanisms", {}):
-            mechanism_found = True
 
-    if deployment_found:
+        ev_src = ev.source_id.lower()
+        summary_lower = ev.summary.lower()
+
+        # Strict check for deployment / release record
+        if ev_src in deploy_sources or (
+            any(w in summary_lower for w in ("deployed", "deployment", "released", "release notes", "rollback"))
+            and not any(symptom in summary_lower for symptom in ("gateway events", "support tickets", "marketing campaign"))
+        ):
+            deployment_evidence_found = True
+            deployment_evidence_source = ev.source_id
+            break
+
+        # Check for valid component / telemetry evidence
+        if ev_src in subsystems or ev_src in mechanisms or ev_src in ("payment_gateway", "inventory", "marketing", "orders", "device_performance"):
+            component_evidence_found = True
+            component_evidence_sources.append(ev.source_id)
+
+    if deployment_evidence_found:
         return RuleResult(
             rule_name="timeline",
             verdict=RuleVerdict.PASS,
             rationale=(
-                "Supporting evidence contains a deployment record that "
-                "temporally precedes the anomaly window - timeline is consistent."
+                f"Supporting evidence contains an explicit deployment/release record (source='{deployment_evidence_source}') "
+                "preceding the anomaly window - deployment timeline is consistent."
             ),
         )
 
-    if mechanism_found:
+    if is_deploy_claim and not deployment_evidence_found:
+        return RuleResult(
+            rule_name="timeline",
+            verdict=RuleVerdict.PARTIAL,
+            rationale=(
+                "Hypothesis claims an internal software release/deployment root cause, but supporting evidence "
+                "contains no explicit deployment or release records; deployment timeline precedence is unconfirmed."
+            ),
+        )
+
+    if component_evidence_found:
         return RuleResult(
             rule_name="timeline",
             verdict=RuleVerdict.PASS,
             rationale=(
-                "Mechanism evidence is present; the affected component is "
-                "supported by the supporting set, confirming temporal alignment between "
-                "the mechanism and the observed anomaly."
+                f"Supporting evidence contains timestamped component telemetry ({', '.join(sorted(set(component_evidence_sources)))}) "
+                "aligning with the anomaly window - temporal observation is consistent (note: chronology alone does not prove initiating cause)."
             ),
         )
 
@@ -279,7 +295,7 @@ def _rule_timeline(
         rule_name="timeline",
         verdict=RuleVerdict.PARTIAL,
         rationale=(
-            "No deployment or mechanism evidence found in the supporting set; "
+            "No deployment log or timestamped component telemetry found in the supporting set; "
             "timeline consistency is neither confirmed nor refuted."
         ),
     )
@@ -297,13 +313,8 @@ def _rule_segment_alignment(
     Checks whether the hypothesis mentions a specific device/segment AND whether
     the available DimensionContributions confirm that segment's dominance.
 
-    PASS   : the hypothesis specifically mentions a device segment (e.g. Android)
-             AND a matching DimensionContribution exists for that segment.
-    FAIL   : the hypothesis claims a broad, market-wide effect (no specific segment
-             mentioned) BUT dimensional data shows the movement is heavily
-             concentrated in one segment - the hypothesis ignores the skew.
-    PARTIAL: everything else (hypothesis mentions a segment but no contribution
-             data is available, or the alignment is weak).
+    Evaluates ONLY the current hypothesis's mechanism_tag to prevent cross-mechanism
+    contamination.
     """
     if not contributions:
         return RuleResult(
@@ -327,36 +338,28 @@ def _rule_segment_alignment(
         c for c in contributions if c.dimension.lower() == "device"
     ]
 
-    # Determine if any non-external mechanism is explicitly supported
-    supported_mechanism = None
-    h_mech = getattr(hypothesis, "mechanism_tag", "")
-    for m_id, m_data in domain_semantics.get("mechanisms", {}).items():
-        if m_id == "external_factors" or m_id == "default":
-            continue
-        if h_mech == m_id:
-            supported_mechanism = m_id
-            break
-        direct_s = (m_data.get("direct_source") or m_id).lower()
-        comp_s = set(s.lower() for s in m_data.get("compatible_sources", []))
-        if any(
-            eid in evidence_by_id and (
-                evidence_by_id[eid].source_id.lower() == direct_s
-                or evidence_by_id[eid].source_id.lower() in comp_s
-            )
-            for eid in hypothesis.supporting_evidence_ids
-        ):
-            supported_mechanism = m_id
-            break
-        if _contains_any(combined, set(m_data.get("keywords", []))):
-            supported_mechanism = m_id
-            break
+    h_mech = getattr(hypothesis, "mechanism_tag", "") or "UNKNOWN"
+    mechanisms = domain_semantics.get("mechanisms", {})
+    if h_mech == "UNKNOWN" or h_mech not in mechanisms:
+        # Fallback for legacy untagged test hypotheses: infer from statement keywords
+        for m_id, m_data in mechanisms.items():
+            if m_id in ("external_factors", "default"):
+                continue
+            if _contains_any(combined, set(m_data.get("keywords", []))):
+                h_mech = m_id
+                break
+    mech_data = mechanisms.get(h_mech, {})
 
-    # --- Supporting evidence sources ---
-    supporting_sources = {
-        evidence_by_id[eid].source_id
-        for eid in hypothesis.supporting_evidence_ids
-        if eid in evidence_by_id
-    }
+    # Check if the hypothesis's OWN mechanism has compatible supporting evidence
+    has_compatible_evidence = False
+    if h_mech != "UNKNOWN" and h_mech in mechanisms:
+        direct_s = (mech_data.get("direct_source") or h_mech).lower()
+        comp_s = set(s.lower() for s in mech_data.get("compatible_sources", []))
+        for eid in hypothesis.supporting_evidence_ids:
+            ev = evidence_by_id.get(eid)
+            if ev and (ev.source_id.lower() == direct_s or ev.source_id.lower() in comp_s):
+                has_compatible_evidence = True
+                break
 
     if mentioned_segments and device_contributions:
         # Hypothesis explicitly names a device/segment - check alignment
@@ -384,10 +387,8 @@ def _rule_segment_alignment(
     if not mentioned_segments and device_contributions:
         dominant = max(device_contributions, key=lambda c: abs(c.contribution_pct))
 
-        # For hypotheses backed by a specific internal/technical mechanism (like deploy or gateway),
-        # the LLM frequently does not name the segment in the statement even when
-        # the mechanism explains why a specific channel is dominant.
-        if supported_mechanism:
+        # Technical/internal mechanisms with supporting evidence consistent with dominant segment concentration
+        if h_mech not in ("external_factors", "default", "UNKNOWN") and has_compatible_evidence:
             dominant_is_mobile = any(
                 kw in dominant.segment.lower()
                 for kw in ("android", "ios", "mobile", "app")
@@ -397,20 +398,20 @@ def _rule_segment_alignment(
                     rule_name="segment_alignment",
                     verdict=RuleVerdict.PASS,
                     rationale=(
-                        f"Mechanism hypothesis ({supported_mechanism}) with supporting "
+                        f"Mechanism hypothesis ({h_mech}) with supporting "
                         f"evidence; dominant segment '{dominant.segment}' "
                         f"({dominant.contribution_pct:.1f}%) is consistent with "
                         "a regression affecting that segment - segment alignment confirmed."
                     ),
                 )
 
-        # Broad claim with heavy segment concentration  FAIL
+        # Broad/external claims with heavy segment concentration -> FAIL
         if abs(dominant.contribution_pct) > 50:
             return RuleResult(
                 rule_name="segment_alignment",
                 verdict=RuleVerdict.FAIL,
                 rationale=(
-                    f"Hypothesis implies a market-wide effect but dimensional data "
+                    f"Hypothesis ({h_mech}) implies a market-wide effect but dimensional data "
                     f"shows movement concentrated in '{dominant.segment}' "
                     f"({dominant.contribution_pct:.1f}% contribution) - "
                     "segment alignment fails."
@@ -420,7 +421,7 @@ def _rule_segment_alignment(
             rule_name="segment_alignment",
             verdict=RuleVerdict.PARTIAL,
             rationale=(
-                "Hypothesis does not mention a specific device segment; "
+                f"Hypothesis ({h_mech}) does not mention a specific device segment; "
                 "dimensional data shows some segment concentration but not decisive."
             ),
         )
@@ -428,7 +429,7 @@ def _rule_segment_alignment(
     return RuleResult(
         rule_name="segment_alignment",
         verdict=RuleVerdict.PARTIAL,
-        rationale="Hypothesis mentions segment(s) but insufficient dimensional data is available.",
+        rationale=f"Hypothesis ({h_mech}) mentions segment(s) but insufficient dimensional data is available.",
     )
 
 
@@ -442,7 +443,7 @@ def _rule_kpi_corroboration(
     KPI_CORROBORATION rule
     ----------------------
     Counts how many anomalous KPI signals are corroborated by the hypothesis's
-    supporting evidence sources.
+    supporting evidence sources aligned with the hypothesis's affected subsystem/mechanism.
 
     PASS   : >= 2 anomalous KPIs are represented in the supporting evidence.
     PARTIAL: exactly 1 anomalous KPI corroborated.
@@ -452,45 +453,60 @@ def _rule_kpi_corroboration(
         s.kpi_id for s in signals if s.is_anomaly
     )
 
-    # Map anomalous source_ids from evidence that correspond to anomalous KPIs.
-    # We also look at whether supporting evidence explicitly mentions KPI source
-    # names found in anomalous signals.
     corroborated_kpis: set[str] = set()
+    h_sub = getattr(hypothesis, "affected_subsystem", "UNKNOWN") or "UNKNOWN"
+    h_mech = getattr(hypothesis, "mechanism_tag", "") or "UNKNOWN"
+
+    subsystems = domain_semantics.get("subsystems", {})
+    mechanisms = domain_semantics.get("mechanisms", {})
+
+    target_comp = h_sub if (h_sub != "UNKNOWN" and h_sub in subsystems) else h_mech
+    if target_comp == "UNKNOWN" or (target_comp not in subsystems and target_comp not in mechanisms):
+        stmt_comb = (hypothesis.statement + " " + hypothesis.reasoning).lower()
+        for m_id, m_data in mechanisms.items():
+            if m_id in ("external_factors", "default"):
+                continue
+            if _contains_any(stmt_comb, set(m_data.get("keywords", []))):
+                target_comp = m_id
+                break
+
+    comp_data = subsystems.get(target_comp, mechanisms.get(target_comp, {}))
+
+    direct_s = (comp_data.get("direct_source") or target_comp).lower() if comp_data else ""
+    comp_s = set(s.lower() for s in comp_data.get("compatible_sources", [])) if comp_data else set()
+    associated_kpis = [k.lower() for k in comp_data.get("associated_kpis", []) + comp_data.get("verification_steps", [])] if comp_data else []
+    comp_keywords = set(kw.lower() for kw in comp_data.get("keywords", [])) if comp_data else set()
 
     for eid in hypothesis.supporting_evidence_ids:
         ev = evidence_by_id.get(eid)
         if ev is None:
             continue
+
+        ev_src = ev.source_id.lower()
+        summary_lower = ev.summary.lower()
+
         # Direct: evidence source_id matches an anomalous KPI's id
         if ev.source_id in anomalous_kpi_ids:
-            corroborated_kpis.add(ev.source_id)
+            if not target_comp or target_comp in ("UNKNOWN", "default") or ev_src == direct_s or ev_src in comp_s:
+                corroborated_kpis.add(ev.source_id)
+
         # Indirect: check if any anomalous KPI id appears in the evidence summary
         for kpi_id in anomalous_kpi_ids:
-            if kpi_id.lower() in ev.summary.lower():
-                corroborated_kpis.add(kpi_id)
-                
-        # Cross-reference using domain_semantics: if the source represents a mechanism or hypothesis mechanism aligns,
-        # it corroborates KPIs aligned with that mechanism's verification steps or associated KPIs.
-        h_mech = getattr(hypothesis, "mechanism_tag", "")
-        for m_id, m_data in domain_semantics.get("mechanisms", {}).items():
-            direct_s = (m_data.get("direct_source") or m_id).lower()
-            comp_s = set(s.lower() for s in m_data.get("compatible_sources", []))
-            if (
-                ev.source_id.lower() == direct_s
-                or ev.source_id.lower() in comp_s
-                or ev.source_id.lower() == m_id.lower()
-                or (h_mech and m_id.lower() == h_mech.lower())
-            ):
-                related_kpis = [k.lower() for k in m_data.get("associated_kpis", []) + m_data.get("verification_steps", [])]
-                for kpi_id in anomalous_kpi_ids:
-                    kpi_lower = kpi_id.lower()
-                    if any(rk in kpi_lower or kpi_lower in rk or rk.replace("_", "") in kpi_lower for rk in related_kpis):
-                        corroborated_kpis.add(kpi_id)
-                    if any(kw.lower() in kpi_lower for kw in m_data.get("keywords", [])):
-                        corroborated_kpis.add(kpi_id)
-                         
-        # General generic check for orders/revenue
-        if ev.source_id in ("orders", "order_events"):
+            if kpi_id.lower() in summary_lower:
+                if not target_comp or target_comp in ("UNKNOWN", "default") or ev_src == direct_s or ev_src in comp_s:
+                    corroborated_kpis.add(kpi_id)
+
+        # Mechanism/Subsystem associated KPI corroboration: ONLY for the current hypothesis's component
+        if comp_data and is_evidence_compatible_with_mechanism(ev, target_comp, domain_semantics):
+            for kpi_id in anomalous_kpi_ids:
+                kpi_lower = kpi_id.lower()
+                if any(rk in kpi_lower or kpi_lower in rk or rk.replace("_", "") in kpi_lower for rk in associated_kpis):
+                    corroborated_kpis.add(kpi_id)
+                if any(kw in kpi_lower for kw in comp_keywords):
+                    corroborated_kpis.add(kpi_id)
+
+        # Orders / Revenue generic check: only if orders is compatible with THIS mechanism
+        if ev_src in ("orders", "order_events") and (not target_comp or ev_src in comp_s or ev_src == direct_s):
             for kpi_id in anomalous_kpi_ids:
                 if any(kw in kpi_id.lower() for kw in ("revenue", "conversion", "order")):
                     corroborated_kpis.add(kpi_id)
@@ -533,35 +549,50 @@ def is_evidence_compatible_with_mechanism(
 ) -> bool:
     """
     Deterministically validates whether an evidence record semantically
-    corroborates a hypothesis's mechanism_tag.
+    corroborates a hypothesis's mechanism_tag, subsystem, or root-cause archetype.
 
-    Enforces dual-check policy:
-    1. Source compatibility: ev.source_id must be declared in compatible_sources or direct_source.
-    2. Content/KPI relevance: For multi-purpose/contextual sources (e.g. support_tickets, deployment_log, orders),
+    Enforces:
+    1. Subsystem / Root cause separation: payment_gateway telemetry does NOT prove deployment_issues
+       without explicit release/deployment logs.
+    2. Source compatibility: ev.source_id must be declared in compatible_sources or direct_source.
+    3. Content/KPI relevance: For multi-purpose/contextual sources (e.g. support_tickets, deployment_log, orders),
        the evidence summary or source_id must explicitly contain mechanism-specific keywords, KPIs, or steps.
     """
     if not mechanism_tag or mechanism_tag in ("UNKNOWN", "default"):
         return True
 
+    subsystems = domain_semantics.get("subsystems", {})
+    root_archetypes = domain_semantics.get("root_cause_archetypes", {})
     mechanisms = domain_semantics.get("mechanisms", {})
-    if mechanism_tag not in mechanisms:
+
+    if mechanism_tag in subsystems:
+        mech_data = subsystems[mechanism_tag]
+    elif mechanism_tag in root_archetypes:
+        mech_data = root_archetypes[mechanism_tag]
+    elif mechanism_tag in mechanisms:
+        mech_data = mechanisms[mechanism_tag]
+    else:
         return True
 
-    mech_data = mechanisms[mechanism_tag]
-    compatible_sources = set(s.lower() for s in mech_data.get("compatible_sources", []))
-    direct_source = (mech_data.get("direct_source") or mechanism_tag).lower()
+    compatible_sources = set(s.lower() for s in (mech_data.get("compatible_sources") or mech_data.get("discriminating_sources") or []))
+    direct_source = (mech_data.get("direct_source") or "").lower()
     associated_kpis = set(k.lower() for k in mech_data.get("associated_kpis", []))
     keywords = set(k.lower() for k in mech_data.get("keywords", []))
     verification_steps = set(s.lower() for s in mech_data.get("verification_steps", []))
 
     ev_source = ev.source_id.lower()
+    summary_lower = ev.summary.lower()
+
+    # Explicit check: pure payment gateway telemetry does not prove deployment_issues
+    if mechanism_tag in ("deployment_issues", "INTERNAL_RELEASE") and ev_source == "payment_gateway":
+        if not any(kw in summary_lower for kw in ("deploy", "release", "rollback", "v4.3", "v4.2", "frontend", "backend")):
+            return False
 
     # 1. Source compatibility check
-    if compatible_sources:
+    if compatible_sources or direct_source:
         if ev_source not in compatible_sources and ev_source != direct_source:
             return False
     else:
-        # If compatible_sources not specified, reject if source is directly dedicated to another distinct mechanism
         for other_m_id, other_m_data in mechanisms.items():
             if other_m_id == mechanism_tag:
                 continue
@@ -569,10 +600,9 @@ def is_evidence_compatible_with_mechanism(
             if ev_source == other_direct:
                 return False
 
-    # 3. Content & KPI alignment check for contextual/general sources
+    # 2. Content & KPI alignment check for contextual/general sources
     contextual_sources = {"support_tickets", "deployment_log", "release_notes", "orders"}
     if ev_source in contextual_sources:
-        summary_lower = ev.summary.lower()
         has_keyword = any(kw in summary_lower for kw in keywords)
         has_kpi = any(kpi in summary_lower or kpi == ev_source for kpi in associated_kpis)
         has_step = any(step in summary_lower for step in verification_steps)
@@ -580,6 +610,275 @@ def is_evidence_compatible_with_mechanism(
             return False
 
     return True
+
+
+def is_evidence_anomalous_or_relevant(
+    ev: Evidence,
+    mechanism_tag: str,
+    signals: list[AnomalySignal],
+    domain_semantics: dict,
+) -> bool:
+    """
+    Deterministically determines whether an evidence item represents anomalous /
+    mechanism-relevant evidence versus unperturbed normal baseline telemetry.
+
+    Unperturbed baseline / negative-control evidence (e.g. normal inventory levels,
+    unperturbed marketing spend) must contribute 0.0 positive support to prevent
+    spurious corroboration of irrelevant mechanisms.
+    """
+    summary_lower = ev.summary.lower()
+    ev_src = ev.source_id.lower()
+
+    # 1. Explicit normal / baseline indicator in summary
+    normal_phrases = (
+        "appear normal",
+        "appears normal",
+        "levels appear normal",
+        "within normal",
+        "normal range",
+        "no anomaly",
+        "unperturbed",
+        "baseline normal",
+    )
+    if any(phrase in summary_lower for phrase in normal_phrases):
+        return False
+
+    # 2. Event / Unstructured / Deployment sources are inherently relevant causal/temporal observations
+    event_sources = {"deployment_log", "release_notes"}
+    if ev_src in event_sources or getattr(ev, "kind", "") == "unstructured":
+        return True
+
+    # 3. Support tickets: check if error/failure vs general background
+    if ev_src == "support_tickets":
+        error_keywords = ("failure", "error", "unable", "issue", "bug", "crash", "timeout", "latency", "failed")
+        return any(kw in summary_lower for kw in error_keywords)
+
+    # 4. Telemetry / Structured KPI sources: check if the source/metric aligns with an active anomaly
+    anomalous_kpi_ids = {s.kpi_id.lower() for s in signals if s.is_anomaly}
+    non_anomalous_kpi_ids = {s.kpi_id.lower() for s in signals if not s.is_anomaly}
+
+    # If the evidence explicitly mentions or originates from an anomalous KPI
+    if ev_src in anomalous_kpi_ids or any(kpi in summary_lower for kpi in anomalous_kpi_ids):
+        return True
+
+    # Check against domain semantics associated KPIs for the mechanism
+    mechanisms = domain_semantics.get("mechanisms", {})
+    if mechanism_tag in mechanisms:
+        mech_kpis = [k.lower() for k in mechanisms[mechanism_tag].get("associated_kpis", [])]
+        for kpi in mech_kpis:
+            if kpi in anomalous_kpi_ids and (kpi in summary_lower or ev_src in kpi or kpi in ev_src):
+                return True
+
+    # If the source is registered as a non-anomalous signal and has no anomaly indicators, it's baseline
+    if ev_src in non_anomalous_kpi_ids:
+        return False
+
+    for s in signals:
+        if not s.is_anomaly and (s.kpi_id.lower() in summary_lower or s.kpi_id.lower() == ev_src):
+            return False
+
+    # When signals are present, unaligned background inventory is baseline
+    if signals and ev_src == "inventory" and not anomalous_kpi_ids.intersection({"inventory", "inventory_fill_rate_daily"}):
+        return False
+
+    # If marketing evidence is used for non-marketing mechanism, it is baseline
+    if ev_src == "marketing" and mechanism_tag not in ("external_factors", "", "UNKNOWN"):
+        return False
+
+    return True
+
+
+def check_root_cause_evidence_sufficiency(
+    hypothesis: Hypothesis,
+    evidence_by_id: dict[str, Evidence],
+    signals: list[AnomalySignal],
+    domain_semantics: dict,
+) -> tuple[bool, str, list[str]]:
+    """
+    ROOT-CAUSE EVIDENCE SUFFICIENCY GATE
+    ------------------------------------
+    Deterministically evaluates whether the supporting evidence provides sufficient,
+    causally discriminative proof for the claimed root_cause_type (initiating cause),
+    strictly separating affected subsystems, proximal failure mechanisms, and initiating root causes.
+
+    Returns:
+        tuple[bool, str, list[str]]: (passed, rationale, root_cause_evidence_ids)
+
+    Rules:
+    - UNKNOWN:
+      Passed. An UNKNOWN root cause accurately reflects unobserved upstream initiating factors
+      and makes no unsubstantiated causal claims.
+
+    - INTERNAL_RELEASE:
+      Requires at least one causally discriminative deployment/release evidence record
+      (source_id in ('deployment_log', 'release_notes') or explicit release/hotfix record).
+      Gateway telemetry alone (source_id='payment_gateway') and support tickets alone
+      (source_id='support_tickets') MUST NOT satisfy this gate.
+
+    - EXTERNAL_PROVIDER:
+      Requires configured provider-specific evidence (e.g. source_id in ('provider_status',
+      'vendor_incident', 'gateway_provider', 'third_party_status') or explicit third-party outage record).
+      Gateway telemetry alone does NOT automatically establish external provider causation.
+
+    - MACRO_EXTERNAL:
+      Requires relevant external/market evidence (e.g. source_id in ('marketing', 'competitor_data',
+      'market_intelligence', 'social_media') or market-wide promotional telemetry).
+
+    - INVENTORY_SHORTAGE:
+      Requires anomalous inventory evidence (active stockout / depletion records).
+      Normal inventory telemetry (e.g. fill rate 94% normal) fails this gate.
+
+    - RESOURCE_EXHAUSTION:
+      Requires mechanism-specific resource evidence (e.g. connection pool saturation metrics,
+      memory/CPU telemetry, socket exhaustion logs).
+    """
+    raw_root_cause = getattr(hypothesis, "root_cause_type", None)
+    if hasattr(raw_root_cause, "value"):
+        root_cause_str = raw_root_cause.value
+    elif raw_root_cause:
+        root_cause_str = str(raw_root_cause)
+    else:
+        root_cause_str = "UNKNOWN"
+
+    mech_tag = getattr(hypothesis, "mechanism_tag", "UNKNOWN")
+
+    # If root_cause_type is UNKNOWN (or not specified), check if mechanism_tag implies an archetype
+    if root_cause_str in ("UNKNOWN", "none", "", None):
+        if mech_tag == "deployment_issues":
+            root_cause_str = "INTERNAL_RELEASE"
+        else:
+            return (
+                True,
+                "Hypothesis claims no specific upstream root cause (UNKNOWN); upstream causal gate is satisfied.",
+                [],
+            )
+
+    supporting_eids = list(hypothesis.supporting_evidence_ids)
+    supporting_evs = [evidence_by_id[eid] for eid in supporting_eids if eid in evidence_by_id]
+
+    if root_cause_str == "INTERNAL_RELEASE":
+        # Requires at least one causally discriminative deployment/release record
+        # Valid sources: deployment_log, release_notes
+        matched_eids: list[str] = []
+        for ev in supporting_evs:
+            src = ev.source_id.lower()
+            summ = ev.summary.lower()
+            if src in ("deployment_log", "release_notes"):
+                matched_eids.append(ev.evidence_id)
+            elif any(kw in summ for kw in ("release v", "hotfix", "emergency rollback", "deployed v", "deployment log")):
+                if src not in ("payment_gateway", "orders", "support_tickets"):
+                    matched_eids.append(ev.evidence_id)
+
+        if matched_eids:
+            return (
+                True,
+                f"Claimed root cause INTERNAL_RELEASE is supported by discriminative deployment/release evidence: {sorted(matched_eids)}.",
+                sorted(matched_eids),
+            )
+        else:
+            return (
+                False,
+                "Hypothesis claims INTERNAL_RELEASE root cause, but supporting evidence contains no causally discriminative deployment_log or release_notes records (gateway telemetry and support tickets alone do not prove an internal release).",
+                [],
+            )
+
+    elif root_cause_str == "EXTERNAL_PROVIDER":
+        matched_eids: list[str] = []
+        for ev in supporting_evs:
+            src = ev.source_id.lower()
+            summ = ev.summary.lower()
+            if src in ("provider_status", "vendor_incident", "gateway_provider", "third_party_status"):
+                matched_eids.append(ev.evidence_id)
+            elif any(kw in summ for kw in ("provider status", "vendor status", "upstream provider outage", "third-party status", "gateway provider incident")):
+                if src not in ("payment_gateway", "orders", "support_tickets"):
+                    matched_eids.append(ev.evidence_id)
+
+        if matched_eids:
+            return (
+                True,
+                f"Claimed root cause EXTERNAL_PROVIDER is supported by provider-specific evidence: {sorted(matched_eids)}.",
+                sorted(matched_eids),
+            )
+        else:
+            return (
+                False,
+                "Hypothesis claims EXTERNAL_PROVIDER root cause, but supporting evidence contains no third-party provider status or vendor incident records (gateway telemetry alone does not prove an external provider outage).",
+                [],
+            )
+
+    elif root_cause_str == "MACRO_EXTERNAL":
+        matched_eids: list[str] = []
+        for ev in supporting_evs:
+            src = ev.source_id.lower()
+            summ = ev.summary.lower()
+            if src in ("marketing", "competitor_data", "market_intelligence", "social_media"):
+                if is_evidence_anomalous_or_relevant(ev, "external_factors", signals, domain_semantics):
+                    matched_eids.append(ev.evidence_id)
+            elif any(kw in summ for kw in ("competitor campaign", "market shift", "macro holiday", "ad campaign")):
+                matched_eids.append(ev.evidence_id)
+
+        if matched_eids:
+            return (
+                True,
+                f"Claimed root cause MACRO_EXTERNAL is supported by external market/campaign evidence: {sorted(matched_eids)}.",
+                sorted(matched_eids),
+            )
+        else:
+            return (
+                False,
+                "Hypothesis claims MACRO_EXTERNAL root cause, but supporting evidence contains no external market or campaign evidence.",
+                [],
+            )
+
+    elif root_cause_str == "INVENTORY_SHORTAGE":
+        matched_eids: list[str] = []
+        for ev in supporting_evs:
+            src = ev.source_id.lower()
+            if src == "inventory":
+                if is_evidence_anomalous_or_relevant(ev, "inventory_system", signals, domain_semantics):
+                    matched_eids.append(ev.evidence_id)
+
+        if matched_eids:
+            return (
+                True,
+                f"Claimed root cause INVENTORY_SHORTAGE is supported by anomalous inventory/stockout evidence: {sorted(matched_eids)}.",
+                sorted(matched_eids),
+            )
+        else:
+            return (
+                False,
+                "Hypothesis claims INVENTORY_SHORTAGE root cause, but supporting evidence contains no anomalous inventory or stockout records (normal fill rate does not prove inventory shortage).",
+                [],
+            )
+
+    elif root_cause_str == "RESOURCE_EXHAUSTION":
+        matched_eids: list[str] = []
+        for ev in supporting_evs:
+            src = ev.source_id.lower()
+            summ = ev.summary.lower()
+            if any(kw in summ for kw in ("connection pool exhaustion", "memory exhaustion", "cpu saturation", "thread pool", "resource exhaustion", "socket exhaustion")):
+                matched_eids.append(ev.evidence_id)
+            elif src in ("server_metrics", "infrastructure_telemetry", "host_metrics"):
+                matched_eids.append(ev.evidence_id)
+
+        if matched_eids:
+            return (
+                True,
+                f"Claimed root cause RESOURCE_EXHAUSTION is supported by resource telemetry evidence: {sorted(matched_eids)}.",
+                sorted(matched_eids),
+            )
+        else:
+            return (
+                False,
+                "Hypothesis claims RESOURCE_EXHAUSTION root cause, but supporting evidence contains no resource utilization or connection pool saturation telemetry.",
+                [],
+            )
+
+    return (
+        True,
+        f"Root cause '{root_cause_str}' evaluated with standard baseline telemetry checks.",
+        [],
+    )
 
 
 def _rule_mechanism_consistency(
@@ -832,7 +1131,7 @@ def score_hypothesis(
             disqualification_reason=f"Failed hard constraint(s): {[r.rule_name for r in hard_fails]}",
         )
 
-    # Step 2: Support score (Deduplicated & Mechanism Alignment Validated)
+    # Step 2: Support score (Deduplicated, Mechanism Aligned & Baseline Guarded)
     support_score: float = 0.0
     aligned_support_eids: list[str] = []
     unaligned_evidence_ids: list[str] = []
@@ -841,9 +1140,14 @@ def score_hypothesis(
         ev = evidence_by_id.get(eid)
         if ev is None:
             continue
-        if is_evidence_compatible_with_mechanism(ev, getattr(h, "mechanism_tag", ""), domain_semantics):
-            aligned_support_eids.append(eid)
-            support_score += ev.reliability_weight * ev.relevance
+        mech_tag = getattr(h, "mechanism_tag", "")
+        if is_evidence_compatible_with_mechanism(ev, mech_tag, domain_semantics):
+            # Baseline / negative-control guard: normal unperturbed evidence contributes 0.0 support
+            if is_evidence_anomalous_or_relevant(ev, mech_tag, signals, domain_semantics):
+                aligned_support_eids.append(eid)
+                support_score += ev.reliability_weight * ev.relevance
+            else:
+                unaligned_evidence_ids.append(eid)
         else:
             unaligned_evidence_ids.append(eid)
 
@@ -882,9 +1186,18 @@ def score_hypothesis(
     else:
         sufficiency_level = EvidenceSufficiencyLevel.STRONG
 
+    # Check Root-Cause Evidence Sufficiency Gate
+    root_cause_gate_passed, root_cause_rationale, root_cause_eids = check_root_cause_evidence_sufficiency(
+        h, evidence_by_id, signals, domain_semantics
+    )
+
     # Determine Verdict
     if final_audit_score >= thresholds.high_threshold and sufficiency_level in (EvidenceSufficiencyLevel.SUFFICIENT, EvidenceSufficiencyLevel.STRONG):
-        verdict = AuditVerdict.VERIFIED
+        if root_cause_gate_passed:
+            verdict = AuditVerdict.VERIFIED
+        else:
+            # When root-cause evidence is missing for a specific root_cause_type claim, cap at MARGINAL
+            verdict = AuditVerdict.MARGINAL
     elif final_audit_score >= thresholds.medium_threshold or (final_audit_score >= thresholds.high_threshold and sufficiency_level == EvidenceSufficiencyLevel.LIMITED):
         verdict = AuditVerdict.MARGINAL
     else:
@@ -903,6 +1216,9 @@ def score_hypothesis(
         narrative="",
         method=MethodTag.RULES,
         unaligned_evidence_ids=sorted(unaligned_evidence_ids),
+        root_cause_gate_passed=root_cause_gate_passed,
+        root_cause_evidence_ids=root_cause_eids,
+        root_cause_rationale=root_cause_rationale,
     )
 
 

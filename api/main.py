@@ -690,54 +690,84 @@ async def feedback_endpoint(
             feedback_id = cur.fetchone()[0]
 
         # ------------------------------------------------------------------
-        # 4. E9 Validation — CORRECT + analyst-scoped + first-wins policy
+        # 4. E9 Lifecycle Management — CORRECT, INCORRECT, PARTIALLY_CORRECT
         # ------------------------------------------------------------------
-        if verdict_str == "CORRECT" and inv_persona == "analyst" and scenario_id:
+        if inv_persona == "analyst" and scenario_id:
             try:
                 from engines.memory import MemoryEngine
+                from models import PrecedentValidationState
                 memory = MemoryEngine(chroma_client=state.chroma_client, llm_provider=state.llm_provider)
 
-                # First-wins check: only validate if not already validated
-                collection = memory._get_or_create_collection()
-                existing = collection.get(ids=[scenario_id], include=["metadatas"])
-                already_validated = False
-                if existing and existing.get("metadatas") and len(existing["metadatas"]) > 0:
-                    meta = existing["metadatas"][0] or {}
-                    hv = meta.get("human_validated", False)
-                    if isinstance(hv, str):
-                        hv = hv.lower() in ("true", "1")
-                    already_validated = bool(hv)
+                if verdict_str == "CORRECT":
+                    # First-wins check: only validate if not already validated
+                    collection = memory._get_or_create_collection()
+                    existing = collection.get(ids=[scenario_id], include=["metadatas"])
+                    already_validated = False
+                    if existing and existing.get("metadatas") and len(existing["metadatas"]) > 0:
+                        meta = existing["metadatas"][0] or {}
+                        val_state = meta.get("validation_state", "")
+                        hv = meta.get("human_validated", False)
+                        if isinstance(hv, str):
+                            hv = hv.lower() in ("true", "1")
+                        already_validated = (val_state == PrecedentValidationState.VALIDATED.value or bool(hv))
 
-                if not already_validated:
-                    ok = memory.mark_validated(
-                        scenario_id=scenario_id,
-                        validation_feedback_id=feedback_id,
-                    )
-                    if ok:
-                        validated_precedent = True
-                        # Update the feedback record with validation linkage
-                        with state.db_conn.cursor() as cur:
-                            cur.execute(
-                                """
-                                UPDATE feedback
-                                SET validated_precedent = TRUE,
-                                    validation_precedent_id = %s
-                                WHERE feedback_id = %s
-                                """,
-                                (scenario_id, feedback_id),
+                    if not already_validated:
+                        ok = memory.mark_validated(
+                            scenario_id=scenario_id,
+                            validation_feedback_id=feedback_id,
+                        )
+                        if ok:
+                            validated_precedent = True
+                            # Update the feedback record with validation linkage
+                            with state.db_conn.cursor() as cur:
+                                cur.execute(
+                                    """
+                                    UPDATE feedback
+                                    SET validated_precedent = TRUE,
+                                        validation_precedent_id = %s
+                                    WHERE feedback_id = %s
+                                    """,
+                                    (scenario_id, feedback_id),
+                                )
+                            logger.info(
+                                "/feedback: E9 precedent %s marked VALIDATED by feedback_id=%d (first-wins)",
+                                scenario_id, feedback_id,
                             )
+                    else:
                         logger.info(
-                            "/feedback: E9 precedent %s validated by feedback_id=%d (first-wins)",
+                            "/feedback: precedent %s already validated; recording feedback_id=%d without re-stamping",
                             scenario_id, feedback_id,
                         )
-                else:
-                    logger.info(
-                        "/feedback: precedent %s already validated; recording feedback_id=%d without re-stamping",
-                        scenario_id, feedback_id,
+
+                elif verdict_str == "INCORRECT":
+                    # Mark precedent DISPUTED and exclude from normal retrieval
+                    ok = memory.mark_disputed(
+                        scenario_id=scenario_id,
+                        validation_feedback_id=feedback_id,
+                        dispute_notes=analyst_notes,
                     )
+                    if ok:
+                        logger.info(
+                            "/feedback: E9 precedent %s marked DISPUTED (excluded from normal retrieval) by feedback_id=%d",
+                            scenario_id, feedback_id,
+                        )
+
+                elif verdict_str == "PARTIALLY_CORRECT":
+                    # Mark precedent PARTIALLY_VALIDATED (no +0.10 boost)
+                    ok = memory.mark_partially_validated(
+                        scenario_id=scenario_id,
+                        validation_feedback_id=feedback_id,
+                        notes=analyst_notes,
+                    )
+                    if ok:
+                        logger.info(
+                            "/feedback: E9 precedent %s marked PARTIALLY_VALIDATED by feedback_id=%d",
+                            scenario_id, feedback_id,
+                        )
+
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "/feedback: E9 validation failed for %s (feedback_id=%d): %s — feedback still saved",
+                    "/feedback: E9 lifecycle transition failed for %s (feedback_id=%d): %s — feedback still saved",
                     scenario_id, feedback_id, exc,
                 )
 
@@ -891,6 +921,61 @@ async def get_feedback_for_scenario(scenario_id: str, request: Request) -> JSONR
 
 
 # ---------------------------------------------------------------------------
+# GET /precedents/{scenario_id} — Precedent Memory Inspection & Audit
+# ---------------------------------------------------------------------------
+
+
+@app.get("/precedents/{scenario_id}")
+async def get_precedents_for_scenario(
+    scenario_id: str,
+    request: Request,
+    query_context: str = "",
+    include_disputed: bool = False,
+    include_suppressed: bool = False,
+    persona: str = "analyst",
+) -> JSONResponse:
+    """
+    Retrieve precedents matching scenario_id, with optional audit flags to include
+    DISPUTED and SUPPRESSED historical records.
+    """
+    state = request.app.state
+    if state.chroma_client is None:
+        return JSONResponse(
+            status_code=200,
+            content={"scenario_id": scenario_id, "count": 0, "precedents": []},
+        )
+
+    try:
+        from engines.memory import MemoryEngine
+        from security.entitlements import SecurityEngine
+        
+        entitlements_config = getattr(state, "entitlements_config", None)
+        auth_sources = None
+        if entitlements_config:
+            scope = SecurityEngine(entitlements_config).authorize(persona)
+            auth_sources = scope.authorized_sources
+
+        memory = MemoryEngine(chroma_client=state.chroma_client, llm_provider=state.llm_provider)
+        precedents = memory.retrieve_precedents(
+            scenario_id=scenario_id,
+            query_context=query_context,
+            include_disputed=include_disputed,
+            include_suppressed=include_suppressed,
+            authorized_sources=auth_sources,
+            persona=persona,
+        )
+
+        return JSONResponse(content={
+            "scenario_id": scenario_id,
+            "count": len(precedents),
+            "precedents": _to_json(precedents),
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.error("/precedents/%s: error: %s", scenario_id, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve precedents: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # GET /evaluation/health — Continuous Evaluation & Drift Monitoring (Round 2)
 # ---------------------------------------------------------------------------
 
@@ -919,4 +1004,6 @@ async def get_system_health(request: Request) -> JSONResponse:
         except Exception:  # noqa: BLE001
             pass
         raise HTTPException(status_code=500, detail=f"Health evaluation failed: {exc}")
+
+
 

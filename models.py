@@ -435,6 +435,25 @@ class CitationViolation:
     detail: str = ""
 
 
+class RootCauseType(str, Enum):
+    INTERNAL_RELEASE = "INTERNAL_RELEASE"
+    EXTERNAL_PROVIDER = "EXTERNAL_PROVIDER"
+    MACRO_EXTERNAL = "MACRO_EXTERNAL"
+    RESOURCE_EXHAUSTION = "RESOURCE_EXHAUSTION"
+    INVENTORY_SHORTAGE = "INVENTORY_SHORTAGE"
+    UNKNOWN = "UNKNOWN"
+
+
+class AffectedSubsystem(str, Enum):
+    PAYMENT_GATEWAY = "payment_gateway"
+    INVENTORY_SYSTEM = "inventory_system"
+    MARKETING_CHANNEL = "marketing_channel"
+    DEVICE_CLIENT = "device_client"
+    AUTH_SERVICE = "auth_service"
+    COMPUTE_BACKEND = "compute_backend"
+    UNKNOWN = "UNKNOWN"
+
+
 @dataclass
 class Hypothesis:
     """
@@ -444,7 +463,11 @@ class Hypothesis:
 
     hypothesis_id: str = "H1"                 # e.g. "H1"
     statement: str = ""                       # LLM prose, 1–2000 chars, NO numbers
-    mechanism_tag: str = ""                   # explicit structured mechanism tag
+    mechanism_tag: str = ""                   # explicit structured mechanism tag (retained for backward compatibility)
+    root_cause_type: str = "UNKNOWN"          # Initiating cause: "INTERNAL_RELEASE" | "EXTERNAL_PROVIDER" | "MACRO_EXTERNAL" | "RESOURCE_EXHAUSTION" | "INVENTORY_SHORTAGE" | "UNKNOWN"
+    affected_subsystem: str = "UNKNOWN"       # Component/pathway affected: "payment_gateway" | "inventory_system" | "marketing_channel" | "device_client" | "UNKNOWN"
+    proximal_mechanism: str = "UNKNOWN"       # Technical mechanism: e.g. "latency_spike_and_timeout", "stockout", "crash_loop", "connection_pool_exhaustion", "UNKNOWN"
+    symptom_kpis: list[str] = field(default_factory=list) # Downstream KPI effects: e.g. ["hourly_conversion", "payment_failure_rate_15min"]
     citations: list[EvidenceCitation] = field(default_factory=list)
     reasoning: str = ""                       # 1–5000 chars
     # Narrative prose only. Must not reference evidence IDs or assert
@@ -495,6 +518,9 @@ class ScoredHypothesis:
     disqualification_reason: Optional[str] = None
     violations: list[CitationViolation] = field(default_factory=list)
     unaligned_evidence_ids: list[str] = field(default_factory=list)
+    root_cause_gate_passed: bool = True
+    root_cause_evidence_ids: list[str] = field(default_factory=list)
+    root_cause_rationale: str = ""
 
     def __post_init__(self) -> None:
         self.final_audit_score = clamp(self.final_audit_score, 0.0, 1.0)
@@ -620,6 +646,15 @@ class InvestigationResult:
     precedents: list[Any] = field(default_factory=list)
     telemetry: Telemetry = field(default_factory=Telemetry)
     method_ownership: dict[str, list[MethodTag]] = field(default_factory=dict)
+
+
+class PrecedentValidationState(str, Enum):
+    """Lifecycle and validation state of an institutional precedent in vector memory."""
+    UNVALIDATED = "UNVALIDATED"                  # Automatically stored AI conclusion pending analyst review
+    VALIDATED = "VALIDATED"                      # Confirmed by authorized human analyst (CORRECT)
+    PARTIALLY_VALIDATED = "PARTIALLY_VALIDATED"  # Reviewed with partial corrections
+    DISPUTED = "DISPUTED"                        # Marked INCORRECT by analyst; excluded from normal retrieval
+    SUPPRESSED = "SUPPRESSED"                    # Administratively deactivated or superseded
 
 
 class FeedbackVerdict(str, Enum):

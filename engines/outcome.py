@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from models import Decision, MethodTag, OutcomeProjection, OutcomeType
+from models import AuditVerdict, Decision, MethodTag, OutcomeProjection, OutcomeType
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,26 @@ SIMULATED_DISCLAIMER: str = (
 # ---------------------------------------------------------------------------
 
 
-def _match_curve(recommended_action: str, domain_semantics: dict) -> dict:
+def _match_curve(recommended_action: str, domain_semantics: dict) -> Optional[dict]:
     """
     Determine the best-matching recovery curve from the recommended action text.
 
     Looks for intervention keywords in order of specificity from domain_semantics.
-    Falls back to the 'default' curve when no keyword matches.
+    Returns the matched curve data, or the 'default' curve if it represents an operational action.
+    Returns None if the action is diagnostic or non-remedial.
     """
     lower = recommended_action.lower()
+
+    # Defense-in-depth: diagnostic directives never match operational recovery curves
+    if (
+        "targeted diagnostic investigation" in lower
+        or "targeted diagnostic" in lower
+        or "diagnostic verification" in lower
+        or "collect telemetry and verify" in lower
+        or "diagnostic investigation" in lower
+    ):
+        return None
+
     recovery_curves = domain_semantics.get("recovery_curves", {})
 
     for curve_id, curve_data in recovery_curves.items():
@@ -67,6 +79,8 @@ def _match_curve(recommended_action: str, domain_semantics: dict) -> dict:
         "projected_metric": "kpi_primary_metric",
         "projected_recovery_pct": 75.0,
         "recovery_window_hours": 4,
+        "mean_time_to_normalcy": "15 min",
+        "assumptions": ["Remediation directly addresses identified primary anomaly driver."],
     })
 
 
@@ -75,18 +89,26 @@ def _match_curve(recommended_action: str, domain_semantics: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def project_outcome(decision: Decision, domain_semantics: Optional[dict] = None) -> Optional[OutcomeProjection]:
+def project_outcome(
+    decision: Decision,
+    domain_semantics: Optional[dict] = None,
+    overall_verdict: Optional[AuditVerdict] = None,
+) -> Optional[OutcomeProjection]:
     """
     Engine E8: produce a SIMULATED outcome projection from a Decision.
 
     Returns None (no projection) when:
     - The decision is abstained (no recommended action to project on).
-    - The guard assertion detects a non-SIMULATED tag (should never happen
-      under normal operation — exists to satisfy Req 14.5).
+    - The decision has no recommended action.
+    - The overall_verdict is not VERIFIED (e.g. MARGINAL, ABSTAIN, REJECTED).
+    - The recommended action or lever is diagnostic/telemetry verification rather than operational remediation.
+    - The guard assertion detects a non-SIMULATED tag or missing disclaimer.
 
     Parameters
     ----------
-    decision : Decision produced by Engine E7.
+    decision        : Decision produced by Engine E7.
+    domain_semantics: Optional domain semantics dictionary containing recovery curves.
+    overall_verdict : Optional AuditVerdict from Engine E6 / E7 governance state.
 
     Returns
     -------
@@ -95,7 +117,7 @@ def project_outcome(decision: Decision, domain_semantics: Optional[dict] = None)
 
     Requirements: 14.1, 14.2, 14.3, 14.5
     """
-    # Guard: abstained decisions carry no recommended action — nothing to project.
+    # Guard 1: Abstained decisions carry no recommended action — nothing to project (Req 14.3)
     if decision.abstained:
         logger.info(
             "project_outcome: decision is abstained; no projection produced."
@@ -109,8 +131,47 @@ def project_outcome(decision: Decision, domain_semantics: Optional[dict] = None)
         )
         return None
 
+    # Guard 2: Structured verdict check (Governance State Gating)
+    # Only VERIFIED hypotheses with operational remediation are eligible for recovery simulation.
+    # MARGINAL, ABSTAIN, and REJECTED states MUST return None.
+    if overall_verdict is not None and overall_verdict != AuditVerdict.VERIFIED:
+        logger.info(
+            "project_outcome: overall_verdict is %s (not VERIFIED); suppressing recovery projection.",
+            overall_verdict.value if hasattr(overall_verdict, "value") else str(overall_verdict),
+        )
+        return None
+
+    # Guard 3: Structured lever check (Diagnostic levers produce no operational recovery)
+    if decision.structured_recommendation:
+        lever = (decision.structured_recommendation.controllable_lever or "").strip().lower()
+        if "diagnostic" in lever or "telemetry" in lever:
+            logger.info(
+                "project_outcome: controllable_lever is diagnostic (%r); suppressing recovery projection.",
+                decision.structured_recommendation.controllable_lever,
+            )
+            return None
+
+    # Guard 4: Prose-level diagnostic keyword check (defense-in-depth)
+    lower_action = decision.recommended_action.lower()
+    if (
+        lower_action.startswith("targeted diagnostic investigation")
+        or "collect telemetry and verify" in lower_action
+        or "diagnostic telemetry before committing" in lower_action
+    ):
+        logger.info(
+            "project_outcome: recommended_action is a diagnostic directive; suppressing recovery projection."
+        )
+        return None
+
     domain_semantics = domain_semantics or {}
     curve = _match_curve(decision.recommended_action, domain_semantics)
+
+    if not curve:
+        logger.info(
+            "project_outcome: action %r did not match an operational recovery curve; no projection produced.",
+            decision.recommended_action,
+        )
+        return None
 
     # Build the projection — always SIMULATED (Req 14.1, 14.2).
     projection = OutcomeProjection(

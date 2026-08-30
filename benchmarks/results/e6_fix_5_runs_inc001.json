@@ -1,0 +1,32 @@
+[
+  {
+    "iteration": 1,
+    "timestamp": "2026-08-30T07:55:11.653972",
+    "duration_seconds": 17.0,
+    "hypotheses_count": 0,
+    "winning_hypothesis_id": null,
+    "winning_mechanism_tag": "NONE",
+    "abstained": true,
+    "abstention_reason": "low_confidence",
+    "selected_lever_id": null,
+    "recommended_action": null,
+    "outcome_projection": null,
+    "hypotheses": [],
+    "scored_hypotheses": []
+  },
+  {
+    "iteration": 2,
+    "timestamp": "2026-08-30T07:56:27.802086",
+    "duration_seconds": 16.15,
+    "hypotheses_count": 0,
+    "winning_hypothesis_id": null,
+    "winning_mechanism_tag": "NONE",
+    "abstained": true,
+    "abstention_reason": "low_confidence",
+    "selected_lever_id": null,
+    "recommended_action": null,
+    "outcome_projection": null,
+    "hypotheses": [],
+    "scored_hypotheses": []
+  }
+]

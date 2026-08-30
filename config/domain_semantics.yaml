@@ -1,5 +1,99 @@
 domain: E-Commerce Retail
 
+# ---------------------------------------------------------------------------
+# Subsystems (Architectural Components & Pathways)
+# ---------------------------------------------------------------------------
+subsystems:
+  payment_gateway:
+    description: "Payment processing integration and gateway client pathway"
+    direct_source: "payment_gateway"
+    compatible_sources: ["payment_gateway", "support_tickets", "orders"]
+    keywords: ["payment", "gateway", "stripe", "adyen", "auth", "checkout"]
+    associated_kpis: ["gateway_latency_15min", "payment_failure_rate_15min", "hourly_conversion"]
+    verification_steps:
+      - payment_success_rate
+      - conversion_rate_recovery
+  inventory_system:
+    description: "Inventory management, warehouse catalog, and stock fulfillment"
+    direct_source: "inventory"
+    compatible_sources: ["inventory", "orders", "support_tickets"]
+    keywords: ["inventory", "stock", "warehouse", "depletion", "out of stock"]
+    associated_kpis: ["inventory_fill_rate_daily"]
+    verification_steps:
+      - inventory_fill_rate
+      - product_availability
+  marketing_channel:
+    description: "Marketing campaign delivery, advertising spend, and promotional acquisition"
+    direct_source: "marketing"
+    compatible_sources: ["marketing", "orders"]
+    keywords: ["marketing", "campaign", "promotion", "spend", "impressions", "social", "digital", "email"]
+    associated_kpis: []
+    verification_steps:
+      - market_share_indicators
+      - campaign_performance
+  device_client:
+    description: "Client applications and frontend runtime across platforms"
+    direct_source: "device_performance"
+    compatible_sources: ["support_tickets", "orders"]
+    keywords: ["device", "mobile", "ios", "android", "web", "app crash"]
+    associated_kpis: []
+    verification_steps:
+      - app_crash_rate
+      - device_specific_conversion
+  auth_service:
+    description: "Authentication, single sign-on, and user identity services"
+    direct_source: "security_log"
+    compatible_sources: ["security_log", "support_tickets"]
+    keywords: ["sso", "saml", "auth", "login", "identity"]
+    associated_kpis: []
+    verification_steps:
+      - login_success_rate
+  default:
+    direct_source: ""
+    compatible_sources: []
+    keywords: []
+    associated_kpis: []
+    verification_steps:
+      - kpi_primary_metric_recovery
+
+# ---------------------------------------------------------------------------
+# Root Cause Archetypes (Initiating Events / Conditions)
+# ---------------------------------------------------------------------------
+root_cause_archetypes:
+  INTERNAL_RELEASE:
+    description: "Internal software deployment, release, migration, or configuration change"
+    discriminating_sources: ["deployment_log", "release_notes"]
+    keywords: ["deploy", "release", "rollback", "migration", "v4.3", "v4.2", "frontend", "backend", "configuration"]
+    primary_remediation: "rollback"
+  EXTERNAL_PROVIDER:
+    description: "Third-party vendor, external payment processor, bank, or partner network outage"
+    discriminating_sources: ["vendor_status", "network_telemetry", "payment_gateway"]
+    keywords: ["third_party", "provider", "bank", "stripe", "adyen", "partner", "external_api", "upstream_outage"]
+    primary_remediation: "vendor_failover"
+  MACRO_EXTERNAL:
+    description: "Market-wide consumer behavior, competitor pricing, seasonality, or macroeconomic conditions"
+    discriminating_sources: ["marketing", "orders"]
+    keywords: ["competitor", "market", "pricing", "macro", "holiday", "consumer", "seasonality"]
+    primary_remediation: "marketing_rebalance"
+  RESOURCE_EXHAUSTION:
+    description: "System resource depletion such as memory leaks, connection pool exhaustion, or CPU starvation"
+    discriminating_sources: ["system_telemetry", "host_metrics", "deployment_log"]
+    keywords: ["memory", "cpu", "leak", "oom", "connection_pool", "pool_exhaustion", "thread_starvation"]
+    primary_remediation: "scale_resources"
+  INVENTORY_SHORTAGE:
+    description: "Physical stockout, warehouse fulfillment backlog, or supplier replenishment delay"
+    discriminating_sources: ["inventory", "orders"]
+    keywords: ["stockout", "warehouse", "backlog", "supplier", "depletion", "unfulfilled"]
+    primary_remediation: "reorder"
+  UNKNOWN:
+    description: "Initiating cause cannot be empirically distinguished from available evidence"
+    discriminating_sources: []
+    keywords: []
+    primary_remediation: "diagnostic_verification"
+
+# ---------------------------------------------------------------------------
+# Mechanisms (Retained for full backward compatibility across E1-E9)
+# ---------------------------------------------------------------------------
 mechanisms:
   payment_gateway:
     direct_source: "payment_gateway"
@@ -78,11 +172,9 @@ recovery_curves:
 hypothesis_generation:
   prompt_context: >
     - The domain is an e-commerce retail business.
-    - If a hypothesis involves checkout or payment degradation caused by a recent 
-      software release, the recommended action MUST include rolling back that release 
-      (e.g., v4.3) as the primary remediation step.
-    - If a hypothesis involves inventory shortages, the recommended action should 
-      include reordering or restocking affected product lines.
+    - If a hypothesis establishes an internal software release as the root cause with deployment evidence, the recommended action should include rolling back that release (e.g., v4.3).
+    - If evidence establishes only payment gateway degradation without discriminating an internal deployment or external vendor outage, root_cause_type must be UNKNOWN and the recommended action should be targeted diagnostic investigation.
+    - If a hypothesis involves inventory shortages, the recommended action should include reordering or restocking affected product lines.
   drivers:
     - "technical degradation (e.g. latency, crashes)"
     - "external factors (e.g. competitor pricing, holidays)"

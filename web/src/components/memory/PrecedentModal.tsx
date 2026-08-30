@@ -1,6 +1,6 @@
 import React from "react"
 import { PrecedentItem } from "../../types/investigation"
-import { History, X, CheckCircle2, ShieldCheck, ArrowRight } from "lucide-react"
+import { History, X, CheckCircle2, AlertCircle, AlertTriangle } from "lucide-react"
 
 interface PrecedentModalProps {
   precedent: PrecedentItem
@@ -9,6 +9,9 @@ interface PrecedentModalProps {
 
 export const PrecedentModal: React.FC<PrecedentModalProps> = ({ precedent, onClose }) => {
   const relevancePct = Math.round((precedent.relevance ?? precedent.retrieval_score ?? 0.85) * 100)
+  const state = precedent.validation_state || (precedent.human_validated ? "VALIDATED" : "UNVALIDATED")
+  const isValidated = state === "VALIDATED"
+  const isDisputed = state === "DISPUTED"
 
   return (
     <div
@@ -28,10 +31,23 @@ export const PrecedentModal: React.FC<PrecedentModalProps> = ({ precedent, onClo
             <div>
               <div className="text-sm font-bold font-mono text-[#F4EEE0] flex items-center gap-2">
                 <span>{precedent.scenario_id}</span>
-                {precedent.human_validated && (
+                {isValidated ? (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#4E8569]/20 text-[#78AC91] font-mono flex items-center gap-1 border border-[#4E8569]/30">
                     <CheckCircle2 className="w-3 h-3 text-[#4E8569]" />
                     VALIDATED (+0.10 BOOST)
+                  </span>
+                ) : isDisputed ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#E05252]/20 text-[#E05252] font-mono flex items-center gap-1 border border-[#E05252]/30">
+                    <AlertCircle className="w-3 h-3 text-[#E05252]" />
+                    DISPUTED
+                  </span>
+                ) : state === "PARTIALLY_VALIDATED" ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#D9A74A]/20 text-[#D9A74A] font-mono border border-[#D9A74A]/30">
+                    PARTIALLY VALIDATED
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2A2A2A] text-[#9E9788] font-mono border border-[#3A3A3A]">
+                    UNVALIDATED PRECEDENT
                   </span>
                 )}
               </div>
@@ -48,20 +64,48 @@ export const PrecedentModal: React.FC<PrecedentModalProps> = ({ precedent, onClo
           </button>
         </div>
 
-        {/* Narrative & Winning Hypothesis */}
+        {/* Disputed Banner if applicable */}
+        {isDisputed && (
+          <div className="p-3 rounded-xl bg-[#E05252]/10 border border-[#E05252]/30 flex items-start gap-2.5 text-xs text-[#E05252]">
+            <AlertTriangle className="w-4 h-4 text-[#E05252] flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold font-mono">DISPUTED PRECEDENT: </span>
+              <span>
+                Marked incorrect by analyst review. Excluded from normal investigation retrieval to prevent contamination.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Narrative & Hypothesis */}
         <div className="space-y-3 font-sans">
           <div className="p-3.5 rounded-xl bg-[#222222] border border-[#333333] space-y-1">
-            <div className="text-[10px] font-mono uppercase font-bold text-[#9E9788]">Precedent Incident Summary</div>
+            <div className="text-[10px] font-mono uppercase font-bold text-[#9E9788]">
+              Precedent Incident Summary
+            </div>
             <p className="text-xs text-[#D1C9B8] leading-relaxed">
-              {precedent.summary || "Historical incident pattern stored in vector memory."}
+              {precedent.summary || "Prior investigation pattern archived in vector memory."}
             </p>
           </div>
 
           {precedent.winning_hypothesis && (
             <div className="p-3.5 rounded-xl bg-[#222222] border border-[#333333] space-y-1">
-              <div className="text-[10px] font-mono uppercase font-bold text-[#6B9BB0]">Historical Resolution</div>
+              <div className="text-[10px] font-mono uppercase font-bold text-[#6B9BB0]">
+                {isValidated ? "Historical Validated Resolution" : isDisputed ? "Disputed Hypothesis (Excluded)" : "Prior Investigation Hypothesis (Unvalidated)"}
+              </div>
               <p className="text-xs text-[#D1C9B8] leading-relaxed">
                 {precedent.winning_hypothesis}
+              </p>
+            </div>
+          )}
+
+          {precedent.dispute_notes && (
+            <div className="p-3.5 rounded-xl bg-[#222222] border border-[#E05252]/30 space-y-1">
+              <div className="text-[10px] font-mono uppercase font-bold text-[#E05252]">
+                Analyst Dispute &amp; Correction Notes
+              </div>
+              <p className="text-xs text-[#E0B4B4] leading-relaxed">
+                {precedent.dispute_notes}
               </p>
             </div>
           )}

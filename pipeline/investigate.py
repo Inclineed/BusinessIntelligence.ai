@@ -760,15 +760,22 @@ def investigate(
     outcome = None
     try:
         if decision is not None:
-            outcome = project_outcome(decision, deps.domain_semantics)
+            verdict = challenge_result.overall_verdict if challenge_result else None
+            outcome = project_outcome(decision, deps.domain_semantics, overall_verdict=verdict)
             
             # Inject E8 expected impact back into the governed action record
-            if not decision.abstained and decision.structured_recommendation and outcome:
+            if not decision.abstained and decision.structured_recommendation:
                 import dataclasses
-                final_structured_rec = dataclasses.replace(
-                    decision.structured_recommendation,
-                    expected_impact=f"Projected {outcome.projected_recovery_pct}% recovery on {outcome.projected_metric}"
-                )
+                if outcome:
+                    final_structured_rec = dataclasses.replace(
+                        decision.structured_recommendation,
+                        expected_impact=f"Projected {outcome.projected_recovery_pct}% recovery on {outcome.projected_metric}"
+                    )
+                else:
+                    final_structured_rec = dataclasses.replace(
+                        decision.structured_recommendation,
+                        expected_impact="Telemetry Validation & Uncertainty Reduction (Non-Remedial)"
+                    )
                 decision = dataclasses.replace(decision, structured_recommendation=final_structured_rec)
     except Exception as exc:  # noqa: BLE001
         logger.error("investigate [E8] Outcome Engine failed: %s", exc, exc_info=True)

@@ -57,25 +57,25 @@ class HypothesisGenerationResult(NamedTuple):
 
 def _build_system_prompt(drivers: list[str]) -> str:
     """
-    System prompt grounding the LLM in the KPI contract's driver space.
-    Explicitly instructs the model NOT to produce any quantitative values.
+    System prompt grounding the LLM in the KPI contract's driver space and causal discrimination principles.
+    Explicitly instructs the model NOT to produce any quantitative values and to enforce causal hierarchy.
     """
-    driver_list = ", ".join(drivers) if drivers else "payment_success_rate, checkout_code_quality, inventory_availability, footfall, gateway_reliability"
+    driver_list = ", ".join(drivers) if drivers else "payment_success_rate, checkout_code_quality, inventory_availability, footfall"
     return (
-        "You are a business intelligence analyst. Your task is to propose competing "
-        "hypotheses that explain an observed KPI movement using only the provided evidence.\n\n"
-        "CRITICAL CONSTRAINTS — violating any of these will cause your output to be rejected:\n"
-        "1. Do NOT include any numbers, percentages, scores, confidence values, probabilities, "
-        "counts, rankings, ratios, or any other quantitative-truth values in any hypothesis "
-        "statement or reasoning. Numbers belong to the evaluation engine.\n"
-        "2. Reference ONLY evidence IDs that appear in the provided evidence list. "
-        "Never fabricate or invent evidence identifiers.\n"
-        "3. Each hypothesis statement must be 1 to 2000 characters and each reasoning "
-        "must be 1 to 5000 characters.\n"
-        "4. Stamp every hypothesis with method tag LLM.\n\n"
-        f"Known KPI drivers for this domain: {driver_list}.\n\n"
-        "You MUST ground each hypothesis in these drivers. Identify which driver(s) "
-        "the evidence points to and propose a causal narrative — without any numbers."
+        "You are a business intelligence analyst. Propose up to 3 competing, falsifiable hypotheses explaining an observed KPI movement using ONLY provided evidence.\n\n"
+        "CRITICAL RULES:\n"
+        "1. NO numbers, percentages, scores, counts, ratios, or probabilities in statement or reasoning.\n"
+        "2. Reference ONLY provided evidence IDs in citations. Never invent IDs.\n"
+        "3. Distinguish canonical causal layers:\n"
+        "   - ROOT_CAUSE: initiating cause (INTERNAL_RELEASE, EXTERNAL_PROVIDER, MACRO_EXTERNAL, RESOURCE_EXHAUSTION, INVENTORY_SHORTAGE, UNKNOWN).\n"
+        "   - AFFECTED_SUBSYSTEM: technical pathway (payment_gateway, inventory_system, marketing_channel, device_client, auth_service).\n"
+        "   - PROXIMAL_MECHANISM: immediate mechanism (latency_spike_and_timeout, connection_pool_exhaustion, stockout, crash_loop).\n"
+        "   - SYMPTOM_KPIS: downstream observed KPIs.\n"
+        "4. Do NOT confuse affected subsystem with root cause: payment gateway telemetry proves gateway degradation, not automatically an external provider or deployment. If upstream cause is unobserved, set root_cause_type='UNKNOWN'.\n"
+        "5. Do NOT duplicate hypotheses on the same causal chain.\n"
+        "6. In citations, mark role as 'supports', 'contradicts', or 'neutral'. Mark downstream symptoms as 'neutral' unless discriminating.\n"
+        "7. Stamp every hypothesis with method tag LLM. Output valid JSON only.\n"
+        f"Domain KPI drivers: {driver_list}."
     )
 
 
@@ -88,171 +88,63 @@ def _build_user_prompt(
 ) -> str:
     """
     User prompt containing:
-    - anomaly summary (KPI IDs, direction — no raw numbers per the constraint)
-    - top-3 dimensional contributions (segments only, no percentages)
+    - anomaly summary (KPI IDs, direction — no raw numbers)
+    - top-3 dimensional contributions (segments only)
     - evidence IDs and summaries
-    - exact output schema the model must follow
+    - exact output schema
     """
-    # --- Anomaly summary (qualitative direction only, no raw numeric values) ---
     anomaly_lines: list[str] = []
     for sig in signals:
         if sig.is_anomaly:
             direction = "decreased" if sig.delta_pct < 0 else "increased"
-            anomaly_lines.append(
-                f"  - KPI '{sig.kpi_id}' has {direction} significantly "
-                f"(anomaly confirmed by statistical test)"
-            )
+            anomaly_lines.append(f"  - KPI '{sig.kpi_id}' has {direction} significantly")
     if not anomaly_lines:
-        anomaly_lines.append("  - No anomalies currently flagged; investigate potential leading indicators.")
+        anomaly_lines.append("  - No anomalies currently flagged.")
     anomaly_summary = "Anomalous KPIs:\n" + "\n".join(anomaly_lines)
 
-    # --- Top-3 dimensional contributions (segment labels, no percentages) ---
-    sorted_contribs = sorted(
-        contributions,
-        key=lambda c: abs(c.contribution_pct),
-        reverse=True,
-    )[:3]
-    contrib_lines: list[str] = []
-    for c in sorted_contribs:
-        direction = "negative" if c.segment_delta_pct < 0 else "positive"
-        contrib_lines.append(
-            f"  - Dimension '{c.dimension}', segment '{c.segment}': "
-            f"dominant {direction} contributor"
-        )
-    contrib_summary = (
-        "Top dimensional contributors (by magnitude, no percentages shown):\n"
-        + ("\n".join(contrib_lines) if contrib_lines else "  - No dimensional data available.")
-    )
+    sorted_contribs = sorted(contributions, key=lambda c: abs(c.contribution_pct), reverse=True)[:3]
+    contrib_lines = [f"  - Dimension '{c.dimension}', segment '{c.segment}': dominant contributor" for c in sorted_contribs]
+    contrib_summary = "Top dimensional contributors:\n" + ("\n".join(contrib_lines) if contrib_lines else "  - None")
 
-    # --- Evidence list (top-10 by relevance * reliability to keep prompt concise) ---
-    sorted_evidence = sorted(
-        evidence,
-        key=lambda e: (e.source_reliability * getattr(e, "confidence", 0.9)),
-        reverse=True,
-    )[:10]
+    sorted_evidence = sorted(evidence, key=lambda e: (e.source_reliability * getattr(e, "confidence", 0.9)), reverse=True)[:10]
+    evidence_lines = [f"  - ID: {ev.evidence_id} | Source: {ev.source_id} | Summary: {ev.summary}" for ev in sorted_evidence]
+    evidence_block = "Available evidence (use ONLY these IDs):\n" + ("\n".join(evidence_lines) if evidence_lines else "  - None")
 
-    evidence_lines: list[str] = []
-    for ev in sorted_evidence:
-        freshness_note = ""
-        # Qualitative freshness hint so the LLM can reason about reliability
-        # without seeing numeric weights (those are for E6)
-        if ev.source_reliability < 0.3:
-            freshness_note = " [note: source may be stale — treat with lower confidence]"
-        elif ev.source_reliability < 0.7:
-            freshness_note = " [note: source is moderately fresh]"
-        else:
-            freshness_note = " [note: source is fresh]"
-
-        evidence_lines.append(
-            f"  - ID: {ev.evidence_id}\n"
-            f"    Source: {ev.source_id}\n"
-            f"    Summary: {ev.summary}{freshness_note}"
-        )
-    evidence_block = (
-        "Available evidence (use ONLY these IDs):\n"
-        + ("\n".join(evidence_lines) if evidence_lines else "  - No evidence available.")
-    )
-
-    # --- Driver reminder ---
-    driver_list = ", ".join(drivers) if drivers else "payment_success_rate, checkout_code_quality, inventory_availability"
-
-    # --- Citation rules ---
-    citation_rules = (
-        "EVIDENCE CITATION RULES — MANDATORY:\n\n"
-        "Every piece of evidence you use to support, contradict, or contextualize your\n"
-        "hypothesis must appear in the citations list. No exceptions.\n\n"
-        "For each citation:\n"
-        "- evidence_id: use the exact ID from the evidence provided to you.\n"
-        "- quoted_summary: copy the evidence summary character-for-character.\n"
-        "  Do not paraphrase. Do not shorten. Do not rephrase. Do not reorder words.\n"
-        "  Any deviation will automatically disqualify your entire hypothesis.\n"
-        "- role: set to \"supports\", \"contradicts\", or \"neutral\".\n"
-        "  CRITICAL: \"supports\" means this evidence directly corroborates your specific mechanism_tag\n"
-        "  (e.g., payment logs for payment_gateway, marketing campaigns for external_factors).\n"
-        "  If evidence describes a separate or competing factor (e.g. marketing spend when proposing\n"
-        "  a payment gateway failure), mark it as \"neutral\" or \"contradicts\", NEVER \"supports\".\n"
-        "- relevance_explanation: one sentence connecting this evidence to your\n"
-        "  hypothesis. Do not repeat the summary. Do not reference other evidence IDs.\n\n"
-        "In the reasoning field: write narrative prose explaining your hypothesis.\n"
-        "Do not reference evidence IDs in reasoning.\n"
-        "Do not assert what any evidence item says in reasoning.\n"
-        "All factual evidence references belong in citations only.\n\n"
-        "The same evidence ID must not appear more than once in citations."
-    )
-
-    # --- Output format instructions ---
-    prompt_context = domain_semantics.get("hypothesis_generation", {}).get("prompt_context", "")
-    if prompt_context:
-        prompt_context = f"Domain Context:\n{prompt_context}\n\n"
-        
     valid_mechanisms = [m for m in domain_semantics.get("mechanisms", {}).keys() if m != "default"]
     valid_mechanisms_str = ", ".join(f'"{m}"' for m in valid_mechanisms) + ', or "UNKNOWN"'
+    valid_subsystems = [s for s in domain_semantics.get("subsystems", {}).keys() if s != "default"]
+    valid_subsystems_str = ", ".join(f'"{s}"' for s in valid_subsystems) + ', or "UNKNOWN"'
+    valid_archetypes = list(domain_semantics.get("root_cause_archetypes", {}).keys())
+    valid_archetypes_str = ", ".join(f'"{a}"' for a in valid_archetypes)
+
+    citation_rules = (
+        "CITATION RULES:\n"
+        "- evidence_id: exact ID from list above.\n"
+        "- quoted_summary: copy evidence summary verbatim.\n"
+        "- role: 'supports' (specifically corroborates this mechanism), 'contradicts', or 'neutral'.\n"
+        "- relevance_explanation: one sentence connecting evidence to hypothesis."
+    )
 
     output_instructions = (
-        f"{prompt_context}"
-        "Generate EXACTLY 3 distinct, competing candidate hypotheses (H1, H2, and H3) that explain the observed KPI movement.\n\n"
-        "You MUST output ONLY valid JSON matching this exact schema — no prose before or after:\n"
+        f"Output valid JSON schema:\n"
         "{\n"
         '  "hypotheses": [\n'
         "    {\n"
         '      "hypothesis_id": "H1",\n'
-        f'      "mechanism_tag": "<MUST be exactly one of: {valid_mechanisms_str}>",\n'
-        '      "statement": "<qualitative causal statement for H1, NO numbers>",\n'
+        f'      "mechanism_tag": "<one of: {valid_mechanisms_str}>",\n'
+        f'      "root_cause_type": "<one of: {valid_archetypes_str}>",\n'
+        f'      "affected_subsystem": "<one of: {valid_subsystems_str}>",\n'
+        '      "proximal_mechanism": "<e.g. latency_spike_and_timeout, connection_pool_exhaustion, stockout, UNKNOWN>",\n'
+        '      "symptom_kpis": ["<anomalous KPI 1>"],\n'
+        '      "statement": "<qualitative causal statement, NO numbers>",\n'
         '      "citations": [\n'
-        "        {\n"
-        '          "evidence_id": "<first_supporting_evidence_id>",\n'
-        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
-        '          "role": "supports",\n'
-        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
-        "        },\n"
-        "        {\n"
-        '          "evidence_id": "<second_supporting_or_corroborating_evidence_id>",\n'
-        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
-        '          "role": "supports",\n'
-        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
-        "        }\n"
+        '        {"evidence_id": "<id1>", "quoted_summary": "<exact summary>", "role": "supports", "relevance_explanation": "<exp>"},\n'
+        '        {"evidence_id": "<id2>", "quoted_summary": "<exact summary>", "role": "supports", "relevance_explanation": "<exp>"}\n'
         "      ],\n"
-        '      "reasoning": "<qualitative narrative prose for H1, NO numbers, NO evidence IDs>"\n'
-        "    },\n"
-        "    {\n"
-        '      "hypothesis_id": "H2",\n'
-        f'      "mechanism_tag": "<MUST be exactly one of: {valid_mechanisms_str}>",\n'
-        '      "statement": "<qualitative competing statement for H2, NO numbers>",\n'
-        '      "citations": [\n'
-        "        {\n"
-        '          "evidence_id": "<exact_id_from_list_above>",\n'
-        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
-        '          "role": "supports",\n'
-        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
-        "        }\n"
-        "      ],\n"
-        '      "reasoning": "<qualitative narrative prose for H2, NO numbers, NO evidence IDs>"\n'
-        "    },\n"
-        "    {\n"
-        '      "hypothesis_id": "H3",\n'
-        f'      "mechanism_tag": "<MUST be exactly one of: {valid_mechanisms_str}>",\n'
-        '      "statement": "<qualitative alternative statement for H3, NO numbers>",\n'
-        '      "citations": [\n'
-        "        {\n"
-        '          "evidence_id": "<exact_id_from_list_above>",\n'
-        '          "quoted_summary": "<copy evidence summary character-for-character>",\n'
-        '          "role": "supports",\n'
-        '          "relevance_explanation": "<one sentence connecting evidence to hypothesis>"\n'
-        "        }\n"
-        "      ],\n"
-        '      "reasoning": "<qualitative narrative prose for H3, NO numbers, NO evidence IDs>"\n'
+        '      "reasoning": "<qualitative narrative prose, NO numbers, NO evidence IDs>"\n'
         "    }\n"
         "  ]\n"
-        "}\n\n"
-        "CRITICAL REMINDER:\n"
-        "- Generate all 3 hypotheses: H1, H2, and H3 with distinct mechanism tags (each hypothesis MUST choose a different mechanism from the valid mechanisms list).\n"
-        f"- The 'mechanism_tag' MUST exactly match one of these literal strings: {valid_mechanisms_str}.\n"
-        "- In 'citations', include ALL relevant evidence items from the evidence list above (include 2 or more citations per hypothesis where corroborating sources exist).\n"
-        "- Do NOT put any digits, percentages, ratios, probabilities, scores, "
-        "counts, or rankings in 'statement' or 'reasoning'.\n"
-        "- Only reference evidence IDs from the list above in citations.\n"
-        "- Do NOT reference evidence IDs in 'reasoning'.\n"
-        f"- Ground hypotheses in these KPI drivers: {driver_list}."
+        "}"
     )
 
     return "\n\n".join([anomaly_summary, contrib_summary, evidence_block, citation_rules, output_instructions])
@@ -760,10 +652,29 @@ def generate_hypotheses(
             for eid in raw.get("contradictory_evidence_ids", []):
                 citations.append(EvidenceCitation(evidence_id=str(eid), quoted_summary="", role="contradicts", relevance_explanation=""))
 
-        # Build the Hypothesis dataclass (Requirement 8.1, 8.6)
+        # Build the Hypothesis dataclass with structured causal ontology
+        raw_root = str(raw.get("root_cause_type", "UNKNOWN")).strip().upper()
+        if raw_root not in ("INTERNAL_RELEASE", "EXTERNAL_PROVIDER", "MACRO_EXTERNAL", "RESOURCE_EXHAUSTION", "INVENTORY_SHORTAGE", "UNKNOWN"):
+            raw_root = "UNKNOWN"
+
+        raw_sub = str(raw.get("affected_subsystem", "UNKNOWN")).strip().lower()
+        if not raw_sub or raw_sub in ("unknown", "none"):
+            raw_sub = str(raw.get("mechanism_tag", "UNKNOWN")).strip().lower()
+
+        raw_prox = str(raw.get("proximal_mechanism", "UNKNOWN")).strip()
+        
+        raw_symptom_kpis = raw.get("symptom_kpis", [])
+        symptom_kpis = [str(k) for k in raw_symptom_kpis] if isinstance(raw_symptom_kpis, list) else []
+
+        mech_tag = str(raw.get("mechanism_tag", raw_sub or "UNKNOWN"))
+
         hyp = Hypothesis(
             hypothesis_id=str(raw.get("hypothesis_id", f"H{len(validated) + 1}")),
-            mechanism_tag=str(raw.get("mechanism_tag", "UNKNOWN")),
+            mechanism_tag=mech_tag,
+            root_cause_type=raw_root,
+            affected_subsystem=raw_sub,
+            proximal_mechanism=raw_prox,
+            symptom_kpis=symptom_kpis,
             statement=raw["statement"],
             citations=citations,
             reasoning=raw["reasoning"],

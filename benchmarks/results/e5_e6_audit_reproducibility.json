@@ -1,0 +1,813 @@
+[
+  {
+    "run_index": 1,
+    "timestamp": "2026-08-30T07:18:34.601265",
+    "hypotheses_count": 3,
+    "rejected_count": 0,
+    "rejection_reasons": [],
+    "hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "mechanism_tag": "payment_gateway",
+        "statement": "Issues in the payment gateway are causing checkout problems that may be driving the KPI changes.",
+        "supporting_evidence_ids": [
+          "3af2abbcf5693df4",
+          "9d8f8b1fe6c0aaff"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H2",
+        "mechanism_tag": "inventory_system",
+        "statement": "Inventory availability constraints are leading to stock\u2011related support tickets and could be influencing the KPI trends.",
+        "supporting_evidence_ids": [
+          "112ecbadd1baabed"
+        ],
+        "contradictory_evidence_ids": [
+          "80d2929611bb32c7"
+        ],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H3",
+        "mechanism_tag": "external_factors",
+        "statement": "Recent marketing activity on social channels is increasing traffic and may be affecting the KPI patterns.",
+        "supporting_evidence_ids": [
+          "d56bbf77062276e8"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 1
+      }
+    ],
+    "scored_hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "audit_verdict": "verified",
+        "support_score": 0.8595,
+        "contradiction_score": 0.0,
+        "rule_score": 0.7,
+        "final_audit_score": 0.7,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "pass",
+            "rationale": "Supporting evidence contains a deployment record that temporally precedes the anomaly window - timeline is consistent."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'payment_gateway' is supported by compatible evidence ['3af2abbcf5693df4', '9d8f8b1fe6c0aaff']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H3",
+        "audit_verdict": "marginal",
+        "support_score": 0.405,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.405,
+        "evidence_sufficiency_level": "sufficient",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'external_factors' is supported by compatible evidence ['d56bbf77062276e8']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H2",
+        "audit_verdict": "rejected",
+        "support_score": 0.0,
+        "contradiction_score": 0.0,
+        "rule_score": 0.0,
+        "final_audit_score": 0.0,
+        "evidence_sufficiency_level": "insufficient",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'inventory_system' is supported by compatible evidence ['112ecbadd1baabed']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "fail",
+            "rationale": "High-reliability contradictory evidence found: '80d2929611bb32c7' (w=0.95). This materially undermines the hypothesis."
+          }
+        ]
+      }
+    ],
+    "overall_verdict": "verified",
+    "winning_hypothesis_id": "H1",
+    "abstained": false,
+    "latency_ms": {
+      "hypothesis_generation": 9101.53,
+      "challenge_audit": 0.65
+    }
+  },
+  {
+    "run_index": 2,
+    "timestamp": "2026-08-30T07:19:44.767072",
+    "hypotheses_count": 3,
+    "rejected_count": 0,
+    "rejection_reasons": [],
+    "hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "mechanism_tag": "payment_gateway",
+        "statement": "A rise in payment gateway errors could be causing checkout disruptions and reducing sales.",
+        "supporting_evidence_ids": [
+          "3af2abbcf5693df4",
+          "9d8f8b1fe6c0aaff"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H2",
+        "mechanism_tag": "inventory_system",
+        "statement": "Reduced inventory availability may be prompting stock\u2011related support tickets and limiting purchase opportunities.",
+        "supporting_evidence_ids": [
+          "80d2929611bb32c7",
+          "112ecbadd1baabed"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H3",
+        "mechanism_tag": "external_factors",
+        "statement": "Recent marketing activity may be shifting customer attention, influencing key performance indicators.",
+        "supporting_evidence_ids": [
+          "d56bbf77062276e8"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 1
+      }
+    ],
+    "scored_hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "audit_verdict": "verified",
+        "support_score": 0.8595,
+        "contradiction_score": 0.0,
+        "rule_score": 0.7,
+        "final_audit_score": 0.7,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "pass",
+            "rationale": "Supporting evidence contains a deployment record that temporally precedes the anomaly window - timeline is consistent."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'payment_gateway' is supported by compatible evidence ['3af2abbcf5693df4', '9d8f8b1fe6c0aaff']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H2",
+        "audit_verdict": "marginal",
+        "support_score": 0.8415,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.575,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'inventory_system' is supported by compatible evidence ['112ecbadd1baabed', '80d2929611bb32c7']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H3",
+        "audit_verdict": "marginal",
+        "support_score": 0.405,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.405,
+        "evidence_sufficiency_level": "sufficient",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'external_factors' is supported by compatible evidence ['d56bbf77062276e8']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      }
+    ],
+    "overall_verdict": "abstain",
+    "winning_hypothesis_id": null,
+    "abstained": true,
+    "latency_ms": {
+      "hypothesis_generation": 6641.89,
+      "challenge_audit": 0.7
+    }
+  },
+  {
+    "run_index": 3,
+    "timestamp": "2026-08-30T07:20:55.857354",
+    "hypotheses_count": 3,
+    "rejected_count": 0,
+    "rejection_reasons": [],
+    "hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "mechanism_tag": "payment_gateway",
+        "statement": "Recent degradation in the payment processing layer is increasing checkout failures, which may be driving upcoming KPI declines.",
+        "supporting_evidence_ids": [
+          "3af2abbcf5693df4",
+          "9d8f8b1fe6c0aaff",
+          "5cd5ff470a351dfa"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 3
+      },
+      {
+        "hypothesis_id": "H2",
+        "mechanism_tag": "inventory_system",
+        "statement": "Suboptimal inventory availability is leading to stock\u2011related customer issues that could suppress future sales performance.",
+        "supporting_evidence_ids": [
+          "80d2929611bb32c7",
+          "112ecbadd1baabed"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H3",
+        "mechanism_tag": "external_factors",
+        "statement": "Current marketing spend patterns are shifting traffic composition, potentially affecting conversion rates and overall KPI trends.",
+        "supporting_evidence_ids": [
+          "d56bbf77062276e8",
+          "987d4f65c23f0223"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      }
+    ],
+    "scored_hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "audit_verdict": "verified",
+        "support_score": 1.0,
+        "contradiction_score": 0.0,
+        "rule_score": 0.7,
+        "final_audit_score": 0.7,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "pass",
+            "rationale": "Supporting evidence contains a deployment record that temporally precedes the anomaly window - timeline is consistent."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'payment_gateway' is supported by compatible evidence ['3af2abbcf5693df4', '5cd5ff470a351dfa', '9d8f8b1fe6c0aaff']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H2",
+        "audit_verdict": "marginal",
+        "support_score": 0.8415,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.575,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'inventory_system' is supported by compatible evidence ['112ecbadd1baabed', '80d2929611bb32c7']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H3",
+        "audit_verdict": "marginal",
+        "support_score": 0.81,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.575,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'external_factors' is supported by compatible evidence ['987d4f65c23f0223', 'd56bbf77062276e8']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      }
+    ],
+    "overall_verdict": "abstain",
+    "winning_hypothesis_id": null,
+    "abstained": true,
+    "latency_ms": {
+      "hypothesis_generation": 7492.43,
+      "challenge_audit": 0.67
+    }
+  },
+  {
+    "run_index": 4,
+    "timestamp": "2026-08-30T07:22:06.164465",
+    "hypotheses_count": 3,
+    "rejected_count": 0,
+    "rejection_reasons": [],
+    "hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "mechanism_tag": "payment_gateway",
+        "statement": "Degradation in the payment gateway is leading to increased checkout failures and could be driving the observed KPI shift.",
+        "supporting_evidence_ids": [
+          "3af2abbcf5693df4",
+          "9d8f8b1fe6c0aaff"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H2",
+        "mechanism_tag": "inventory_system",
+        "statement": "Subtle inventory constraints are prompting stock\u2011related support issues that may be influencing the KPI trend.",
+        "supporting_evidence_ids": [
+          "80d2929611bb32c7",
+          "112ecbadd1baabed"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H3",
+        "mechanism_tag": "external_factors",
+        "statement": "Recent marketing activity may be shifting traffic patterns and influencing the KPI without a direct technical issue.",
+        "supporting_evidence_ids": [
+          "d56bbf77062276e8",
+          "987d4f65c23f0223"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      }
+    ],
+    "scored_hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "audit_verdict": "verified",
+        "support_score": 0.8595,
+        "contradiction_score": 0.0,
+        "rule_score": 0.7,
+        "final_audit_score": 0.7,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "pass",
+            "rationale": "Supporting evidence contains a deployment record that temporally precedes the anomaly window - timeline is consistent."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'payment_gateway' is supported by compatible evidence ['3af2abbcf5693df4', '9d8f8b1fe6c0aaff']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H2",
+        "audit_verdict": "marginal",
+        "support_score": 0.8415,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.575,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'inventory_system' is supported by compatible evidence ['112ecbadd1baabed', '80d2929611bb32c7']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H3",
+        "audit_verdict": "marginal",
+        "support_score": 0.81,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.575,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'external_factors' is supported by compatible evidence ['987d4f65c23f0223', 'd56bbf77062276e8']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      }
+    ],
+    "overall_verdict": "abstain",
+    "winning_hypothesis_id": null,
+    "abstained": true,
+    "latency_ms": {
+      "hypothesis_generation": 6475.12,
+      "challenge_audit": 0.24
+    }
+  },
+  {
+    "run_index": 5,
+    "timestamp": "2026-08-30T07:23:19.409090",
+    "hypotheses_count": 3,
+    "rejected_count": 0,
+    "rejection_reasons": [],
+    "hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "mechanism_tag": "payment_gateway",
+        "statement": "Degradation in the payment gateway is driving the observed KPI changes.",
+        "supporting_evidence_ids": [
+          "3af2abbcf5693df4",
+          "9d8f8b1fe6c0aaff"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H2",
+        "mechanism_tag": "inventory_system",
+        "statement": "Inventory shortages are contributing to the KPI movement.",
+        "supporting_evidence_ids": [
+          "112ecbadd1baabed"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [
+          "80d2929611bb32c7"
+        ],
+        "citations_count": 2
+      },
+      {
+        "hypothesis_id": "H3",
+        "mechanism_tag": "external_factors",
+        "statement": "Recent marketing campaigns are influencing the KPI trends.",
+        "supporting_evidence_ids": [
+          "d56bbf77062276e8",
+          "987d4f65c23f0223"
+        ],
+        "contradictory_evidence_ids": [],
+        "neutral_evidence_ids": [],
+        "citations_count": 2
+      }
+    ],
+    "scored_hypotheses": [
+      {
+        "hypothesis_id": "H1",
+        "audit_verdict": "verified",
+        "support_score": 0.8595,
+        "contradiction_score": 0.0,
+        "rule_score": 0.7,
+        "final_audit_score": 0.7,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "pass",
+            "rationale": "Supporting evidence contains a deployment record that temporally precedes the anomaly window - timeline is consistent."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'payment_gateway' is supported by compatible evidence ['3af2abbcf5693df4', '9d8f8b1fe6c0aaff']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H3",
+        "audit_verdict": "marginal",
+        "support_score": 0.81,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.575,
+        "evidence_sufficiency_level": "strong",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'external_factors' is supported by compatible evidence ['987d4f65c23f0223', 'd56bbf77062276e8']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      },
+      {
+        "hypothesis_id": "H2",
+        "audit_verdict": "marginal",
+        "support_score": 0.414,
+        "contradiction_score": 0.0,
+        "rule_score": 0.575,
+        "final_audit_score": 0.414,
+        "evidence_sufficiency_level": "sufficient",
+        "rule_results": [
+          {
+            "rule_name": "timeline",
+            "verdict": "partial",
+            "rationale": "No deployment or mechanism evidence found in the supporting set; timeline consistency is neither confirmed nor refuted."
+          },
+          {
+            "rule_name": "segment_alignment",
+            "verdict": "partial",
+            "rationale": "Insufficient dimensional contribution data to assess segment alignment."
+          },
+          {
+            "rule_name": "kpi_corroboration",
+            "verdict": "fail",
+            "rationale": "No anomalous KPI signals are corroborated by the supporting evidence sources - kpi corroboration fails."
+          },
+          {
+            "rule_name": "mechanism_consistency",
+            "verdict": "pass",
+            "rationale": "Mechanism 'inventory_system' is supported by compatible evidence ['112ecbadd1baabed']."
+          },
+          {
+            "rule_name": "contradiction",
+            "verdict": "pass",
+            "rationale": "No contradictory evidence referenced - contradiction rule passes."
+          }
+        ]
+      }
+    ],
+    "overall_verdict": "abstain",
+    "winning_hypothesis_id": null,
+    "abstained": true,
+    "latency_ms": {
+      "hypothesis_generation": 9093.09,
+      "challenge_audit": 0.35
+    }
+  }
+]

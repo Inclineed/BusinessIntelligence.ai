@@ -51,12 +51,14 @@ export const PrecedentExplorer: React.FC<PrecedentExplorerProps> = ({ precedents
           let dateStr = "Baseline Incident"
           let evidenceIds = ""
 
+          let vstate = "UNVALIDATED"
           if (typeof item === "object" && item !== null) {
             sid = item.scenario_id || sid
             similarity = item.similarity || item.relevance || similarity
             conf = (item.audit_verdict || item.original_audit_verdict || conf).toUpperCase()
             otype = (item.outcome_type || "observed").toUpperCase()
-            humanVal = Boolean(item.human_validated)
+            vstate = item.validation_state || (item.human_validated ? "VALIDATED" : "UNVALIDATED")
+            humanVal = vstate === "VALIDATED"
             summary = item.summary || item.recommendation || ""
             dateStr = item.created_at || item.timestamp || dateStr
             evidenceIds = item.evidence_ids || ""
@@ -83,13 +85,25 @@ export const PrecedentExplorer: React.FC<PrecedentExplorerProps> = ({ precedents
                   <span className="font-mono text-[10px] text-muted-foreground bg-surface-raised border border-hairline px-2 py-0.5 rounded uppercase">
                     {otype}
                   </span>
-                  {humanVal ? (
+                  {vstate === "VALIDATED" ? (
                     <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-semantic-positive-bg text-semantic-positive border border-semantic-positive-border flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> HUMAN VERIFIED
+                      <CheckCircle2 className="w-3 h-3" /> VALIDATED
+                    </span>
+                  ) : vstate === "DISPUTED" ? (
+                    <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-semantic-critical-bg text-semantic-critical border border-semantic-critical-border flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> DISPUTED
+                    </span>
+                  ) : vstate === "PARTIALLY_VALIDATED" ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold text-semantic-warning bg-semantic-warning-bg border border-semantic-warning-border">
+                      PARTIALLY VALIDATED
+                    </span>
+                  ) : vstate === "SUPPRESSED" ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono text-muted-foreground bg-surface-raised border border-hairline">
+                      SUPPRESSED
                     </span>
                   ) : (
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono text-muted-foreground bg-surface-raised border border-hairline">
-                      UNVALIDATED BASELINE
+                      UNVALIDATED PRECEDENT
                     </span>
                   )}
                 </div>

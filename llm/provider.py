@@ -306,7 +306,7 @@ class GroqProvider(LLMProvider):
     DEFAULT_MODEL: str = "groq/compound-mini"
     DEFAULT_BASE_URL: str = "https://api.groq.com/openai/v1"
     DEFAULT_TIMEOUT: float = 45.0  # seconds
-    DEFAULT_MAX_RETRIES: int = 5
+    DEFAULT_MAX_RETRIES: int = 15
 
     def __init__(
         self,
@@ -393,7 +393,7 @@ class GroqProvider(LLMProvider):
         5xx server errors, and network timeouts with exponential backoff up to max_retries.
         """
         # When engines pass generic default model or None, use instance's configured Groq model
-        if model is None or model in ("qwen3:8b", "default", "groq/compound-mini") or not model:
+        if model is None or model in ("qwen3:8b", "default", "groq/compound-mini", "groq/compound") or not model:
             target_model = self._model
         else:
             target_model = model
@@ -416,8 +416,8 @@ class GroqProvider(LLMProvider):
             user_content = prompt + "\n\nCRITICAL INSTRUCTION: Keep thinking process brief. Output ONLY valid JSON matching the schema immediately."
         messages.append({"role": "user", "content": user_content})
 
-        # Stay safely within Groq's 8000 TPM limit (e.g. ~1100 prompt + 2500 completion = 3600 < 8000)
-        actual_max_tokens = min(max_tokens, 2500)
+        # Stay safely within Groq's 6000 TPM limit (e.g. ~1000 prompt + 1000 completion = 2000 < 6000)
+        actual_max_tokens = min(max_tokens, 1000)
 
         payload: dict[str, Any] = {
             "model": target_model,
@@ -458,11 +458,9 @@ class GroqProvider(LLMProvider):
                             self._max_retries + 1,
                             self._current_key_idx,
                         )
-                        # If a full cycle completed across all keys, back off briefly
-                        if (attempt + 1) % len(self._api_keys) == 0:
-                            time.sleep(max(0.5, retry_after_sec))
-                        else:
-                            time.sleep(0.1)
+                        # Sleep proportional backoff so rate limit window clears
+                        sleep_time = max(2.0, retry_after_sec / len(self._api_keys))
+                        time.sleep(sleep_time)
                         continue
 
                     logger.warning(

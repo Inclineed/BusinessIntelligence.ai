@@ -26,6 +26,7 @@ from models import (
     InvestigationResult,
     MethodTag,
     OutcomeType,
+    PrecedentValidationState,
 )
 from llm.provider import LLMProvider, LLMUnavailableError
 
@@ -346,9 +347,17 @@ class MemoryEngine:
                 "timestamp": iso_now,
                 "evidence_ids": evidence_ids_str,
                 "summary": summary[:1000],  # stored for retrieval result
-                # ISSUE-002 Phase 3 — Human validation provenance
+                # Precedent Lifecycle & Validation State (Stage E9 Hardening)
+                "validation_state": PrecedentValidationState.UNVALIDATED.value,
                 "human_validated": False,
                 "validated_at": "",
+                "validation_feedback_id": "",
+                "disputed_at": "",
+                "dispute_feedback_id": "",
+                "dispute_notes": "",
+                "partially_validated_at": "",
+                "suppressed_at": "",
+                "suppress_reason": "",
             }
 
             # 4. Upsert into ChromaDB
@@ -467,7 +476,7 @@ class MemoryEngine:
         return {"succeeded": succeeded, "failed": failed}
 
     # ------------------------------------------------------------------
-    # mark_validated — ISSUE-002 Phase 3
+    # Precedent Lifecycle Management (Validation, Dispute, Suppression)
     # ------------------------------------------------------------------
 
     def mark_validated(
@@ -477,11 +486,13 @@ class MemoryEngine:
         validation_feedback_id: Optional[int] = None,
     ) -> bool:
         """
-        Mark an existing precedent as human-validated.
+        Mark an existing precedent as human-validated (CORRECT feedback).
 
-        Updates the ChromaDB record's metadata to set human_validated=True,
-        validated_at to the given (or current UTC) ISO timestamp, and
-        optionally links the validation to the originating feedback_id.
+        Updates the ChromaDB record's metadata to set:
+        - validation_state = VALIDATED
+        - human_validated = True
+        - validated_at = ISO timestamp
+        - validation_feedback_id = feedback_id
 
         Does NOT alter audit_verdict or original_confidence_state.
 
@@ -500,6 +511,7 @@ class MemoryEngine:
 
             meta = (existing.get("metadatas") or [{}])[0] or {}
             ts = (validated_at or datetime.now(tz=timezone.utc)).isoformat()
+            meta["validation_state"] = PrecedentValidationState.VALIDATED.value
             meta["human_validated"] = True
             meta["validated_at"] = ts
             if validation_feedback_id is not None:
@@ -510,7 +522,7 @@ class MemoryEngine:
                 metadatas=[meta],
             )
             logger.info(
-                "mark_validated: scenario=%s marked as human-validated at %s (feedback_id=%s).",
+                "mark_validated: scenario=%s marked as VALIDATED at %s (feedback_id=%s).",
                 scenario_id,
                 ts,
                 validation_feedback_id,
@@ -525,6 +537,165 @@ class MemoryEngine:
             )
             return False
 
+    def mark_disputed(
+        self,
+        scenario_id: str,
+        disputed_at: Optional[datetime] = None,
+        validation_feedback_id: Optional[int] = None,
+        dispute_notes: Optional[str] = None,
+    ) -> bool:
+        """
+        Mark an existing precedent as DISPUTED (INCORRECT feedback).
+
+        Updates the ChromaDB record's metadata to set:
+        - validation_state = DISPUTED
+        - human_validated = False (drops any validation boost)
+        - disputed_at = ISO timestamp
+        - dispute_feedback_id = feedback_id
+        - dispute_notes = analyst correction notes
+
+        Preserves all historical metadata for audit trails while ensuring
+        the record is excluded from normal precedent retrieval.
+
+        Returns True on success, False if the record is not found or update fails.
+        """
+        try:
+            collection = self._get_or_create_collection()
+            existing = collection.get(ids=[scenario_id], include=["metadatas"])
+            if not existing or not existing.get("ids") or len(existing["ids"]) == 0:
+                logger.warning(
+                    "mark_disputed: no precedent found for scenario=%s.",
+                    scenario_id,
+                )
+                return False
+
+            meta = (existing.get("metadatas") or [{}])[0] or {}
+            ts = (disputed_at or datetime.now(tz=timezone.utc)).isoformat()
+            meta["validation_state"] = PrecedentValidationState.DISPUTED.value
+            meta["human_validated"] = False
+            meta["disputed_at"] = ts
+            if validation_feedback_id is not None:
+                meta["dispute_feedback_id"] = validation_feedback_id
+            if dispute_notes is not None:
+                meta["dispute_notes"] = str(dispute_notes)[:1000]
+
+            collection.update(
+                ids=[scenario_id],
+                metadatas=[meta],
+            )
+            logger.info(
+                "mark_disputed: scenario=%s marked as DISPUTED at %s (feedback_id=%s).",
+                scenario_id,
+                ts,
+                validation_feedback_id,
+            )
+            return True
+
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "mark_disputed: failed for scenario=%s: %s",
+                scenario_id,
+                exc,
+            )
+            return False
+
+    def mark_partially_validated(
+        self,
+        scenario_id: str,
+        partially_validated_at: Optional[datetime] = None,
+        validation_feedback_id: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> bool:
+        """
+        Mark an existing precedent as PARTIALLY_VALIDATED (PARTIALLY_CORRECT feedback).
+
+        Sets validation_state=PARTIALLY_VALIDATED, human_validated=False (no +0.10 boost).
+        """
+        try:
+            collection = self._get_or_create_collection()
+            existing = collection.get(ids=[scenario_id], include=["metadatas"])
+            if not existing or not existing.get("ids") or len(existing["ids"]) == 0:
+                logger.warning(
+                    "mark_partially_validated: no precedent found for scenario=%s.",
+                    scenario_id,
+                )
+                return False
+
+            meta = (existing.get("metadatas") or [{}])[0] or {}
+            ts = (partially_validated_at or datetime.now(tz=timezone.utc)).isoformat()
+            meta["validation_state"] = PrecedentValidationState.PARTIALLY_VALIDATED.value
+            meta["human_validated"] = False
+            meta["partially_validated_at"] = ts
+            if validation_feedback_id is not None:
+                meta["validation_feedback_id"] = validation_feedback_id
+            if notes is not None:
+                meta["analyst_notes"] = str(notes)[:1000]
+
+            collection.update(
+                ids=[scenario_id],
+                metadatas=[meta],
+            )
+            logger.info(
+                "mark_partially_validated: scenario=%s marked as PARTIALLY_VALIDATED at %s.",
+                scenario_id,
+                ts,
+            )
+            return True
+
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "mark_partially_validated: failed for scenario=%s: %s",
+                scenario_id,
+                exc,
+            )
+            return False
+
+    def mark_suppressed(
+        self,
+        scenario_id: str,
+        suppressed_at: Optional[datetime] = None,
+        suppress_reason: Optional[str] = None,
+    ) -> bool:
+        """
+        Mark an existing precedent as SUPPRESSED (administratively deactivated or superseded).
+        """
+        try:
+            collection = self._get_or_create_collection()
+            existing = collection.get(ids=[scenario_id], include=["metadatas"])
+            if not existing or not existing.get("ids") or len(existing["ids"]) == 0:
+                logger.warning(
+                    "mark_suppressed: no precedent found for scenario=%s.",
+                    scenario_id,
+                )
+                return False
+
+            meta = (existing.get("metadatas") or [{}])[0] or {}
+            ts = (suppressed_at or datetime.now(tz=timezone.utc)).isoformat()
+            meta["validation_state"] = PrecedentValidationState.SUPPRESSED.value
+            meta["human_validated"] = False
+            meta["suppressed_at"] = ts
+            if suppress_reason is not None:
+                meta["suppress_reason"] = str(suppress_reason)[:500]
+
+            collection.update(
+                ids=[scenario_id],
+                metadatas=[meta],
+            )
+            logger.info(
+                "mark_suppressed: scenario=%s marked as SUPPRESSED at %s.",
+                scenario_id,
+                ts,
+            )
+            return True
+
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "mark_suppressed: failed for scenario=%s: %s",
+                scenario_id,
+                exc,
+            )
+            return False
+
     # ------------------------------------------------------------------
     # retrieve_precedents
     # ------------------------------------------------------------------
@@ -534,6 +705,8 @@ class MemoryEngine:
         scenario_id: str,
         query_context: str = "",
         include_simulated: bool = False,
+        include_disputed: bool = False,
+        include_suppressed: bool = False,
         retention_config: Optional[dict] = None,
         authorized_sources: Optional[frozenset[str] | set[str] | list[str]] = None,
         persona: Optional[str] = None,
@@ -542,40 +715,21 @@ class MemoryEngine:
     ) -> list[dict]:
         """
         Retrieve up to MAX_RESULTS precedents with relevance ≥ RELEVANCE_THRESHOLD,
-        strictly bounded by persona authorized_sources entitlement (Req 15.3, 5.2).
+        strictly bounded by persona authorized_sources entitlement (Req 15.3, 5.2)
+        and lifecycle validation state.
 
         The query text is the scenario_id optionally enriched with free-form
         context (e.g. a short description of the KPI movement).
 
+        Lifecycle state filtering:
+        - UNVALIDATED precedents are retrieved with their baseline confidence weight.
+        - VALIDATED precedents receive the +0.10 human validation boost.
+        - DISPUTED and SUPPRESSED precedents are excluded from normal retrieval
+          unless explicitly requested via include_disputed / include_suppressed.
+
         Stamps each returned precedent with MethodTag.RETRIEVAL (Req 15.5).
         Incorporates confidence weighting (HIGH=1.0, MEDIUM=0.6, ABSTAIN=0.2, LOW=0.1)
         while preserving semantic similarity scoring.
-
-        Returns
-        -------
-        A list of precedent dicts sorted by retrieval_score descending, each with:
-            scenario_id       : str
-            summary           : str
-            relevance         : float  in [0, 1]
-            audit_verdict  : str
-            original_confidence_state : str
-            retrieval_weight  : float
-            retrieval_score   : float
-            outcome_type      : str ("observed" or "simulated")
-            winning_hypothesis: str
-            recommendation    : str
-            timestamp         : str (ISO-8601)
-            created_at        : str (ISO-8601)
-            evidence_ids      : str
-            source_ids        : list[str]
-            human_validated   : bool
-            validated_at      : str (ISO-8601 or empty)
-            method            : MethodTag.RETRIEVAL
-
-        Returns an empty list with an indication log when no relevant
-        precedents are found (Req 15.4).
-
-        Requirements: 15.3, 15.4, 15.5
         """
         query_text = query_context.strip() if query_context.strip() else scenario_id
 
@@ -661,7 +815,7 @@ class MemoryEngine:
             return []
 
         # ----------------------------------------------------------------
-        # Build result list, filtering by authorization, relevance, & confidence weighting
+        # Build result list, filtering by lifecycle, authorization, relevance, & confidence weighting
         # ----------------------------------------------------------------
         precedents: list[dict] = []
         auth_sources_set = frozenset(authorized_sources) if authorized_sources is not None else None
@@ -677,8 +831,34 @@ class MemoryEngine:
             meta = meta or {}
             outcome_type_val = meta.get("outcome_type", "unknown")
 
+            # ----------------------------------------------------------------
+            # 0. Lifecycle State Gate (Excludes DISPUTED & SUPPRESSED by default)
+            # ----------------------------------------------------------------
+            val_state_raw = meta.get("validation_state")
+            if not val_state_raw:
+                hv = meta.get("human_validated", False)
+                if isinstance(hv, str):
+                    hv = hv.lower() in ("true", "1")
+                val_state = PrecedentValidationState.VALIDATED.value if hv else PrecedentValidationState.UNVALIDATED.value
+            else:
+                val_state = str(val_state_raw).upper().strip()
+
+            if val_state == PrecedentValidationState.DISPUTED.value and not include_disputed:
+                logger.info(
+                    "retrieve_precedents: excluding DISPUTED precedent %s from normal retrieval",
+                    doc_id,
+                )
+                continue
+
+            if val_state == PrecedentValidationState.SUPPRESSED.value and not include_suppressed:
+                logger.info(
+                    "retrieve_precedents: excluding SUPPRESSED precedent %s from normal retrieval",
+                    doc_id,
+                )
+                continue
+
             # Legacy / unknown provenance and simulated outcome protection:
-            # Normal precedent retrieval strictly requires verified OBSERVED provenance.
+            # Normal precedent retrieval strictly requires verified OBSERVED / investigation conclusion provenance.
             if not include_simulated and outcome_type_val != OutcomeType.OBSERVED.value:
                 continue
 
@@ -784,11 +964,9 @@ class MemoryEngine:
             retrieval_score = round(relevance * conf_weight, 4)
 
             # ----------------------------------------------------------------
-            # 5. Human Validation Boost
+            # 5. Human Validation Boost (Applied strictly to VALIDATED records)
             # ----------------------------------------------------------------
-            is_human_validated = meta.get("human_validated", False)
-            if isinstance(is_human_validated, str):
-                is_human_validated = is_human_validated.lower() in ("true", "1")
+            is_human_validated = (val_state == PrecedentValidationState.VALIDATED.value)
             if is_human_validated:
                 retrieval_score = round(retrieval_score + HUMAN_VALIDATION_BOOST, 4)
 
@@ -796,6 +974,7 @@ class MemoryEngine:
                 "scenario_id": meta.get("scenario_id", doc_id),
                 "summary": meta.get("summary") or document,
                 "relevance": round(relevance, 4),
+                "validation_state": val_state,
                 "audit_verdict": conf_state_str or (conf_state.value if conf_state else "unknown"),
                 "original_audit_verdict": meta.get("original_audit_verdict", meta.get("original_confidence_state", conf_state_str or "unknown")),
                 "original_confidence_state": meta.get("original_confidence_state", conf_state_str or "unknown"),
@@ -808,9 +987,11 @@ class MemoryEngine:
                 "created_at": meta.get("created_at", meta.get("timestamp", "")),
                 "evidence_ids": meta.get("evidence_ids", ""),
                 "source_ids": sorted(candidate_sources),
-                # ISSUE-002 Phase 3 — Human validation provenance
+                # Lifecycle and validation provenance
                 "human_validated": bool(is_human_validated),
                 "validated_at": meta.get("validated_at", ""),
+                "disputed_at": meta.get("disputed_at", ""),
+                "dispute_notes": meta.get("dispute_notes", ""),
                 # Requirement 15.5 — stamp with RETRIEVAL
                 "method": MethodTag.RETRIEVAL,
             }
@@ -881,17 +1062,21 @@ def retrieve_precedents(
     chroma_client: Any,
     llm_provider: LLMProvider,
     include_simulated: bool = False,
+    include_disputed: bool = False,
+    include_suppressed: bool = False,
 ) -> list[dict]:
     """
     Module-level convenience wrapper around MemoryEngine.retrieve_precedents.
 
     Parameters
     ----------
-    scenario_id   : ID of the scenario being investigated.
-    query_context : Optional enriching context for the vector query.
-    chroma_client : chromadb.Client instance.
-    llm_provider  : LLMProvider for embedding.
+    scenario_id       : ID of the scenario being investigated.
+    query_context     : Optional enriching context for the vector query.
+    chroma_client     : chromadb.Client instance.
+    llm_provider      : LLMProvider for embedding.
     include_simulated : If True, includes SIMULATED outcomes (default False).
+    include_disputed  : If True, includes DISPUTED precedents (default False).
+    include_suppressed: If True, includes SUPPRESSED precedents (default False).
 
     Returns a list of precedent dicts sorted by retrieval_score descending.
     Returns [] with a log indication when no relevant precedents are found
@@ -904,4 +1089,6 @@ def retrieve_precedents(
         scenario_id,
         query_context,
         include_simulated=include_simulated,
+        include_disputed=include_disputed,
+        include_suppressed=include_suppressed,
     )

@@ -1613,5 +1613,202 @@ class TestE9CandidatePoolOversampling:
         assert {r["scenario_id"] for r in res_x5} == {f"VALID_{i}" for i in range(5)}
 
 
+# ---------------------------------------------------------------------------
+# Precedent Lifecycle State & Invalidation Test Suite (Stage E9 Hardening)
+# ---------------------------------------------------------------------------
+
+
+class TestPrecedentLifecycleState:
+    """
+    Tests covering explicit lifecycle states (UNVALIDATED, VALIDATED, PARTIALLY_VALIDATED, DISPUTED, SUPPRESSED)
+    and invalidation gating in Stage E9 MemoryEngine.
+    """
+
+    def setup_method(self):
+        self.provider = _make_llm_provider("Deployment latency regression.")
+
+    def test_new_precedent_stored_as_unvalidated(self):
+        """Requirement 1: Automatically stored new precedents begin as UNVALIDATED with human_validated=False."""
+        result = _make_result("INC_001")
+        chroma = _make_chroma_client()
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+
+        ok = engine.store_precedent(result)
+        assert ok is True
+
+        collection = chroma.get_or_create_collection.return_value
+        assert collection.upsert.called
+        call_kwargs = collection.upsert.call_args.kwargs
+        metas = call_kwargs.get("metadatas", [])
+        assert len(metas) == 1
+        meta = metas[0]
+        assert meta["validation_state"] == "UNVALIDATED"
+        assert meta["human_validated"] is False
+        assert meta["validated_at"] == ""
+
+    def test_unvalidated_precedent_retrieved_without_boost(self):
+        """Requirement 2: UNVALIDATED precedent can be retrieved, but receives NO human validation boost."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["INC_UNVAL"],
+            query_distances=[0.2],  # relevance = 1.0 - 0.2/2 = 0.90
+            query_metadatas=[{
+                "scenario_id": "INC_UNVAL",
+                "audit_verdict": "VERIFIED",
+                "validation_state": "UNVALIDATED",
+                "human_validated": False,
+                "outcome_type": "observed",
+                "source_ids": "orders",
+            }],
+            query_documents=["Summary."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = engine.retrieve_precedents("QUERY")
+
+        assert len(res) == 1
+        prec = res[0]
+        assert prec["validation_state"] == "UNVALIDATED"
+        assert prec["human_validated"] is False
+        assert prec["relevance"] == 0.90
+        assert prec["retrieval_weight"] == 1.0
+        # Score is exactly relevance * 1.0 without +0.10 boost
+        assert prec["retrieval_score"] == 0.90
+
+    def test_validated_precedent_receives_human_boost(self):
+        """Requirement 3: VALIDATED precedent receives +0.10 human validation boost."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["INC_VAL"],
+            query_distances=[0.2],  # relevance = 0.90
+            query_metadatas=[{
+                "scenario_id": "INC_VAL",
+                "audit_verdict": "VERIFIED",
+                "validation_state": "VALIDATED",
+                "human_validated": True,
+                "validated_at": "2026-08-29T12:00:00+00:00",
+                "outcome_type": "observed",
+                "source_ids": "orders",
+            }],
+            query_documents=["Summary."],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = engine.retrieve_precedents("QUERY")
+
+        assert len(res) == 1
+        prec = res[0]
+        assert prec["validation_state"] == "VALIDATED"
+        assert prec["human_validated"] is True
+        # Score includes +0.10 boost: 0.90 + 0.10 = 1.00
+        assert prec["retrieval_score"] == 1.00
+
+    def test_disputed_precedent_excluded_from_normal_retrieval(self):
+        """Requirement 5 & 6: DISPUTED precedent is strictly excluded from normal retrieval."""
+        chroma = _make_chroma_client(
+            count=2,
+            query_ids=["INC_DISPUTED", "INC_VALID"],
+            query_distances=[0.1, 0.2],
+            query_metadatas=[
+                {
+                    "scenario_id": "INC_DISPUTED",
+                    "audit_verdict": "VERIFIED",
+                    "validation_state": "DISPUTED",
+                    "human_validated": False,
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                },
+                {
+                    "scenario_id": "INC_VALID",
+                    "audit_verdict": "VERIFIED",
+                    "validation_state": "UNVALIDATED",
+                    "human_validated": False,
+                    "outcome_type": "observed",
+                    "source_ids": "orders",
+                },
+            ],
+            query_documents=["Disputed", "Valid"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = engine.retrieve_precedents("QUERY")
+
+        assert len(res) == 1
+        assert res[0]["scenario_id"] == "INC_VALID"
+
+    def test_disputed_precedent_accessible_when_include_disputed_true(self):
+        """Requirement 9: Disputed record remains available for audit/history when include_disputed=True."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["INC_DISPUTED"],
+            query_distances=[0.2],
+            query_metadatas=[{
+                "scenario_id": "INC_DISPUTED",
+                "audit_verdict": "VERIFIED",
+                "validation_state": "DISPUTED",
+                "human_validated": False,
+                "disputed_at": "2026-08-29T12:00:00+00:00",
+                "dispute_notes": "Incorrect root cause",
+                "outcome_type": "observed",
+                "source_ids": "orders",
+            }],
+            query_documents=["Disputed Summary"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = engine.retrieve_precedents("QUERY", include_disputed=True)
+
+        assert len(res) == 1
+        assert res[0]["scenario_id"] == "INC_DISPUTED"
+        assert res[0]["validation_state"] == "DISPUTED"
+        assert res[0]["dispute_notes"] == "Incorrect root cause"
+
+    def test_suppressed_precedent_excluded_from_normal_retrieval(self):
+        """SUPPRESSED precedent is excluded from normal retrieval."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["INC_SUPP"],
+            query_distances=[0.1],
+            query_metadatas=[{
+                "scenario_id": "INC_SUPP",
+                "audit_verdict": "VERIFIED",
+                "validation_state": "SUPPRESSED",
+                "human_validated": False,
+                "outcome_type": "observed",
+                "source_ids": "orders",
+            }],
+            query_documents=["Suppressed"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = engine.retrieve_precedents("QUERY")
+        assert len(res) == 0
+
+        res_audit = engine.retrieve_precedents("QUERY", include_suppressed=True)
+        assert len(res_audit) == 1
+        assert res_audit[0]["scenario_id"] == "INC_SUPP"
+
+    def test_partially_validated_does_not_receive_boost(self):
+        """Requirement 7: PARTIALLY_VALIDATED precedent does not receive +0.10 validation boost."""
+        chroma = _make_chroma_client(
+            count=1,
+            query_ids=["INC_PARTIAL"],
+            query_distances=[0.2],  # relevance = 0.90
+            query_metadatas=[{
+                "scenario_id": "INC_PARTIAL",
+                "audit_verdict": "MARGINAL",  # weight 0.6
+                "validation_state": "PARTIALLY_VALIDATED",
+                "human_validated": False,
+                "outcome_type": "observed",
+                "source_ids": "orders",
+            }],
+            query_documents=["Partial Summary"],
+        )
+        engine = MemoryEngine(chroma_client=chroma, llm_provider=self.provider)
+        res = engine.retrieve_precedents("QUERY")
+
+        assert len(res) == 1
+        prec = res[0]
+        assert prec["validation_state"] == "PARTIALLY_VALIDATED"
+        assert prec["human_validated"] is False
+        # Score is 0.90 * 0.6 = 0.54 without boost
+        assert prec["retrieval_score"] == 0.54
+
+
 
 

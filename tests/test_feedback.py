@@ -214,6 +214,127 @@ class TestMarkValidatedWithFeedbackId(unittest.TestCase):
         assert result is False
 
 
+class TestMarkDisputed(unittest.TestCase):
+    """Test MemoryEngine.mark_disputed() lifecycle behavior on INCORRECT feedback."""
+
+    def test_mark_disputed_updates_metadata(self):
+        from engines.memory import MemoryEngine
+        from models import PrecedentValidationState
+
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {
+            "ids": ["INC_DISPUTED"],
+            "metadatas": [{
+                "scenario_id": "INC_DISPUTED",
+                "audit_verdict": "VERIFIED",
+                "validation_state": "UNVALIDATED",
+                "human_validated": False,
+            }],
+        }
+
+        mock_client = MagicMock()
+        engine = MemoryEngine(chroma_client=mock_client, llm_provider=MagicMock())
+        engine._get_or_create_collection = MagicMock(return_value=mock_collection)
+
+        ts = datetime(2026, 8, 29, 15, 0, 0, tzinfo=timezone.utc)
+        result = engine.mark_disputed(
+            scenario_id="INC_DISPUTED",
+            disputed_at=ts,
+            validation_feedback_id=101,
+            dispute_notes="Hypothesis H1 was a transient network spike, not deployment",
+        )
+
+        assert result is True
+        call_args = mock_collection.update.call_args
+        updated_meta = call_args.kwargs.get("metadatas") or call_args[1].get("metadatas")
+        meta = updated_meta[0]
+        assert meta["validation_state"] == PrecedentValidationState.DISPUTED.value
+        assert meta["human_validated"] is False
+        assert meta["dispute_feedback_id"] == 101
+        assert "transient network spike" in meta["dispute_notes"]
+        assert "2026-08-29" in meta["disputed_at"]
+
+    def test_mark_disputed_nonexistent_returns_false(self):
+        from engines.memory import MemoryEngine
+
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {"ids": [], "metadatas": []}
+
+        mock_client = MagicMock()
+        engine = MemoryEngine(chroma_client=mock_client, llm_provider=MagicMock())
+        engine._get_or_create_collection = MagicMock(return_value=mock_collection)
+
+        result = engine.mark_disputed(scenario_id="NONEXISTENT")
+        assert result is False
+
+
+class TestMarkPartiallyValidatedAndSuppressed(unittest.TestCase):
+    """Test mark_partially_validated and mark_suppressed methods."""
+
+    def test_mark_partially_validated(self):
+        from engines.memory import MemoryEngine
+        from models import PrecedentValidationState
+
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {
+            "ids": ["INC_PARTIAL"],
+            "metadatas": [{
+                "scenario_id": "INC_PARTIAL",
+                "validation_state": "UNVALIDATED",
+                "human_validated": False,
+            }],
+        }
+
+        mock_client = MagicMock()
+        engine = MemoryEngine(chroma_client=mock_client, llm_provider=MagicMock())
+        engine._get_or_create_collection = MagicMock(return_value=mock_collection)
+
+        result = engine.mark_partially_validated(
+            scenario_id="INC_PARTIAL",
+            validation_feedback_id=202,
+            notes="Action needed slight adjustment",
+        )
+
+        assert result is True
+        call_args = mock_collection.update.call_args
+        updated_meta = call_args.kwargs.get("metadatas") or call_args[1].get("metadatas")
+        meta = updated_meta[0]
+        assert meta["validation_state"] == PrecedentValidationState.PARTIALLY_VALIDATED.value
+        assert meta["human_validated"] is False
+        assert meta["validation_feedback_id"] == 202
+        assert "adjustment" in meta["analyst_notes"]
+
+    def test_mark_suppressed(self):
+        from engines.memory import MemoryEngine
+        from models import PrecedentValidationState
+
+        mock_collection = MagicMock()
+        mock_collection.get.return_value = {
+            "ids": ["INC_SUPPRESSED"],
+            "metadatas": [{
+                "scenario_id": "INC_SUPPRESSED",
+                "validation_state": "UNVALIDATED",
+            }],
+        }
+
+        mock_client = MagicMock()
+        engine = MemoryEngine(chroma_client=mock_client, llm_provider=MagicMock())
+        engine._get_or_create_collection = MagicMock(return_value=mock_collection)
+
+        result = engine.mark_suppressed(
+            scenario_id="INC_SUPPRESSED",
+            suppress_reason="Superseded by architectural overhaul",
+        )
+
+        assert result is True
+        call_args = mock_collection.update.call_args
+        updated_meta = call_args.kwargs.get("metadatas") or call_args[1].get("metadatas")
+        meta = updated_meta[0]
+        assert meta["validation_state"] == PrecedentValidationState.SUPPRESSED.value
+        assert meta["human_validated"] is False
+        assert "overhaul" in meta["suppress_reason"]
+
+
 class TestOriginalResultImmutability(unittest.TestCase):
     """
     Verify that feedback submission does NOT alter the original

@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { PrecedentItem } from "../../types/investigation"
-import { History, CheckCircle2, Eye } from "lucide-react"
+import { History, CheckCircle2, AlertCircle, Eye } from "lucide-react"
 import { PrecedentModal } from "./PrecedentModal"
 
 interface PrecedentCarouselProps {
@@ -25,9 +25,10 @@ export const PrecedentCarousel: React.FC<PrecedentCarouselProps> = ({ precedents
     if (typeof p === "string") {
       return {
         scenario_id: p,
-        summary: `Institutional precedent from scenario ${p}`,
+        summary: `Prior investigation record from scenario ${p}`,
         relevance: 0.82,
         winning_hypothesis: "Historical validated cause",
+        validation_state: "UNVALIDATED",
       }
     }
     return p
@@ -60,6 +61,7 @@ export const PrecedentCarousel: React.FC<PrecedentCarouselProps> = ({ precedents
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {normalizedPrecedents.map((item, idx) => {
             const relevancePct = Math.round((item.relevance ?? item.retrieval_score ?? 0.85) * 100)
+            const state = item.validation_state || (item.human_validated ? "VALIDATED" : "UNVALIDATED")
 
             return (
               <div
@@ -78,21 +80,34 @@ export const PrecedentCarousel: React.FC<PrecedentCarouselProps> = ({ precedents
                     </span>
                   </div>
 
-                  {/* Summary Text (expanded to 3 lines for readability) */}
+                  {/* Summary Text */}
                   <p className="text-xs text-[#D1C9B8] line-clamp-3 font-sans leading-relaxed">
-                    {item.summary || "Historical incident investigation precedent."}
+                    {item.summary || "Prior investigation precedent record."}
                   </p>
                 </div>
 
-                {/* Bottom Bar: Human Validated badge & inspect */}
+                {/* Bottom Bar: Lifecycle State badge & inspect */}
                 <div className="flex items-center justify-between text-[10px] font-mono text-[#9E9788] border-t border-white/[0.04] pt-2">
-                  {item.human_validated ? (
+                  {state === "VALIDATED" ? (
                     <span className="flex items-center gap-1 text-[#4E8569] font-bold">
                       <CheckCircle2 className="w-3 h-3" />
                       VALIDATED
                     </span>
+                  ) : state === "DISPUTED" ? (
+                    <span className="flex items-center gap-1 text-[#E05252] font-bold">
+                      <AlertCircle className="w-3 h-3" />
+                      DISPUTED
+                    </span>
+                  ) : state === "PARTIALLY_VALIDATED" ? (
+                    <span className="text-[#D9A74A] font-bold">
+                      PARTIALLY VALIDATED
+                    </span>
+                  ) : state === "SUPPRESSED" ? (
+                    <span className="text-[#9E9788] font-bold">
+                      SUPPRESSED
+                    </span>
                   ) : (
-                    <span className="text-[#9E9788]">Unvalidated</span>
+                    <span className="text-[#9E9788]">Unvalidated Precedent</span>
                   )}
 
                   <span className="flex items-center gap-1 group-hover:text-[#F4EEE0] transition-colors">

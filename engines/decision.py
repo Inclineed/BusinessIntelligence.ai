@@ -203,7 +203,11 @@ def _build_decision_prompt(
         "   controllable_lever, recommended_action, verification_metric, "
         "   persona_narrative, monitoring_plan.\n"
         f"5. controllable_lever MUST be EXACTLY one of the following strings: {available_levers}.\n"
-        f"6. Keep persona_narrative under 300 words and recommended_action under 150 words.{marginal_system_rule}"
+        "6. CAUSAL ROOT-CAUSE GATING:\n"
+        "   - Select 'Software Release Reversion' ONLY when the winning hypothesis provides verified evidence of an internal software release/deployment.\n"
+        "   - If the affected subsystem is payment_gateway but the initiating root cause is UNKNOWN or unverified, select 'Targeted Diagnostic Verification'.\n"
+        "   - Never speculatively recommend production rollback or vendor failover without verified root-cause evidence.\n"
+        f"7. Keep persona_narrative under 300 words and recommended_action under 150 words.{marginal_system_rule}"
     )
     winning_id = challenge_result.winning_hypothesis_id or "unknown"
 
@@ -229,6 +233,7 @@ def _build_decision_prompt(
         # Fallback if no domain policy is defined
         domain_policy = (
             "- Base your recommendation SOLELY on the winning hypothesis and its evidence.\n"
+            "- If the initiating root cause is unverified or UNKNOWN, formulate a targeted diagnostic verification.\n"
             "- Set verification_metric to the specific KPI(s) that should be monitored to confirm recovery."
         )
 
@@ -465,49 +470,14 @@ def decide(
                     "operations team for immediate remediation."
                 )
 
-        # Enforce MARGINAL Action Guard: ensure action is strictly evidence-seeking / diagnostic
-        if is_marginal and recommended_action:
-            lower_action = recommended_action.lower()
-            direct_remediation_kws = ["roll back", "rollback", "revert", "reversion", "deploy", "deployment", "reorder", "replenish", "disable", "terminate", "delete", "purge"]
-            diagnostic_kws = ["investigate", "investigation", "verify", "verification", "telemetry", "diagnostic", "diagnostics", "canary", "inspect", "validate", "validation", "monitor", "monitoring", "audit", "trace", "testing"]
-            
-            has_direct_remediation = any(kw in lower_action for kw in direct_remediation_kws)
-            has_diagnostic = any(kw in lower_action for kw in diagnostic_kws)
-            
-            if has_direct_remediation and not has_diagnostic:
-                logger.warning(
-                    "decide: LLM proposed direct remediation on MARGINAL verdict (%r). "
-                    "Enforcing guarded diagnostic action directive.",
-                    recommended_action,
-                )
-                recommended_action = (
-                    f"Targeted Diagnostic Investigation: Collect telemetry and verify {verification_metric} "
-                    f"to validate hypothesis {winning_id} before executing production remediation."
-                )
-
-        # Build the narrative — prefer the LLM value; fall back to monitoring_plan
-        if not persona_narrative:
-            persona_narrative = parsed.get("monitoring_plan", "")
-        if not persona_narrative:
-            if is_marginal:
-                persona_narrative = (
-                    f"Confidence in hypothesis {winning_id} is MARGINAL. Evidence is partially consistent but "
-                    "requires additional diagnostic telemetry before committing to operational changes."
-                )
-            else:
-                persona_narrative = (
-                    f"Action recommended based on {challenge_result.overall_verdict.value.upper()} "
-                    "verdict hypothesis. Please refer to the evidence panel for full details."
-                )
-
-        # Enforce Lever Authorization (Unknown Lever Guard)
-        controllable_lever = parsed.get("controllable_lever", "")
+        # Extract and validate controllable lever
+        raw_lever = parsed.get("controllable_lever", "")
         levers = decision_rights.get("levers", {})
-        if controllable_lever not in levers:
+        if raw_lever not in levers:
             logger.warning(
                 "decide: LLM generated an unknown or unauthorized lever: %r. "
                 "Abstaining to prevent execution of unauthorized action.",
-                controllable_lever,
+                raw_lever,
             )
             verification_steps = default_verification_steps
             narrative = (
@@ -527,7 +497,7 @@ def decide(
             return decision
 
         # Enforce Requesting Persona Authorization for Selected Lever
-        lever_cfg = levers[controllable_lever]
+        lever_cfg = levers[raw_lever]
         authorized_personas = [p.lower() for p in lever_cfg.get("authorized_personas", [])]
         req_persona = (persona.value if hasattr(persona, "value") else str(persona)).lower()
 
@@ -536,13 +506,13 @@ def decide(
                 "decide: Requesting persona '%s' is not authorized for lever '%s' (Authorized: %s). "
                 "Abstaining to prevent unauthorized action recommendation.",
                 req_persona,
-                controllable_lever,
+                raw_lever,
                 authorized_personas,
             )
             verification_steps = default_verification_steps
             narrative = (
                 f"The requesting persona '{req_persona.upper()}' is not authorized to execute the required "
-                f"lever '{controllable_lever}' (Authorized roles: {', '.join(p.upper() for p in authorized_personas)}). "
+                f"lever '{raw_lever}' (Authorized roles: {', '.join(p.upper() for p in authorized_personas)}). "
                 "Action recommendation is suppressed pending role escalation or delegation."
             )
             decision = Decision(
@@ -556,6 +526,46 @@ def decide(
             )
             _verify_decision_property_6(decision)
             return decision
+
+        # Enforce MARGINAL Action Guard: ensure action and lever are strictly evidence-seeking / diagnostic
+        if is_marginal:
+            controllable_lever = "Targeted Diagnostic Verification"
+            lever_cfg = levers.get(controllable_lever, lever_cfg)
+            if recommended_action:
+                lower_action = recommended_action.lower()
+                direct_remediation_kws = ["roll back", "rollback", "revert", "reversion", "deploy", "deployment", "reorder", "replenish", "disable", "terminate", "delete", "purge"]
+                diagnostic_kws = ["investigate", "investigation", "verify", "verification", "telemetry", "diagnostic", "diagnostics", "canary", "inspect", "validate", "validation", "monitor", "monitoring", "audit", "trace", "testing"]
+                
+                has_direct_remediation = any(kw in lower_action for kw in direct_remediation_kws)
+                has_diagnostic = any(kw in lower_action for kw in diagnostic_kws)
+                
+                if (has_direct_remediation and not has_diagnostic) or not has_diagnostic:
+                    logger.warning(
+                        "decide: LLM proposed direct remediation on MARGINAL verdict (%r). "
+                        "Enforcing guarded diagnostic action directive.",
+                        recommended_action,
+                    )
+                    recommended_action = (
+                        f"Targeted Diagnostic Investigation: Collect telemetry and verify {verification_metric} "
+                        f"to validate hypothesis {winning_id} before executing production remediation."
+                    )
+        else:
+            controllable_lever = raw_lever
+
+        # Build the narrative — prefer the LLM value; fall back to monitoring_plan
+        if not persona_narrative:
+            persona_narrative = parsed.get("monitoring_plan", "")
+        if not persona_narrative:
+            if is_marginal:
+                persona_narrative = (
+                    f"Confidence in hypothesis {winning_id} is MARGINAL. Evidence is partially consistent but "
+                    "requires additional diagnostic telemetry before committing to operational changes."
+                )
+            else:
+                persona_narrative = (
+                    f"Action recommended based on {challenge_result.overall_verdict.value.upper()} "
+                    "verdict hypothesis. Please refer to the evidence panel for full details."
+                )
             
         # Valid lever and authorized persona — build the StructuredActionRecommendation
         monitoring_plan = parsed.get("monitoring_plan", f"Monitor {verification_metric}")
@@ -564,7 +574,7 @@ def decide(
             driver=winning_statement or "Unknown",
             controllable_lever=controllable_lever,
             action=recommended_action,
-            expected_impact="Pending E8 Simulation",
+            expected_impact="Telemetry Validation & Uncertainty Reduction (Non-Remedial)" if is_marginal else "Pending E8 Simulation",
             owner=lever_cfg.get("owner", "Unknown"),
             confidence=challenge_result.scored_hypotheses[0].final_audit_score if challenge_result.scored_hypotheses else 0.0,
             monitoring_plan=monitoring_plan,
